@@ -156,7 +156,9 @@ export async function generateShareCard({ result, mode, playerNames }) {
   const W   = 600;
   const H   = 840;
   const PAD = 30;
-  const POSTER_BOTTOM = 580;
+  // 435 = 580 × 0.75 — 25% smaller poster area so the card doesn't feel
+  // poster-dominated when displayed full-screen on Instagram / WhatsApp stories.
+  const POSTER_BOTTOM = 435;
   const serviceColor  = SERVICE_COLORS[result.service] || '#888';
 
   const canvas  = document.createElement('canvas');
