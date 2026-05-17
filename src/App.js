@@ -1,0 +1,2387 @@
+import React, { useState, useEffect, useRef } from 'react';
+import tmdbService from './services/tmdb';
+import watchmodeService from './services/watchmode';
+import { generateShareCard } from './utils/shareCard';
+import { trackAppLoaded, trackPickGenerated } from './services/analytics';
+import './App.css';
+
+const STEAMY_KEYWORDS = '256466|738|3182|286925|41404|41260|278555|298666';
+
+const MOODS = [
+  { emoji: '😂', label: 'Fun',        ids: [35, 16] },
+  { emoji: '❤️', label: 'Romantic',   ids: [10749, 18] },
+  { emoji: '😱', label: 'Scary',      ids: [27, 53] },
+  { emoji: '💥', label: 'Thrilling',  ids: [28, 12, 80] },
+  { emoji: '😢', label: 'Emotional',  ids: [18, 36] },
+  { emoji: '🧠', label: 'Thoughtful', ids: [99, 9648] },
+  { emoji: '🍿', label: 'Easy Watch', ids: [10751, 35, 'anime'] },
+  { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
+];
+const ANIME_KEYWORD = '210024';
+
+const SERVICES = [
+  { name: 'Netflix',      color: '#E50914' },
+  { name: 'Prime Video',  color: '#00A8E1' },
+  { name: 'Disney+',      color: '#1B3CC0' },
+  { name: 'Apple TV',     color: '#A2AAAD' },
+  { name: 'Max',          color: '#6A1BD0' },
+];
+
+// Returns a time-aware mood greeting so the label feels natural at any hour.
+// 5 am–11 am  → morning   |  12 pm–5 pm → afternoon
+// 6 pm–8 pm   → evening   |  9 pm–4 am  → tonight
+const getMoodGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour >= 5  && hour < 12) return 'How are you feeling this morning?';
+  if (hour >= 12 && hour < 18) return 'How are you feeling this afternoon?';
+  if (hour >= 18 && hour < 21) return 'How are you feeling this evening?';
+  return 'How are you feeling tonight?';
+};
+
+const loadPrefs = () => {
+  try { return JSON.parse(localStorage.getItem('streaming-prefs')) || {}; }
+  catch { return {}; }
+};
+
+// Safe localStorage writer — swallows QuotaExceededError and any storage failures
+// (iOS Safari private mode, full disk, disabled storage) so the app never crashes
+// on a setItem call. Reads still use direct localStorage with try/catch at the call site.
+const safeSet = (key, value) => {
+  try { localStorage.setItem(key, value); }
+  catch (e) { console.warn(`[Storage] Failed to write "${key}":`, e.message); }
+};
+
+function App() {
+  const [mode, setMode] = useState(() => loadPrefs().mode || 'solo');
+  const [selectedServices, setSelectedServices] = useState(() => loadPrefs().services || SERVICES.map(s => s.name));
+  const [selectedGenres, setSelectedGenres] = useState(() => {
+    const saved = loadPrefs().genres || {};
+    return { solo: [], p1: [], p2: [], theater: [], ...saved };
+  });
+  const [selectedFormats, setSelectedFormats] = useState(() => loadPrefs().formats || ['Movie', 'Series']);
+  const [minRating, setMinRating] = useState(() => loadPrefs().minRating ?? 6.0);
+  const [genres, setGenres] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState(null);
+  const [matchCount, setMatchCount] = useState(0);
+  const [recentPicks, setRecentPicks] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('streaming-seen')) || []; }
+    catch { return []; }
+  });
+  const [collection, setCollection] = useState(null);
+  const [showCollection, setShowCollection] = useState(false);
+  const [cinemaMode, setCinemaMode] = useState(false);
+  const [cinemaSource, setCinemaSource] = useState('pick'); // 'pick' | 'history'
+  const [replayResult, setReplayResult] = useState(null); // history replay only — never touches main result
+  const [watchHistory, setWatchHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('streaming-history')) || []; }
+    catch { return []; }
+  });
+  const [showHistory, setShowHistory] = useState(false);
+  const [showToast, setShowToast] = useState(false);
+  const [playerNames, setPlayerNames] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'Him', p2: 'Her' }; }
+    catch { return { p1: 'Him', p2: 'Her' }; }
+  });
+  const [editingPlayer, setEditingPlayer] = useState(null);
+  const [activePlayer, setActivePlayer] = useState('p1');
+  const [showAllGenres, setShowAllGenres] = useState(false);
+  const [pickReason, setPickReason] = useState(null);
+  const [tasteProfile, setTasteProfile] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('streaming-taste-profile')) || { solo: {}, p1: {}, p2: {} }; }
+    catch { return { solo: {}, p1: {}, p2: {} }; }
+  });
+  const [ratingPopup, setRatingPopup] = useState(null);
+  const [welcomeBack] = useState(() => Object.keys(loadPrefs()).length > 0);
+  const [watchLink, setWatchLink] = useState(null);
+  // Theater-specific enrichment — cert (G/PG/PG-13/R) + wide vs limited release.
+  // Fetched lazily per pick, like collection data. null while loading or not theater.
+  const [theaterReleaseInfo, setTheaterReleaseInfo] = useState(null);
+  const [hasSearched, setHasSearched] = useState(false);
+  const [fetchError, setFetchError] = useState(false);
+  const [maxCertification, setMaxCertification] = useState(() => loadPrefs().maxCertification || null);
+  const [maxRuntime, setMaxRuntime] = useState(() => loadPrefs().maxRuntime || null);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [imageCopied, setImageCopied] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareCardUrl, setShareCardUrl] = useState(null);
+  const [shareCardLoading, setShareCardLoading] = useState(false);
+  const [shareCardReady, setShareCardReady] = useState(false);
+  const shareItemRef = useRef(null);
+  const shareCanvasRef = useRef(null);
+  const sharePreviewRef = useRef(null);
+  const importFileRef = useRef(null);
+  const [importSuccess, setImportSuccess] = useState(false);
+  const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
+  const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
+  const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('sd_onboarded') !== 'true');
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [showTerms, setShowTerms] = useState(false);
+  const [showBallot, setShowBallot] = useState(false);
+  const [ballotStep, setBallotStep] = useState('p1');
+  const [p1Vote, setP1Vote] = useState(null);
+  const [p2Vote, setP2Vote] = useState(null);
+
+  // Save for later — bookmarked picks (up to 20), persisted in localStorage
+  const [savedForLater, setSavedForLater] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('settle-saved')) || []; }
+    catch { return []; }
+  });
+
+  // Consecutive "Try another" counter — triggers mood nudge at 3
+  const [tryAnotherCount, setTryAnotherCount] = useState(0);
+
+  // Couples ballot failure tracking — coin flip unlocks after 2 straight rejections
+  const [ballotFailCount, setBallotFailCount] = useState(0);
+  const [revealReady, setRevealReady] = useState(false);
+
+  // Theater mode filters
+  const [familyFriendly, setFamilyFriendly] = useState(false);
+
+  // History panel tab — 'watched' | 'saved'
+  const [historyTab, setHistoryTab] = useState('watched');
+
+  // Global Escape-to-close for any open overlay/modal (a11y: 2.1.2 No Keyboard Trap)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (showShareModal) { closeShareModal(); return; }
+      if (showPrivacy)    { setShowPrivacy(false); return; }
+      if (showTerms)      { setShowTerms(false); return; }
+      if (showHistory)    { setShowHistory(false); return; }
+      if (ratingPopup)    { handleVote('skip'); return; }
+      if (cinemaMode)     { setCinemaMode(false); return; }
+      if (showBallot)     { setShowBallot(false); return; }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot]);
+
+  // Load genres and fire app_loaded event on mount
+  useEffect(() => {
+    loadGenres();
+    trackAppLoaded({ mode, isReturningUser: welcomeBack });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Show rating popup on mount for entries that have never been rated.
+  // 'skip' is treated as a permanent decision — the popup never re-fires for it.
+  useEffect(() => {
+    const unrated = watchHistory.find(entry => !entry.rated);
+    if (!unrated) return;
+    const t = setTimeout(() => setRatingPopup(unrated), 800);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  // Level 1 — auto-save preferences on any change (only if consent given)
+  useEffect(() => {
+    if (!consent) return;
+    safeSet('streaming-prefs', JSON.stringify({
+      mode,
+      services: selectedServices,
+      genres: selectedGenres,
+      formats: selectedFormats,
+      minRating,
+      maxCertification,
+      maxRuntime
+    }));
+  }, [mode, selectedServices, selectedGenres, selectedFormats, minRating, maxCertification, maxRuntime, consent]);
+
+  // Reset ballot state when a new result comes in
+  useEffect(() => {
+    setShowBallot(false);
+    setBallotStep('p1');
+    setP1Vote(null);
+    setP2Vote(null);
+  }, [result]);
+
+  // Ballot reveal tension — 1 s suspense before showing outcome + haptic pulse
+  useEffect(() => {
+    if (ballotStep !== 'reveal') return;
+    setRevealReady(false);
+    const t = setTimeout(() => {
+      setRevealReady(true);
+      if (navigator.vibrate) navigator.vibrate([80, 60, 80]);
+    }, 1000);
+    return () => clearTimeout(t);
+  }, [ballotStep]);
+
+  // Mount tainted canvas directly into DOM when no data URL is available
+  useEffect(() => {
+    const container = sharePreviewRef.current;
+    const canvas = shareCanvasRef.current;
+    if (showShareModal && shareCardReady && !shareCardUrl && canvas && container) {
+      container.innerHTML = '';
+      canvas.className = 'share-preview-img';
+      container.appendChild(canvas);
+    }
+  }, [showShareModal, shareCardReady, shareCardUrl]);
+
+  // Check for sequel collection + Watchmode deep link whenever a movie result appears.
+  // `cancelled` flag prevents stale promise responses from overwriting newer results
+  // when the user spam-clicks "Try another".
+  useEffect(() => {
+    setCollection(null);
+    setShowCollection(false);
+    setWatchLink(null);
+    setTheaterReleaseInfo(null);
+    if (!result) return;
+    let cancelled = false;
+
+    if (result.type === 'Movie') {
+      tmdbService.getMovieCollection(result.id)
+        .then(c => { if (!cancelled) setCollection(c); })
+        .catch(() => {});
+    }
+    // Fetch cert + wide/limited for theater picks — displayed on the result card
+    if (result.service === 'In Theaters') {
+      tmdbService.getMovieReleaseInfo(result.id)
+        .then(info => { if (!cancelled) setTheaterReleaseInfo(info); })
+        .catch(() => {});
+    }
+    // Use Watchmode for Disney+ and Apple TV to get direct title deep links
+    if (result.service === 'Disney+' || result.service === 'Apple TV') {
+      watchmodeService.getServiceUrl(result.id, result.type, result.service, result.title)
+        .then(url => { if (!cancelled) setWatchLink(url); })
+        .catch(() => {});
+    }
+
+    return () => { cancelled = true; };
+  }, [result]);
+
+  const loadGenres = async () => {
+    try {
+      const movieGenres = await tmdbService.getGenres('movie');
+      const tvGenres = await tmdbService.getGenres('tv');
+      
+      // Merge and deduplicate
+      const EXCLUDED_GENRES = ['Action & Adventure', 'Sci-Fi & Fantasy', 'TV Movie', 'War & Politics', 'Soap'];
+      const allGenres = [...movieGenres, ...tvGenres];
+      const uniqueGenres = Array.from(
+        new Map(allGenres.map(g => [g.name, g])).values()
+      ).filter(g => !EXCLUDED_GENRES.includes(g.name))
+       .map(g => g.name === 'Science Fiction' ? { ...g, name: 'Sci-Fi' } : g);
+
+      const customGenres = [
+        { id: 'anime', name: 'Anime ⛩️' },
+        { id: 'steamy', name: 'Steamy 🔥' }
+      ];
+
+      const allWithCustom = [...uniqueGenres, ...customGenres]
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      setGenres(allWithCustom);
+    } catch (error) {
+      console.error('Error loading genres:', error);
+      // Retry once after 2s — common cause is a transient network blip on cold load.
+      // If it still fails, the user gets a clear empty state and can retry by picking,
+      // which falls back to genre-less discovery (TMDB still returns results without genre filters).
+      setTimeout(() => {
+        if (genres.length === 0) {
+          tmdbService.getGenres('movie').then(() => loadGenres()).catch(() => {});
+        }
+      }, 2000);
+    }
+  };
+
+  const toggleService = (serviceName) => {
+    setSelectedServices(prev =>
+      prev.includes(serviceName)
+        ? prev.filter(s => s !== serviceName)
+        : [...prev, serviceName]
+    );
+  };
+
+  const toggleFormat = (format) => {
+    setSelectedFormats(prev =>
+      prev.includes(format)
+        ? prev.filter(f => f !== format)
+        : [...prev, format]
+    );
+  };
+
+  const handleGenreClick = (genreId, player = 'solo') => {
+    setTryAnotherCount(0);
+    setSelectedGenres(prev => {
+      const current = prev[player] || [];
+      const newSelection = current.includes(genreId)
+        ? current.filter(g => g !== genreId)
+        : [...current, genreId];
+      return { ...prev, [player]: newSelection };
+    });
+  };
+
+  const handleMoodClick = (moodIds, player = 'solo') => {
+    setTryAnotherCount(0);
+    setSelectedGenres(prev => {
+      const current = prev[player] || [];
+      // Only treat as "deselect" if ALL of this mood's IDs are already selected.
+      // Using `some` caused shared IDs (e.g. Drama=18 in both Romantic & Emotional)
+      // to trigger a removal instead of an addition.
+      const allSelected = moodIds.every(id => current.includes(id));
+      const newSelection = allSelected
+        ? current.filter(id => !moodIds.includes(id))
+        : [...new Set([...current, ...moodIds])];
+      return { ...prev, [player]: newSelection };
+    });
+  };
+
+  const isMoodActive = (moodIds, player = 'solo') => {
+    // A mood is "on" only when every one of its genre IDs is present.
+    return moodIds.every(id => selectedGenres[player]?.includes(id));
+  };
+
+  const generatePickReason = (picked, activeGenreIds, isHiddenGems, currentMode) => {
+    if (isHiddenGems) {
+      return `💎 Hidden gem — high quality`;
+    }
+
+    if (currentMode === 'theater') {
+      return `🎟️ Currently in US theaters`;
+    }
+
+    // Find which active moods match this result.
+    // Use `every` on the selection check so a mood only qualifies if the user
+    // explicitly activated it (all its IDs are present) — not just because one
+    // shared genre ID (e.g. Comedy=35 appears in both Fun and Easy Watch) causes
+    // a false match against a mood the user never selected.
+    const activeMoodLabels = MOODS
+      .filter(mood =>
+        mood.ids.every(id => activeGenreIds.includes(id)) &&
+        mood.ids.some(id => picked.genres.includes(id))
+      )
+      .map(m => m.label)
+      .slice(0, 2);
+
+    // Fall back to genre names if no mood match
+    const matchedGenreNames = picked.genres
+      .filter(id => activeGenreIds.includes(id))
+      .map(id => genres.find(g => g.id === id)?.name)
+      .filter(Boolean)
+      .slice(0, 2);
+
+    const label = activeMoodLabels.length > 0
+      ? activeMoodLabels.join(' & ')
+      : matchedGenreNames.join(' & ');
+
+    if (label && currentMode === 'couple') {
+      return `Picked because you both like ${label}`;
+    }
+    if (label) {
+      return `Matches your ${label} mood`;
+    }
+
+    return `Top pick from your filters · ${picked.votes} ratings`;
+  };
+
+  const getActiveGenres = () => {
+    if (mode === 'solo') return selectedGenres.solo;
+    
+    // In couple mode, find overlap first, then combine
+    const p1 = selectedGenres.p1;
+    const p2 = selectedGenres.p2;
+    const overlap = p1.filter(g => p2.includes(g));
+    
+    return overlap.length > 0 ? overlap : [...new Set([...p1, ...p2])];
+  };
+
+  const getOverlapGenres = () => {
+    if (mode !== 'couple') return [];
+    return selectedGenres.p1.filter(g => selectedGenres.p2.includes(g));
+  };
+
+  const getCompatibilityScore = () => {
+    const p1 = selectedGenres.p1;
+    const p2 = selectedGenres.p2;
+    if (p1.length === 0 && p2.length === 0) return null;
+    if (p1.length === 0 || p2.length === 0) return 0;
+    const overlap = p1.filter(g => p2.includes(g));
+    const union = [...new Set([...p1, ...p2])];
+    return Math.round((overlap.length / union.length) * 100);
+  };
+
+  const savePlayerName = (player, value) => {
+    const name = value.trim() || (player === 'p1' ? 'Him' : 'Her');
+    const updated = { ...playerNames, [player]: name };
+    setPlayerNames(updated);
+    if (consent) safeSet('streaming-player-names', JSON.stringify(updated));
+    setEditingPlayer(null);
+  };
+
+  const getStatusMessage = () => {
+    const score = getCompatibilityScore();
+    const overlap = getOverlapGenres();
+    const p1 = playerNames.p1;
+    const p2 = playerNames.p2;
+    const pair = `${p1} & ${p2}`;
+    if (score === null) return { text: 'Each pick your genres below', emoji: '👇' };
+    if (score === 0)    return { text: `${pair} — no common ground yet`, emoji: '🤔' };
+    if (overlap.length === 1) return { text: `${pair} — getting warmer...`, emoji: '🌡️' };
+    if (score < 50)    return { text: `${pair} — finding middle ground`, emoji: '🤝' };
+    if (score < 75)    return { text: `${pair} — you're vibing!`, emoji: '✨' };
+    return { text: `${pair} — perfect match!`, emoji: '🔥' };
+  };
+
+  // ── Save for later ────────────────────────────────────────────────────────
+  const toggleSaveForLater = (item) => {
+    setSavedForLater(prev => {
+      const exists = prev.some(s => s.id === item.id);
+      const updated = exists
+        ? prev.filter(s => s.id !== item.id)
+        : [{
+            id: item.id, title: item.title, year: item.year,
+            posterPath: item.posterPath, service: item.service,
+            rating: item.rating, type: item.type,
+            genres: item.genres || [], savedAt: new Date().toISOString()
+          }, ...prev].slice(0, 20);
+      safeSet('settle-saved', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const isSaved = (item) => item && savedForLater.some(s => s.id === item.id);
+
+  // ── Profile export / import ────────────────────────────────────────────────
+  // Packages all meaningful user data into a dated JSON file the user can save
+  // locally. Import reads it back and restores every piece of state + localStorage.
+  // This is a stop-gap against localStorage wipe until cloud sync ships.
+  const handleExportData = () => {
+    const exportData = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tasteProfile,
+      watchHistory,
+      savedForLater,
+      recentPicks,
+      playerNames,
+      prefs: {
+        mode,
+        services: selectedServices,
+        genres: selectedGenres,
+        formats: selectedFormats,
+        minRating,
+        maxCertification,
+      },
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `settle-profile-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportData = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.version || !data.tasteProfile) throw new Error('Invalid format');
+
+        if (data.tasteProfile) {
+          setTasteProfile(data.tasteProfile);
+          safeSet('streaming-taste-profile', JSON.stringify(data.tasteProfile));
+        }
+        if (data.watchHistory) {
+          setWatchHistory(data.watchHistory);
+          safeSet('streaming-history', JSON.stringify(data.watchHistory));
+        }
+        if (data.savedForLater) {
+          setSavedForLater(data.savedForLater);
+          safeSet('settle-saved', JSON.stringify(data.savedForLater));
+        }
+        if (data.recentPicks) {
+          setRecentPicks(data.recentPicks);
+          safeSet('streaming-seen', JSON.stringify(data.recentPicks));
+        }
+        if (data.playerNames) {
+          setPlayerNames(data.playerNames);
+          safeSet('streaming-player-names', JSON.stringify(data.playerNames));
+        }
+        if (data.prefs) {
+          const p = data.prefs;
+          if (p.services) setSelectedServices(p.services);
+          if (p.genres)   setSelectedGenres({ solo: [], p1: [], p2: [], theater: [], ...p.genres });
+          if (p.formats)  setSelectedFormats(p.formats);
+          if (p.minRating !== undefined) setMinRating(p.minRating);
+        }
+
+        setImportSuccess(true);
+        setTimeout(() => setImportSuccess(false), 3000);
+      } catch {
+        // Non-critical — just show a browser alert so the user knows the file was wrong
+        // without crashing state. A custom toast would require error state wiring.
+        window.alert('Could not read that file. Please use a Settle export file.');
+      }
+      // Reset so the same file can be re-imported if needed
+      e.target.value = '';
+    };
+    reader.readAsText(file);
+  };
+
+  // ── Couples streak ─────────────────────────────────────────────────────────
+  // Returns the length of the current "agreed" streak (consecutive couple-mode
+  // history entries where coupleAgreed === true), or null if streak < 2.
+  const getStreakInfo = () => {
+    const entries = watchHistory.filter(h => h.mode === 'couple');
+    if (entries.length < 2) return null;
+    let streak = 0;
+    for (const entry of entries) {
+      if (entry.coupleAgreed) streak++;
+      else break;
+    }
+    return streak >= 2 ? streak : null;
+  };
+
+  const handleConsent = (accepted) => {
+    // Persist the decision either way so the banner never re-appears on return visits.
+    safeSet('sd_consent', accepted ? 'true' : 'false');
+    if (accepted) setConsent(true);
+    setShowConsent(false);
+  };
+
+  const handleOnboardingDone = () => {
+    safeSet('sd_onboarded', 'true');
+    setShowOnboarding(false);
+  };
+
+  const openBallot = () => {
+    setBallotStep('p1');
+    setP1Vote(null);
+    setP2Vote(null);
+    setShowBallot(true);
+  };
+
+  const handleBallotVote = (vote) => {
+    if (ballotStep === 'p1') {
+      setP1Vote(vote);
+      setBallotStep('p2');
+    } else if (ballotStep === 'p2') {
+      setP2Vote(vote);
+      setBallotStep('reveal');
+    }
+  };
+
+  const getBallotOutcome = (v1, v2) => {
+    if (v1 === 'up' && v2 === 'up') return 'match';
+    if (v1 === 'down' && v2 === 'down') return 'both-no';
+    return 'split';
+  };
+
+  const handleBallotMatch = () => {
+    setShowBallot(false);
+    setBallotFailCount(0);
+    setCinemaSource('pick');
+    setCinemaMode(true);
+    saveToHistory(result, { coupleAgreed: true });
+    // Both players voted up — train both taste profiles immediately
+    if (result.genres?.length > 0) {
+      updateTasteProfile(result.genres, 'up', 'couple');
+    }
+  };
+
+  const handleBallotRetry = () => {
+    const genreIds = result.genres || [];
+    setShowBallot(false);
+    setBallotFailCount(prev => prev + 1);
+    // Train each player's profile from their individual ballot vote before retrying.
+    // Split/veto data is signal — don't discard it.
+    if (genreIds.length > 0) {
+      if (p1Vote) updateTasteProfile(genreIds, p1Vote, 'p1');
+      if (p2Vote) updateTasteProfile(genreIds, p2Vote, 'p2');
+    }
+    pickContent(false);
+  };
+
+  // Coin flip — pure random pick with no taste-profile weighting. Fires after
+  // 2 consecutive failed ballots when both players want fate to decide.
+  const handleCoinFlip = () => {
+    setBallotFailCount(0);
+    setShowBallot(false);
+    pickContent(false, true); // true = coinFlip mode
+  };
+
+  const closeShareModal = () => {
+    setShowShareModal(false);
+    setShareCardUrl(null);
+    setShareCardReady(false);
+    shareCanvasRef.current = null;
+  };
+
+  // Opens the share modal and generates the card
+  const handleShare = async (item) => {
+    shareItemRef.current = item;
+    setShareCardUrl(null);
+    setShareCardReady(false);
+    shareCanvasRef.current = null;
+    setShareCardLoading(true);
+    setShowShareModal(true);
+    try {
+      const resolvedGenres = (item.genres || [])
+        .map(id => genres.find(g => g.id === id))
+        .filter(Boolean)
+        .slice(0, 4);
+      const canvas = await generateShareCard({ result: { ...item, genres: resolvedGenres }, mode, playerNames });
+      shareCanvasRef.current = canvas;
+      try {
+        setShareCardUrl(canvas.toDataURL('image/png'));
+      } catch {
+        // Canvas is tainted (poster loaded without CORS) — card still renders,
+        // we'll mount the canvas element directly for preview
+        console.warn('[ShareCard] canvas tainted — mounting directly');
+      }
+      setShareCardReady(true);
+    } catch (err) {
+      console.error('[ShareCard] generation failed:', err);
+      closeShareModal();
+      shareAsText(item);
+    } finally {
+      setShareCardLoading(false);
+    }
+  };
+
+  // Fallback: share/copy as plain text
+  const shareAsText = async (item) => {
+    const isCouple = mode === 'couple';
+    const verb = isCouple ? "We're watching" : "Tonight's pick:";
+    const text = `🎬 ${verb} "${item.title}" (${item.year}) on ${item.service}. Found it in seconds with Settle.`;
+    const url  = 'https://trysettle.app';
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Settle', text, url }); } catch {}
+    } else {
+      try {
+        await navigator.clipboard.writeText(`${text}\n${url}`);
+        setShareCopied(true);
+        setTimeout(() => setShareCopied(false), 2500);
+      } catch {}
+    }
+  };
+
+  // Download the card as a PNG file
+  const downloadImage = () => {
+    if (!shareCardUrl) return;
+    const item = shareItemRef.current;
+    const a    = document.createElement('a');
+    a.href     = shareCardUrl;
+    a.download = `${item?.title?.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'pick'}-streaming.png`;
+    a.click();
+  };
+
+  // Primary share action: native share sheet (mobile) → clipboard → download
+  const shareImageCard = async () => {
+    const canvas = shareCanvasRef.current;
+    if (!canvas) return;
+    const item = shareItemRef.current;
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    const file = new File([blob], 'streaming-pick.png', { type: 'image/png' });
+
+    // Mobile — native share sheet with image file
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: item?.title });
+        closeShareModal();
+        return;
+      } catch {}
+    }
+
+    // Desktop — copy to clipboard so user can paste anywhere
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      setImageCopied(true);
+      setTimeout(() => setImageCopied(false), 2500);
+    } catch {
+      // Last resort — download the file
+      downloadImage();
+    }
+  };
+
+  const pickContent = async (hiddenGems = false, coinFlip = false) => {
+    if (mode !== 'theater' && selectedServices.length === 0) {
+      setHasSearched(true);
+      setMatchCount(0);
+      return;
+    }
+    setLoading(true);
+    setResult(null);
+    setPickReason(null);
+    setFetchError(false);
+
+    try {
+      let allResults = [];
+      // Theater uses its own genre slot so solo selections never bleed across.
+      // Hidden gems bypass genre filtering entirely (wide net by design).
+      const activeGenres = hiddenGems
+        ? []
+        : mode === 'theater'
+          ? (selectedGenres.theater || [])
+          : getActiveGenres();
+
+      if (mode === 'theater') {
+        allResults = familyFriendly
+          ? await tmdbService.getNowPlayingWithOptions({
+              maxCertification: 'PG-13',
+            })
+          : await tmdbService.getNowPlaying();
+      } else {
+        const activeFormats = selectedFormats;
+        const fetchPromises = [];
+
+        for (const service of selectedServices) {
+          for (const format of activeFormats) {
+            const type = format === 'Movie' ? 'movie' : 'tv';
+
+            if (activeGenres.length === 0) {
+              fetchPromises.push(
+                tmdbService.discoverContent({
+                  service,
+                  type,
+                  minRating: hiddenGems ? 0 : minRating,
+                  hiddenGems,
+                  maxCertification: hiddenGems ? null : maxCertification,
+                  maxRuntime: (hiddenGems || type !== 'movie') ? null : maxRuntime
+                })
+              );
+            } else {
+              for (const genreId of activeGenres) {
+                const isSteamy = genreId === 'steamy';
+                const isAnime = genreId === 'anime';
+                fetchPromises.push(
+                  tmdbService.discoverContent({
+                    service,
+                    type,
+                    genre: (isSteamy || isAnime) ? null : genreId,
+                    keywords: isSteamy ? STEAMY_KEYWORDS : isAnime ? ANIME_KEYWORD : null,
+                    minRating,
+                    hiddenGems: false,
+                    maxCertification,
+                    maxRuntime: type !== 'movie' ? null : maxRuntime
+                  })
+                );
+              }
+            }
+          }
+        }
+
+        // allSettled — a single failed query (rate limit, network blip) won't
+        // cancel the rest. Fulfilled results are still surfaced to the picker.
+        const batchResults = await Promise.allSettled(fetchPromises);
+        batchResults.forEach(r => {
+          if (r.status === 'fulfilled') allResults.push(...r.value);
+        });
+      }
+
+      // Remove duplicates
+      const unique = Array.from(
+        new Map(allResults.map(item => [item.id, item])).values()
+      );
+
+      // Apply rating floor.
+      // Theater: use a light floor of 4.0 — new releases have thin vote counts and
+      // the streaming minRating slider should never gate what's playing in cinemas.
+      // Streaming hidden gems: no floor (TMDB already filters server-side at 7.5).
+      // Streaming normal: apply the user's minRating preference.
+      let filtered = hiddenGems
+        ? unique
+        : mode === 'theater'
+          ? unique.filter(item => item.rating >= 4.0)
+          : unique.filter(item => item.rating >= minRating);
+
+      // Genre filter
+      const virtualGenres = ['steamy', 'anime'];
+      const realGenres = activeGenres.filter(id => !virtualGenres.includes(id));
+      if (realGenres.length > 0 && !hiddenGems) {
+        filtered = filtered.filter(item =>
+          item.genres.some(genreId => realGenres.includes(genreId))
+        );
+      }
+
+      // Hidden gems from theater: high rated, low popularity
+      if (hiddenGems && mode === 'theater') {
+        filtered = filtered.filter(item => item.rating >= 7.5 && item.popularity < 50);
+        if (filtered.length === 0) filtered = unique.filter(item => item.rating >= 7.0);
+      }
+
+      setMatchCount(filtered.length);
+
+      if (filtered.length === 0) {
+        return;
+      }
+
+      const fresh = filtered.filter(item => !recentPicks.includes(item.id));
+      const pool = fresh.length > 0 ? fresh : filtered;
+
+      // Weighted random using taste profile
+      const profile = mode === 'couple'
+        ? (() => {
+            const merged = {};
+            ['p1', 'p2'].forEach(p => {
+              Object.entries(tasteProfile[p] || {}).forEach(([id, score]) => {
+                merged[id] = (merged[id] || 0) + score;
+              });
+            });
+            return merged;
+          })()
+        : (tasteProfile[mode === 'theater' ? 'solo' : mode] || {});
+
+      const hasProfile = Object.keys(profile).length > 0;
+      const weights = pool.map(item => {
+        if (coinFlip) return 1;
+
+        let weight = 1;
+
+        // Taste-profile genre boost (applies to all modes when profile exists)
+        if (hasProfile) {
+          const boost = item.genres.reduce((sum, id) => sum + (profile[id] || 0), 0);
+          weight += boost * 0.15;
+        }
+
+        // Theater-specific signals layered on top of (or instead of) taste profile:
+        // 1. verifiedTheater — item appeared on TMDB's curated /movie/now_playing list,
+        //    meaning TMDB itself confirms it's currently screening. Strong signal.
+        // 2. popularity — high popularity correlates with wide release + active buzz,
+        //    capped at 100 so megablockbusters don't completely dominate the pool.
+        if (mode === 'theater') {
+          if (item.verifiedTheater) weight *= 1.3;
+          weight += Math.min(item.popularity || 0, 100) / 200;
+        }
+
+        return weight;
+      });
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      let rand = Math.random() * totalWeight;
+      let picked = pool[pool.length - 1];
+      for (let i = 0; i < pool.length; i++) {
+        rand -= weights[i];
+        if (rand <= 0) { picked = pool[i]; break; }
+      }
+      setResult(picked);
+      setPickReason(
+        coinFlip
+          ? '🎲 Chosen by fate — no algorithm, pure chance'
+          : generatePickReason(picked, activeGenres, hiddenGems, mode)
+      );
+      trackPickGenerated({
+        service:     picked.service,
+        type:        picked.type,
+        rating:      picked.rating,
+        mode,
+        isHiddenGem: hiddenGems,
+      });
+      setRecentPicks(prev => {
+        const updated = [...prev.filter(id => id !== picked.id), picked.id].slice(-100);
+        if (consent) safeSet('streaming-seen', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (error) {
+      console.error('Error fetching content:', error);
+      setFetchError(true);
+    } finally {
+      setLoading(false);
+      setHasSearched(true);
+    }
+  };
+
+  const getPlatformLink = (service, title) => {
+    const q = encodeURIComponent(title);
+    const links = {
+      'Netflix':      `https://www.netflix.com/search?q=${q}`,
+      'Max':          `https://www.max.com/search?q=${q}`,
+      'Apple TV':     `https://tv.apple.com/search?term=${q}`,
+      'Prime Video':  `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${q}`,
+      'In Theaters':  `https://www.google.com/search?q=${q}+movie+showtimes`,
+    };
+    return links[service] || null;
+  };
+
+  const saveToHistory = (item, { coupleAgreed = false } = {}) => {
+    const entry = {
+      id: item.id,
+      title: item.title,
+      year: item.year,
+      posterPath: item.posterPath,
+      service: item.service,
+      rating: item.rating,
+      type: item.type,
+      genres: item.genres || [],
+      watchedAt: new Date().toISOString(),
+      mode,
+      coupleAgreed,
+      rated: null
+    };
+    setWatchHistory(prev => {
+      const filtered = prev.filter(h => h.id !== item.id);
+      const updated = [entry, ...filtered].slice(0, 30);
+      if (consent) safeSet('streaming-history', JSON.stringify(updated));
+      return updated;
+    });
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 2800);
+  };
+
+  const handleHistoryReplay = (entry) => {
+    setReplayResult(entry);
+    setShowHistory(false);
+    setCinemaSource('history');
+    setCinemaMode(true);
+  };
+
+  // entryMode: 'solo' | 'couple' (both players) | 'p1' | 'p2' (individual)
+  const updateTasteProfile = (genreIds, vote, entryMode) => {
+    setTasteProfile(prev => {
+      const updated = JSON.parse(JSON.stringify(prev));
+      const players =
+        entryMode === 'couple' ? ['p1', 'p2'] :
+        entryMode === 'p1'     ? ['p1'] :
+        entryMode === 'p2'     ? ['p2'] :
+        ['solo'];
+      players.forEach(player => {
+        if (!updated[player]) updated[player] = {};
+        genreIds.forEach(id => {
+          const current = updated[player][id] || 0;
+          updated[player][id] = vote === 'up'
+            ? current + 2
+            : Math.max(0, current - 1);
+        });
+      });
+      if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const handleVote = (vote) => {
+    if (!ratingPopup) return;
+    // Use functional setState to avoid reading from a potentially stale closure.
+    const popupId = ratingPopup.id;
+    const popupWatchedAt = ratingPopup.watchedAt;
+    setWatchHistory(prev => {
+      const updated = prev.map(entry =>
+        entry.id === popupId && entry.watchedAt === popupWatchedAt
+          ? { ...entry, rated: vote }
+          : entry
+      );
+      if (consent) safeSet('streaming-history', JSON.stringify(updated));
+      return updated;
+    });
+    if (vote !== 'skip') {
+      updateTasteProfile(ratingPopup.genres || [], vote, ratingPopup.mode);
+    }
+    setRatingPopup(null);
+  };
+
+  const clearHistory = () => {
+    setWatchHistory([]);
+    localStorage.removeItem('streaming-history');
+  };
+
+  const formatWatchedDate = (iso) => {
+    if (!iso) return '';
+    const date = new Date(iso);
+    if (isNaN(date.getTime())) return '';
+    const today = new Date();
+    const diff = Math.floor((today - date) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    if (diff < 7) return `${diff} days ago`;
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  const starsFromRating = (rating) => {
+    const full = Math.min(5, Math.max(0, Math.round((parseFloat(rating) || 0) / 2)));
+    return '★'.repeat(full) + '☆'.repeat(5 - full);
+  };
+
+  const getServiceColor = (serviceName) => {
+    if (serviceName === 'In Theaters') return '#EF9F27';
+    return SERVICES.find(s => s.name === serviceName)?.color || '#888';
+  };
+
+  const getGenreClass = (genreId, player) => {
+    if (mode === 'solo') {
+      return (selectedGenres.solo || []).includes(genreId) ? 'solo-on' : '';
+    }
+    if (mode === 'theater') {
+      return (selectedGenres.theater || []).includes(genreId) ? 'solo-on' : '';
+    }
+    
+    const p1Has = selectedGenres.p1.includes(genreId);
+    const p2Has = selectedGenres.p2.includes(genreId);
+    
+    if (player === 'p1') {
+      if (p1Has && p2Has) return 'bothon';
+      if (p1Has) return 'p1on';
+    } else {
+      if (p1Has && p2Has) return 'bothon';
+      if (p2Has) return 'p2on';
+    }
+    
+    return '';
+  };
+
+  // Pre-compute per-render values to avoid redundant calls in JSX
+  const compatScore = mode === 'couple' ? getCompatibilityScore() : null;
+  const statusMsg = mode === 'couple' ? getStatusMessage() : null;
+
+  return (
+    <div className="app">
+      <div className="mode-tabs" role="group" aria-label="Mode">
+        <button
+          className={`mtab ${mode === 'solo' ? 'on' : ''}`}
+          onClick={() => { setMode('solo'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          aria-pressed={mode === 'solo'}
+        >
+          Solo <span aria-hidden="true">👤</span>
+        </button>
+        <button
+          className={`mtab ${mode === 'couple' ? 'on' : ''}`}
+          onClick={() => { setMode('couple'); setActivePlayer('p1'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          aria-pressed={mode === 'couple'}
+        >
+          Couples <span aria-hidden="true">💑</span>
+        </button>
+        <button
+          className={`mtab ${mode === 'theater' ? 'on theater-tab' : ''}`}
+          onClick={() => { setMode('theater'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          aria-pressed={mode === 'theater'}
+        >
+          In Theaters <span aria-hidden="true">🎟️</span>
+        </button>
+      </div>
+
+      {welcomeBack && (
+        <div className="welcome-back" role="status">
+          <span aria-hidden="true">↩ </span>Preferences restored from your last session
+        </div>
+      )}
+
+      {(mode === 'solo' || mode === 'theater') && (() => {
+        // Each mode uses its own genre slot so selections never cross-contaminate.
+        const moodPlayer = mode === 'theater' ? 'theater' : 'solo';
+        const activeSlot = selectedGenres[moodPlayer] || [];
+        const genreListId = `${moodPlayer}-genre-list`;
+        return (
+          <div className="section">
+            <div className="label" id="mood-greeting-label">
+              {mode === 'theater' ? 'What are you in the mood for?' : getMoodGreeting()}
+            </div>
+            <div className="mood-grid" role="group" aria-labelledby="mood-greeting-label">
+              {MOODS.map(mood => (
+                <button
+                  key={mood.label}
+                  className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
+                  onClick={() => handleMoodClick(mood.ids, moodPlayer)}
+                  aria-pressed={isMoodActive(mood.ids, moodPlayer)}
+                >
+                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                  <span className="mood-label">{mood.label}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              className="show-genres-toggle"
+              onClick={() => setShowAllGenres(prev => !prev)}
+              aria-expanded={showAllGenres}
+              aria-controls={genreListId}
+            >
+              {showAllGenres ? '▲ Hide genres' : '＋ More genres'}
+            </button>
+            {showAllGenres && (
+              <div className="chip-grid genre-expand" id={genreListId} role="group" aria-label="Genres">
+                {genres.map(genre => {
+                  const active = activeSlot.includes(genre.id);
+                  return (
+                    <button
+                      type="button"
+                      key={genre.id}
+                      className={`chip ${getGenreClass(genre.id, moodPlayer)}`}
+                      onClick={() => handleGenreClick(genre.id, moodPlayer)}
+                      aria-pressed={active}
+                    >
+                      {genre.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
+      {mode === 'couple' && (
+        <>
+          {/* Streak banner — visible on home screen for returning couples */}
+          {(() => {
+            const streak = getStreakInfo();
+            return streak ? (
+              <div className="couple-streak-banner" role="status" aria-live="polite">
+                <span aria-hidden="true">🔥</span>
+                <span>
+                  {streak}-night streak{streak >= 5 ? ' — you two are on fire' : ' — keep it going'}
+                </span>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Status + compatibility */}
+          <div className="couple-status" role="status" aria-live="polite">
+            <div className="couple-status-text">
+              <span aria-hidden="true">{statusMsg.emoji}</span> {statusMsg.text}
+            </div>
+            {compatScore !== null && (
+              <div className={`compat-score ${compatScore >= 75 ? 'high' : compatScore >= 40 ? 'mid' : 'low'}`}>
+                {compatScore}% match
+              </div>
+            )}
+          </div>
+
+          {/* Player tab switcher */}
+          <div className="player-tabs" role="tablist" aria-label="Player">
+            <div className={`player-tab p1-tab ${activePlayer === 'p1' ? 'active' : ''}`}>
+              <button
+                type="button"
+                className="player-tab-select"
+                onClick={() => setActivePlayer('p1')}
+                role="tab"
+                aria-selected={activePlayer === 'p1'}
+                aria-label={`Select ${playerNames.p1}`}
+              >
+                <span className="player-tab-emoji" aria-hidden="true">⚽</span>
+                {editingPlayer === 'p1' ? null : (
+                  <span className="player-name">{playerNames.p1}</span>
+                )}
+                {selectedGenres.p1.length > 0 && (
+                  <span className="player-tab-count" aria-label={`${selectedGenres.p1.length} genres selected`}>
+                    {selectedGenres.p1.length}
+                  </span>
+                )}
+              </button>
+              {editingPlayer === 'p1' ? (
+                <input
+                  className="player-name-input"
+                  defaultValue={playerNames.p1}
+                  autoFocus
+                  maxLength={16}
+                  aria-label="Player 1 name"
+                  onBlur={e => savePlayerName('p1', e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && savePlayerName('p1', e.target.value)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="player-tab-edit"
+                  onClick={() => setEditingPlayer('p1')}
+                  aria-label={`Edit name for ${playerNames.p1}`}
+                >
+                  <span className="edit-hint" aria-hidden="true">✎</span>
+                </button>
+              )}
+            </div>
+
+            <div className={`player-tab p2-tab ${activePlayer === 'p2' ? 'active' : ''}`}>
+              <button
+                type="button"
+                className="player-tab-select"
+                onClick={() => setActivePlayer('p2')}
+                role="tab"
+                aria-selected={activePlayer === 'p2'}
+                aria-label={`Select ${playerNames.p2}`}
+              >
+                <span className="player-tab-emoji" aria-hidden="true">💅</span>
+                {editingPlayer === 'p2' ? null : (
+                  <span className="player-name">{playerNames.p2}</span>
+                )}
+                {selectedGenres.p2.length > 0 && (
+                  <span className="player-tab-count" aria-label={`${selectedGenres.p2.length} genres selected`}>
+                    {selectedGenres.p2.length}
+                  </span>
+                )}
+              </button>
+              {editingPlayer === 'p2' ? (
+                <input
+                  className="player-name-input"
+                  defaultValue={playerNames.p2}
+                  autoFocus
+                  maxLength={16}
+                  aria-label="Player 2 name"
+                  onBlur={e => savePlayerName('p2', e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && savePlayerName('p2', e.target.value)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="player-tab-edit"
+                  onClick={() => setEditingPlayer('p2')}
+                  aria-label={`Edit name for ${playerNames.p2}`}
+                >
+                  <span className="edit-hint" aria-hidden="true">✎</span>
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Active player mood + genre grid */}
+          <div className={`couple-genre-panel ${activePlayer === 'p1' ? 'p1-panel' : 'p2-panel'}`}>
+            <div className="mood-grid" role="group" aria-label={`Moods for ${activePlayer === 'p1' ? playerNames.p1 : playerNames.p2}`}>
+              {MOODS.map(mood => (
+                <button
+                  key={mood.label}
+                  className={`mood-btn ${isMoodActive(mood.ids, activePlayer) ? 'mood-on' : ''}`}
+                  onClick={() => handleMoodClick(mood.ids, activePlayer)}
+                  aria-pressed={isMoodActive(mood.ids, activePlayer)}
+                >
+                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                  <span className="mood-label">{mood.label}</span>
+                </button>
+              ))}
+            </div>
+            <button
+              className="show-genres-toggle"
+              onClick={() => setShowAllGenres(prev => !prev)}
+              aria-expanded={showAllGenres}
+              aria-controls="couple-genre-list"
+            >
+              {showAllGenres ? '▲ Hide genres' : '＋ More genres'}
+            </button>
+            {showAllGenres && (
+              <div className="chip-grid genre-expand" id="couple-genre-list" role="group" aria-label="Genres">
+                {genres.map(genre => {
+                  const active = selectedGenres[activePlayer]?.includes(genre.id);
+                  return (
+                    <button
+                      type="button"
+                      key={genre.id}
+                      className={`chip ${getGenreClass(genre.id, activePlayer)}`}
+                      onClick={() => handleGenreClick(genre.id, activePlayer)}
+                      aria-pressed={active}
+                    >
+                      {genre.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Shared zone */}
+          {getOverlapGenres().length > 0 && (
+            <div className="shared-zone">
+              <div className="shared-zone-label">Both want</div>
+              <div className="shared-chips">
+                {getOverlapGenres().map(id => {
+                  const genre = genres.find(g => g.id === id);
+                  return genre && (
+                    <span key={id} className="shared-chip">{genre.name}</span>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {mode === 'theater' && (
+        <>
+          <div className="theater-banner">
+            <span aria-hidden="true">🎬</span> Updated weekly · US theaters
+          </div>
+          <div className="section theater-filters">
+            <div className="label" id="theater-filter-label">Filter</div>
+            <div className="theater-filter-row" role="group" aria-labelledby="theater-filter-label">
+              <button
+                type="button"
+                className={`theater-filter-chip ${familyFriendly ? 'chip-on' : ''}`}
+                onClick={() => setFamilyFriendly(prev => !prev)}
+                aria-pressed={familyFriendly}
+              >
+                🧒 Family-friendly
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className={`row2${mode === 'theater' ? ' row2-single' : ''}`}>
+        {mode !== 'theater' && (
+        <div className="fcard">
+          <div className="label" id="format-label">Format</div>
+          <div className="tog-row" role="group" aria-labelledby="format-label">
+            {['Movie', 'Series'].map(format => {
+              const active = selectedFormats.includes(format);
+              return (
+                <button
+                  type="button"
+                  key={format}
+                  className={`tog ${active ? 'on' : ''}`}
+                  onClick={() => toggleFormat(format)}
+                  aria-pressed={active}
+                >
+                  {format}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        )}
+        <div className="fcard">
+          <label className="label" htmlFor="min-rating-input">Min Rating</label>
+          <div className="range-row">
+            <div className="range-wrap">
+              <input
+                id="min-rating-input"
+                type="range"
+                min="0"
+                max="10"
+                step="0.5"
+                value={minRating}
+                onChange={(e) => setMinRating(parseFloat(e.target.value))}
+                aria-valuemin={0}
+                aria-valuemax={10}
+                aria-valuenow={minRating}
+                aria-valuetext={`${minRating.toFixed(1)} out of 10`}
+              />
+              <span className="range-hint" aria-hidden="true">drag to adjust</span>
+            </div>
+            <span className="rval" aria-hidden="true">{minRating.toFixed(1)}</span>
+          </div>
+        </div>
+      </div>
+
+      {mode !== 'theater' && (
+        <div className="section">
+          <div className="label" id="cert-label">Content Rating</div>
+          <div className="cert-row" role="radiogroup" aria-labelledby="cert-label">
+            {[
+              { label: 'All', value: null, aria: 'All' },
+              { label: '🧒 Family', value: 'PG', aria: 'Family (PG)' },
+              { label: 'PG-13', value: 'PG-13', aria: 'PG-13' },
+              { label: 'R & under', value: 'R', aria: 'R and under' }
+            ].map(opt => {
+              const active = maxCertification === opt.value;
+              return (
+                <button
+                  type="button"
+                  key={opt.label}
+                  className={`cert-chip ${active ? 'cert-on' : ''}`}
+                  onClick={() => setMaxCertification(opt.value)}
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={opt.aria}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {mode !== 'theater' && selectedFormats.includes('Movie') && (
+        <div className="section">
+          <div className="label" id="runtime-label">Movie Length</div>
+          <div className="cert-row" role="radiogroup" aria-labelledby="runtime-label">
+            {[
+              { label: 'Any length', value: null, aria: 'Any length' },
+              { label: '⏱ Under 90 min', value: 90, aria: 'Under 90 minutes' },
+              { label: '⏱ Under 2 hrs', value: 120, aria: 'Under 2 hours' },
+            ].map(opt => {
+              const active = maxRuntime === opt.value;
+              return (
+                <button
+                  type="button"
+                  key={opt.label}
+                  className={`cert-chip ${active ? 'cert-on' : ''}`}
+                  onClick={() => setMaxRuntime(opt.value)}
+                  role="radio"
+                  aria-checked={active}
+                  aria-label={opt.aria}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {mode !== 'theater' && (
+        <div className="section">
+          <div className="label" id="services-label">Your Services</div>
+          <div className="chip-grid" role="group" aria-labelledby="services-label">
+            {SERVICES.map(service => {
+              const active = selectedServices.includes(service.name);
+              return (
+                <button
+                  type="button"
+                  key={service.name}
+                  className={`chip ${active ? 'svc-on' : ''}`}
+                  onClick={() => toggleService(service.name)}
+                  aria-pressed={active}
+                >
+                  <span className="sdot" style={{ background: service.color }} aria-hidden="true" />
+                  {service.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="divider" />
+      
+      {matchCount > 0 && (
+        <div className="match-count">
+          {matchCount} title{matchCount === 1 ? '' : 's'} available
+        </div>
+      )}
+
+      <div className="btn-row">
+        <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
+          {loading ? 'Finding...' : 'Find something for us →'}
+        </button>
+        {mode !== 'theater' && (
+          <button className="hidden-gem-btn" onClick={() => pickContent(true)} disabled={loading}>
+            <span aria-hidden="true">💎</span> Hidden Gem
+          </button>
+        )}
+      </div>
+
+      {loading && (
+        <div className="skeleton-card">
+          <div className="skeleton-poster" />
+          <div className="skeleton-content">
+            <div className="skeleton-top">
+              <div>
+                <div className="skeleton-block" style={{ width: '60%', height: 18, marginBottom: 6 }} />
+                <div className="skeleton-block" style={{ width: '35%', height: 11 }} />
+              </div>
+              <div className="skeleton-block" style={{ width: 52, height: 22, borderRadius: 8 }} />
+            </div>
+            <div className="skeleton-pills">
+              <div className="skeleton-block" style={{ width: 56, height: 20, borderRadius: 6 }} />
+              <div className="skeleton-block" style={{ width: 48, height: 20, borderRadius: 6 }} />
+              <div className="skeleton-block" style={{ width: 64, height: 20, borderRadius: 6 }} />
+            </div>
+            <div className="skeleton-block" style={{ width: '45%', height: 13, marginBottom: 10 }} />
+            <div className="skeleton-block" style={{ width: '100%', height: 11, marginBottom: 5 }} />
+            <div className="skeleton-block" style={{ width: '90%', height: 11, marginBottom: 5 }} />
+            <div className="skeleton-block" style={{ width: '75%', height: 11, marginBottom: 12 }} />
+            <div className="skeleton-actions">
+              <div className="skeleton-block" style={{ flex: 1, height: 32, borderRadius: 8 }} />
+              <div className="skeleton-block" style={{ flex: 1, height: 32, borderRadius: 8 }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fetchError && !loading && (
+        <div className="error-card" role="alert">
+          <div className="error-icon" aria-hidden="true">⚠️</div>
+          <div className="error-msg">Couldn't connect. Check your connection and try again.</div>
+          <button className="error-retry" onClick={() => pickContent(false)}>Try again</button>
+        </div>
+      )}
+
+      {hasSearched && matchCount === 0 && !loading && !result && !fetchError && (
+        <div className="nomatch" role="status">
+          {mode !== 'theater' && selectedServices.length === 0
+            ? <><span aria-hidden="true">👆 </span>Select at least one streaming service above to get started.</>
+            : 'No matches found. Try enabling more services or adjusting your filters.'}
+        </div>
+      )}
+
+      {result && !loading && (
+        <div className="result show">
+          <div className="result-inner">
+            <div className="poster-wrap">
+              <div className="poster">
+                {result.posterPath ? (
+                  <img
+                    src={tmdbService.getPosterUrl(result.posterPath)}
+                    alt=""
+                  />
+                ) : (
+                  <div
+                    className="poster-placeholder"
+                    style={{
+                      background: `${getServiceColor(result.service)}22`,
+                      color: getServiceColor(result.service)
+                    }}
+                    aria-hidden="true"
+                  >
+                    {result.service}
+                  </div>
+                )}
+              </div>
+              {collection && (
+                <div className="sequel-wrap">
+                  <button
+                    type="button"
+                    className={`sequel-badge ${showCollection ? 'open' : ''}`}
+                    onClick={() => setShowCollection(prev => !prev)}
+                    aria-expanded={showCollection}
+                    aria-controls="sequel-list"
+                  >
+                    <span aria-hidden="true">🎬</span> Has sequels{' '}
+                    <span aria-hidden="true">{showCollection ? '▲' : '▼'}</span>
+                  </button>
+                  {showCollection && (
+                    <ul className="sequel-list" id="sequel-list">
+                      {collection.parts.map(part => (
+                        <li
+                          key={part.id}
+                          className={`sequel-item ${part.id === result.id ? 'current' : ''}`}
+                          aria-current={part.id === result.id ? 'true' : undefined}
+                        >
+                          <span className="sequel-title">{part.title}</span>
+                          <span className="sequel-year">{part.year}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+            <div className="result-content">
+              <div className="result-top">
+                <div>
+                  <div className="result-title">{result.title}</div>
+                  <div className="result-year">{result.year} · {result.type}</div>
+                </div>
+                {result.service === 'In Theaters' ? (
+                  <div className="svc-badge theater-badge">🎟️ In Theaters</div>
+                ) : (
+                  <div
+                    className="svc-badge"
+                    style={{
+                      background: `${getServiceColor(result.service)}22`,
+                      color: getServiceColor(result.service)
+                    }}
+                  >
+                    {result.service}
+                  </div>
+                )}
+              </div>
+              <div className="pills">
+                {result.genres.slice(0, 3).map(genreId => {
+                  const genre = genres.find(g => g.id === genreId);
+                  return genre && (
+                    <span key={genreId} className="pill">{genre.name}</span>
+                  );
+                })}
+              </div>
+              {/* Theater-specific enrichment row — cert + wide/limited badge */}
+              {result.service === 'In Theaters' && theaterReleaseInfo && (
+                <div className="theater-meta-row">
+                  <span className="cert-badge">
+                    {theaterReleaseInfo.certification || 'NR'}
+                  </span>
+                  <span className={`release-type-badge ${theaterReleaseInfo.isWideRelease ? 'wide' : 'limited'}`}>
+                    {theaterReleaseInfo.isWideRelease ? '🎬 Wide Release' : '🎞️ Limited Release'}
+                  </span>
+                </div>
+              )}
+              <div className="rating-row" aria-label={`Rated ${result.rating} out of 10, ${result.votes} ratings`}>
+                <span className="stars" aria-hidden="true">{starsFromRating(result.rating)}</span>
+                <span className="rating-num" aria-hidden="true">{result.rating}/10</span>
+                <span className="rating-sub" aria-hidden="true">· {result.votes} ratings</span>
+              </div>
+              {pickReason && (
+                <div className="pick-reason">{pickReason}</div>
+              )}
+              <div className="desc">{result.description}</div>
+              <div className="act-row">
+                <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
+                  Try another
+                </button>
+                {mode === 'couple' ? (
+                  <button className="act primary ballot-trigger" onClick={openBallot}>
+                    <span aria-hidden="true">🗳️</span> Secret Vote
+                  </button>
+                ) : (
+                  <button className="act primary" onClick={() => { setTryAnotherCount(0); setCinemaSource('pick'); setCinemaMode(true); saveToHistory(result); }}>
+                    We're watching this <span aria-hidden="true">✓</span>
+                  </button>
+                )}
+                <button
+                  className={`act save-btn ${isSaved(result) ? 'saved' : ''}`}
+                  onClick={() => toggleSaveForLater(result)}
+                  aria-label={isSaved(result) ? 'Remove from saved' : 'Save for later'}
+                  aria-pressed={isSaved(result)}
+                >
+                  {isSaved(result) ? '★' : '☆'}
+                </button>
+                <button
+                  className="act share-btn"
+                  onClick={() => handleShare(result)}
+                  aria-label="Share this pick"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+              {tryAnotherCount >= 3 && (
+                <div className="mood-nudge" role="status">
+                  <span aria-hidden="true">🎯</span> Not feeling these?
+                  <button
+                    className="mood-nudge-btn"
+                    onClick={() => { setTryAnotherCount(0); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                  >
+                    Try a different mood
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="footer-row">
+        <div className="footer-left">
+          <div className="catalog-size">Settle · Powered by TMDB</div>
+          <div className="footer-legal">
+            <button className="privacy-link" onClick={() => setShowPrivacy(true)}>Privacy Policy</button>
+            <span className="footer-legal-sep">·</span>
+            <button className="privacy-link" onClick={() => setShowTerms(true)}>Terms of Service</button>
+          </div>
+        </div>
+        <button
+          className="history-btn"
+          onClick={() => setShowHistory(true)}
+          aria-label={watchHistory.length > 0 ? `Watch history — ${watchHistory.length} watched` : 'Watch history'}
+        >
+          <span aria-hidden="true">🕐</span> {watchHistory.length > 0 ? `${watchHistory.length} watched` : 'History'}
+        </button>
+      </div>
+
+      {/* Toast */}
+      {showToast && (
+        <div className="toast">✓ Added to your watch history</div>
+      )}
+
+      {/* History panel */}
+      {showHistory && (
+        <div className="history-overlay" onClick={() => setShowHistory(false)}>
+          <div
+            className="history-panel"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="history-title-heading"
+          >
+            <div className="history-header">
+              <h2 id="history-title-heading" className="history-title">
+                {historyTab === 'watched' ? <>Watch History <span className="history-count">({watchHistory.length}/30)</span></> : <>Saved <span className="history-count">({savedForLater.length})</span></>}
+              </h2>
+              <button
+                className="history-close"
+                onClick={() => setShowHistory(false)}
+                aria-label="Close watch history"
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+
+            {/* Tab switcher */}
+            <div className="history-tab-bar" role="tablist">
+              <button
+                role="tab"
+                aria-selected={historyTab === 'watched'}
+                className={`history-tab ${historyTab === 'watched' ? 'active' : ''}`}
+                onClick={() => setHistoryTab('watched')}
+              >
+                Watched
+              </button>
+              <button
+                role="tab"
+                aria-selected={historyTab === 'saved'}
+                className={`history-tab ${historyTab === 'saved' ? 'active' : ''}`}
+                onClick={() => setHistoryTab('saved')}
+              >
+                ★ Saved {savedForLater.length > 0 && <span className="history-tab-badge">{savedForLater.length}</span>}
+              </button>
+            </div>
+
+            {historyTab === 'watched' ? (
+              <>
+                {/* Couples streak */}
+                {(() => { const streak = getStreakInfo(); return streak ? (
+                  <div className="streak-info" role="status">
+                    <span className="streak-fire" aria-hidden="true">🔥</span>
+                    <span>{streak} night{streak > 1 ? 's' : ''} in a row you both said yes</span>
+                  </div>
+                ) : null; })()}
+
+                {watchHistory.length === 0 ? (
+                  <div className="history-empty">
+                    <div className="history-empty-icon" aria-hidden="true">🎬</div>
+                    <div className="history-empty-text">Nothing watched yet</div>
+                    <div className="history-empty-sub">Make your first pick and tap "We're watching this"</div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="history-list">
+                      {watchHistory.map(entry => (
+                        <button
+                          key={`${entry.id}-${entry.watchedAt}`}
+                          className="history-entry"
+                          onClick={() => handleHistoryReplay(entry)}
+                          aria-label={`Rewatch ${entry.title}`}
+                        >
+                          <div className="history-poster">
+                            {entry.posterPath ? (
+                              <img src={tmdbService.getPosterUrl(entry.posterPath, 'w92')} alt="" />
+                            ) : (
+                              <div className="history-poster-placeholder" aria-hidden="true">🎬</div>
+                            )}
+                          </div>
+                          <div className="history-info">
+                            <div className="history-entry-title">{entry.title}</div>
+                            <div className="history-entry-meta">{entry.year} · {entry.type}</div>
+                            <div className="history-entry-bottom">
+                              <span className="history-service" style={{
+                                color: entry.service === 'In Theaters' ? '#EF9F27'
+                                  : SERVICES.find(s => s.name === entry.service)?.color || '#999'
+                              }}>
+                                {entry.service}
+                              </span>
+                              <span className="history-date">{formatWatchedDate(entry.watchedAt)}</span>
+                            </div>
+                          </div>
+                          <div className="history-right">
+                            {entry.rated === 'up' && (
+                              <span className="history-vote vote-up" role="img" aria-label="Liked">👍</span>
+                            )}
+                            {entry.rated === 'down' && (
+                              <span className="history-vote vote-down" role="img" aria-label="Disliked">👎</span>
+                            )}
+                            {(!entry.rated || entry.rated === 'skip') && (
+                              <span className="history-vote vote-pending" aria-label="Not rated yet">•••</span>
+                            )}
+                            <div className="history-rating" aria-label={`Rated ${entry.rating} out of 10`}>
+                              <span className="history-stars" aria-hidden="true">★</span>
+                              <span aria-hidden="true"> {entry.rating}</span>
+                            </div>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    <button className="history-clear" onClick={clearHistory}>
+                      Clear history
+                    </button>
+                  </>
+                )}
+              </>
+            ) : (
+              /* Saved tab */
+              savedForLater.length === 0 ? (
+                <div className="history-empty">
+                  <div className="history-empty-icon" aria-hidden="true">★</div>
+                  <div className="history-empty-text">No saved picks yet</div>
+                  <div className="history-empty-sub">Tap ☆ on any result to save it for later</div>
+                </div>
+              ) : (
+                <>
+                  <div className="history-list">
+                    {savedForLater.map(entry => (
+                      <button
+                        key={entry.id}
+                        className="history-entry"
+                        onClick={() => handleHistoryReplay(entry)}
+                        aria-label={`View ${entry.title}`}
+                      >
+                        <div className="history-poster">
+                          {entry.posterPath ? (
+                            <img src={tmdbService.getPosterUrl(entry.posterPath, 'w92')} alt="" />
+                          ) : (
+                            <div className="history-poster-placeholder" aria-hidden="true">🎬</div>
+                          )}
+                        </div>
+                        <div className="history-info">
+                          <div className="history-entry-title">{entry.title}</div>
+                          <div className="history-entry-meta">{entry.year} · {entry.type}</div>
+                          <div className="history-entry-bottom">
+                            <span className="history-service" style={{
+                              color: entry.service === 'In Theaters' ? '#EF9F27'
+                                : SERVICES.find(s => s.name === entry.service)?.color || '#999'
+                            }}>
+                              {entry.service}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="history-right">
+                          <button
+                            className="saved-remove-btn"
+                            onClick={e => { e.stopPropagation(); toggleSaveForLater(entry); }}
+                            aria-label={`Remove ${entry.title} from saved`}
+                          >
+                            ★
+                          </button>
+                          <div className="history-rating" aria-label={`Rated ${entry.rating} out of 10`}>
+                            <span className="history-stars" aria-hidden="true">★</span>
+                            <span aria-hidden="true"> {entry.rating}</span>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                  <button className="history-clear" onClick={() => { setSavedForLater([]); localStorage.removeItem('settle-saved'); }}>
+                    Clear saved
+                  </button>
+                </>
+              )
+            )}
+
+            {/* Data management — always visible at panel bottom */}
+            <div className="history-data-actions">
+              <button className="data-action-btn" onClick={handleExportData}>
+                ↓ Export data
+              </button>
+              <label className="data-action-btn data-action-import">
+                ↑ Import
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".json"
+                  style={{ display: 'none' }}
+                  onChange={handleImportData}
+                />
+              </label>
+              {importSuccess && (
+                <span className="import-success" role="status">✓ Profile restored</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rating popup */}
+      {ratingPopup && (
+        <div className="rating-overlay" onClick={() => handleVote('skip')}>
+          <div
+            className="rating-popup"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rating-popup-title"
+          >
+            <h2 id="rating-popup-title" className="rating-popup-eyebrow">How was it?</h2>
+            <div className="rating-popup-card">
+              {ratingPopup.posterPath ? (
+                <img
+                  className="rating-popup-poster"
+                  src={tmdbService.getPosterUrl(ratingPopup.posterPath, 'w92')}
+                  alt=""
+                />
+              ) : (
+                <div className="rating-popup-poster rating-popup-poster-placeholder" aria-hidden="true">🎬</div>
+              )}
+              <div className="rating-popup-info">
+                <div className="rating-popup-title">{ratingPopup.title}</div>
+                <div className="rating-popup-meta">{ratingPopup.year} · {ratingPopup.type}</div>
+              </div>
+            </div>
+            <div className="rating-popup-actions">
+              <button
+                className="vote-btn vote-up"
+                onClick={() => handleVote('up')}
+                aria-label={`Liked ${ratingPopup.title}`}
+              >
+                <span aria-hidden="true">👍</span>
+              </button>
+              <button
+                className="vote-btn vote-down"
+                onClick={() => handleVote('down')}
+                aria-label={`Disliked ${ratingPopup.title}`}
+              >
+                <span aria-hidden="true">👎</span>
+              </button>
+            </div>
+            <button className="rating-skip" onClick={() => handleVote('skip')}>
+              Skip
+            </button>
+          </div>
+        </div>
+      )}
+
+      {cinemaMode && (cinemaSource === 'history' ? replayResult : result) && (() => {
+        const cinemaItem = cinemaSource === 'history' ? replayResult : result;
+        return (
+        <div className="cinema-overlay" onClick={() => { setCinemaMode(false); setReplayResult(null); }}>
+          <div
+            className="cinema-card"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cinema-title"
+          >
+            <div className="cinema-poster-wrap">
+              {cinemaItem.posterPath ? (
+                <img
+                  className="cinema-poster"
+                  src={tmdbService.getPosterUrl(cinemaItem.posterPath, 'w500')}
+                  alt=""
+                />
+              ) : (
+                <div
+                  className="cinema-poster cinema-poster-placeholder"
+                  style={{ background: `${getServiceColor(cinemaItem.service)}22`, color: getServiceColor(cinemaItem.service) }}
+                  aria-hidden="true"
+                >
+                  {cinemaItem.service}
+                </div>
+              )}
+              {cinemaSource === 'pick' && <div className="cinema-stamp" aria-hidden="true">Tonight's Pick 🎬</div>}
+            </div>
+            <h2 id="cinema-title" className="cinema-title">{cinemaItem.title}</h2>
+            <div className="cinema-meta">
+              {cinemaItem.year} · {cinemaItem.type} ·{' '}
+              <span style={{ color: getServiceColor(cinemaItem.service) }}>{cinemaItem.service}</span>
+            </div>
+            <div className="cinema-rating" aria-label={`Rated ${cinemaItem.rating} out of 10`}>
+              <span className="stars" aria-hidden="true">{starsFromRating(cinemaItem.rating)}</span>
+              <span className="cinema-rating-num" aria-hidden="true">{cinemaItem.rating}/10</span>
+            </div>
+            {(() => {
+              const useWatchmode = cinemaSource === 'pick' && (cinemaItem.service === 'Disney+' || cinemaItem.service === 'Apple TV');
+              const href = useWatchmode ? watchLink : getPlatformLink(cinemaItem.service, cinemaItem.title);
+              return href ? (
+                <div className="cinema-actions">
+                  <a
+                    className="cinema-watch-btn"
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ background: getServiceColor(cinemaItem.service) }}
+                  >
+                    ▶ Open on {cinemaItem.service === 'In Theaters' ? 'Google' : cinemaItem.service}
+                  </a>
+                </div>
+              ) : null;
+            })()}
+            <button className="cinema-share-btn" onClick={() => handleShare(cinemaItem)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
+              </svg>
+              {mode === 'couple' ? "Share what we're watching" : 'Share this pick'}
+            </button>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Secret ballot overlay */}
+      {showBallot && result && (
+        <div className="ballot-overlay" role="dialog" aria-modal="true" aria-label="Secret vote">
+          <div className="ballot-card">
+
+            {/* Step — P1 votes */}
+            {ballotStep === 'p1' && (
+              <div className="ballot-step">
+                <div className="ballot-look-away">
+                  <span aria-hidden="true">👀</span> {playerNames.p2} — look away!
+                </div>
+                <div className="ballot-cue">{playerNames.p1}, cast your vote</div>
+                <div className="ballot-preview">
+                  {result.posterPath && (
+                    <img className="ballot-poster" src={tmdbService.getPosterUrl(result.posterPath, 'w185')} alt="" />
+                  )}
+                  <div className="ballot-preview-info">
+                    <div className="ballot-preview-title">{result.title}</div>
+                    <div className="ballot-preview-meta">{result.year} · {result.type} · <span style={{ color: getServiceColor(result.service) }}>{result.service}</span></div>
+                    <div className="ballot-preview-rating" aria-label={`Rated ${result.rating} out of 10`}>
+                      <span aria-hidden="true">{starsFromRating(result.rating)} {result.rating}/10</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="ballot-votes">
+                  <button className="ballot-vote yes" onClick={() => handleBallotVote('up')} aria-label="Vote yes">
+                    <span aria-hidden="true">👍</span><span>Yes</span>
+                  </button>
+                  <button className="ballot-vote no" onClick={() => handleBallotVote('down')} aria-label="Vote no">
+                    <span aria-hidden="true">👎</span><span>No</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step — P2 votes */}
+            {ballotStep === 'p2' && (
+              <div className="ballot-step">
+                <div className="ballot-locked"><span aria-hidden="true">🔒</span> {playerNames.p1}'s vote is locked</div>
+                <div className="ballot-cue">{playerNames.p2}, your turn</div>
+                <div className="ballot-preview">
+                  {result.posterPath && (
+                    <img className="ballot-poster" src={tmdbService.getPosterUrl(result.posterPath, 'w185')} alt="" />
+                  )}
+                  <div className="ballot-preview-info">
+                    <div className="ballot-preview-title">{result.title}</div>
+                    <div className="ballot-preview-meta">{result.year} · {result.type} · <span style={{ color: getServiceColor(result.service) }}>{result.service}</span></div>
+                    <div className="ballot-preview-rating" aria-label={`Rated ${result.rating} out of 10`}>
+                      <span aria-hidden="true">{starsFromRating(result.rating)} {result.rating}/10</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="ballot-votes">
+                  <button className="ballot-vote yes" onClick={() => handleBallotVote('up')} aria-label="Vote yes">
+                    <span aria-hidden="true">👍</span><span>Yes</span>
+                  </button>
+                  <button className="ballot-vote no" onClick={() => handleBallotVote('down')} aria-label="Vote no">
+                    <span aria-hidden="true">👎</span><span>No</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Step — Reveal */}
+            {ballotStep === 'reveal' && (() => {
+              // 1-second suspense beat before showing outcome
+              if (!revealReady) {
+                return (
+                  <div className="ballot-step ballot-suspense">
+                    <div className="ballot-dots" aria-label="Revealing votes">
+                      <span /><span /><span />
+                    </div>
+                    <div className="ballot-suspense-text">Revealing...</div>
+                  </div>
+                );
+              }
+              const outcome = getBallotOutcome(p1Vote, p2Vote);
+              return (
+                <div className="ballot-step ballot-reveal">
+                  <div className="ballot-reveal-votes">
+                    <div className="ballot-reveal-player">
+                      <div className="ballot-reveal-name">{playerNames.p1}</div>
+                      <div className={`ballot-reveal-emoji ${p1Vote === 'up' ? 'yes' : 'no'}`}>
+                        {p1Vote === 'up' ? '👍' : '👎'}
+                      </div>
+                    </div>
+                    <div className="ballot-reveal-vs">vs</div>
+                    <div className="ballot-reveal-player">
+                      <div className="ballot-reveal-name">{playerNames.p2}</div>
+                      <div className={`ballot-reveal-emoji ${p2Vote === 'up' ? 'yes' : 'no'}`}>
+                        {p2Vote === 'up' ? '👍' : '👎'}
+                      </div>
+                    </div>
+                  </div>
+
+                  {outcome === 'match' && (
+                    <>
+                      <div className="ballot-outcome-icon">🎉</div>
+                      <div className="ballot-outcome-title">It's a match!</div>
+                      <div className="ballot-outcome-sub">You're both watching <strong>{result.title}</strong></div>
+                      <button className="ballot-action primary" onClick={handleBallotMatch}>
+                        Let's watch it ✓
+                      </button>
+                    </>
+                  )}
+
+                  {outcome === 'split' && (
+                    <>
+                      <div className="ballot-outcome-icon">🤔</div>
+                      <div className="ballot-outcome-title">Not tonight...</div>
+                      <div className="ballot-outcome-sub">
+                        {p1Vote === 'up' ? playerNames.p1 : playerNames.p2} wanted it,{' '}
+                        {p1Vote === 'down' ? playerNames.p1 : playerNames.p2} didn't.
+                      </div>
+                      <button className="ballot-action primary" onClick={handleBallotRetry}>
+                        Try another →
+                      </button>
+                    </>
+                  )}
+
+                  {outcome === 'both-no' && (
+                    <>
+                      <div className="ballot-outcome-icon">😂</div>
+                      <div className="ballot-outcome-title">Hard pass from both!</div>
+                      <div className="ballot-outcome-sub">Finding something better...</div>
+                      <button className="ballot-action primary" onClick={handleBallotRetry}>
+                        Find something else →
+                      </button>
+                    </>
+                  )}
+
+                  {/* Coin flip unlocks after 2 consecutive failed ballots */}
+                  {ballotFailCount >= 2 && outcome !== 'match' && (
+                    <button className="ballot-action coin-flip" onClick={handleCoinFlip}>
+                      🎲 Let fate decide tonight
+                    </button>
+                  )}
+
+                  <button className="ballot-action secondary" onClick={() => setShowBallot(false)}>
+                    Cancel
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* Onboarding overlay */}
+      {showOnboarding && (
+        <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+          <div className="onboarding-card">
+            <div className="onboarding-icon" aria-hidden="true">🎬</div>
+            <h1 id="onboarding-title" className="onboarding-title">Settle</h1>
+            <p className="onboarding-tagline">Stop scrolling. Get a pick in seconds.</p>
+            <div className="onboarding-modes">
+              <div className="onboarding-mode">
+                <span className="onboarding-mode-icon" aria-hidden="true">👤</span>
+                <div>
+                  <div className="onboarding-mode-name">Solo</div>
+                  <div className="onboarding-mode-desc">Pick your mood, get a match</div>
+                </div>
+              </div>
+              <div className="onboarding-mode">
+                <span className="onboarding-mode-icon" aria-hidden="true">💑</span>
+                <div>
+                  <div className="onboarding-mode-name">Couples</div>
+                  <div className="onboarding-mode-desc">Both pick genres, app finds the overlap</div>
+                </div>
+              </div>
+              <div className="onboarding-mode">
+                <span className="onboarding-mode-icon" aria-hidden="true">🎟️</span>
+                <div>
+                  <div className="onboarding-mode-name">In Theaters</div>
+                  <div className="onboarding-mode-desc">Live US theater listings, updated weekly</div>
+                </div>
+              </div>
+              <div className="onboarding-mode">
+                <span className="onboarding-mode-icon" aria-hidden="true">💎</span>
+                <div>
+                  <div className="onboarding-mode-name">Hidden Gems</div>
+                  <div className="onboarding-mode-desc">High-rated, under-the-radar picks you haven't heard of</div>
+                </div>
+              </div>
+            </div>
+            {/* Feature strip — surfaces key capabilities first-timers would miss */}
+            <div className="onboarding-features">
+              <span className="onboarding-feature-pill">★ Save picks for later</span>
+              <span className="onboarding-feature-pill">🧠 Learns your taste</span>
+              <span className="onboarding-feature-pill">🕐 Watch history</span>
+            </div>
+
+            <button className="onboarding-cta" onClick={handleOnboardingDone}>
+              Let's go →
+            </button>
+            <p className="onboarding-note">Works with Netflix, Max, Disney+, Apple TV & Prime Video</p>
+          </div>
+        </div>
+      )}
+
+      {/* Privacy Policy modal */}
+      {showPrivacy && (
+        <div className="privacy-overlay" onClick={() => setShowPrivacy(false)}>
+          <div
+            className="privacy-modal"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="privacy-modal-title"
+          >
+            <div className="privacy-header">
+              <h2 id="privacy-modal-title" className="privacy-title">Privacy Policy</h2>
+              <button
+                className="privacy-close"
+                onClick={() => setShowPrivacy(false)}
+                aria-label="Close privacy policy"
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+            <div className="privacy-body">
+              <p><strong>Your data stays on your device.</strong> Settle stores preferences, watch history, and your taste profile in your browser's localStorage. Nothing is sent to any server we operate.</p>
+              <h3>What we store locally</h3>
+              <ul>
+                <li>Your selected services, genres, and filters</li>
+                <li>Watch history (last 30 titles)</li>
+                <li>Your taste profile (up/down votes)</li>
+                <li>Anti-repeat list (last 100 picks)</li>
+                <li>Player names for Couples mode</li>
+              </ul>
+              <h3>Third-party services</h3>
+              <ul>
+                <li><strong>TMDB API</strong> — fetches movie and series data. Subject to <a href="https://www.themoviedb.org/privacy-policy" target="_blank" rel="noopener noreferrer">TMDB's privacy policy</a>.</li>
+                <li><strong>Watchmode API</strong> — fetches Disney+ and Apple TV direct streaming links. Subject to Watchmode's privacy policy.</li>
+                <li><strong>Amazon Prime Video</strong> — Prime Video search links route directly to primevideo.com. No third-party API is used.</li>
+              </ul>
+              <h3>How to clear your data</h3>
+              <p>Go to your browser settings → Clear site data for this site. This removes all locally stored preferences and history.</p>
+              <h3>Contact</h3>
+              <p>Questions? Reach out at <strong>hello@trysettle.app</strong></p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Terms of Service modal */}
+      {showTerms && (
+        <div className="privacy-overlay" onClick={() => setShowTerms(false)}>
+          <div
+            className="privacy-modal"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="terms-modal-title"
+          >
+            <div className="privacy-header">
+              <h2 id="terms-modal-title" className="privacy-title">Terms of Service</h2>
+              <button
+                className="privacy-close"
+                onClick={() => setShowTerms(false)}
+                aria-label="Close terms of service"
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+            <div className="privacy-body">
+              <p className="terms-effective">Effective May 16, 2025 · trysettle.app</p>
+
+              <p>By using Settle you agree to these terms. If you don't agree, please don't use the app.</p>
+
+              <h3>1. What Settle Is</h3>
+              <p>Settle is a free, browser-based tool that helps you decide what to watch. It requires no account, no payment, and no registration. We don't store any personal information on our servers — all your preferences and history live in your own browser.</p>
+
+              <h3>2. The Service Is Provided Free of Charge</h3>
+              <p>Settle is offered at no cost. We reserve the right to modify, suspend, or discontinue the service at any time without notice. We won't be liable to you or any third party for doing so.</p>
+
+              <h3>3. Third-Party Content & APIs</h3>
+              <p>All movie and series data (titles, posters, ratings, descriptions) is sourced from <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">TMDB</a> and used under their API terms. Streaming availability links are provided by <a href="https://www.watchmode.com" target="_blank" rel="noopener noreferrer">Watchmode</a>. We don't own, curate, or guarantee the accuracy of this content. For questions about a specific title, contact the relevant streaming platform directly.</p>
+              <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+
+              <h3>4. Acceptable Use</h3>
+              <p>You agree not to:</p>
+              <ul>
+                <li>Scrape, crawl, or automate requests to the app</li>
+                <li>Attempt to reverse-engineer or tamper with the service</li>
+                <li>Use the app in any way that violates applicable laws</li>
+                <li>Misrepresent affiliation with Settle</li>
+              </ul>
+              <p>We reserve the right to block access for anyone who abuses the service.</p>
+
+              <h3>5. Intellectual Property</h3>
+              <p>The Settle app, its design, code, and original content are owned by us and protected by applicable intellectual property laws. Movie posters, titles, and metadata remain the property of their respective studios and rights holders. The TMDB logo and branding belong to TMDB.</p>
+
+              <h3>6. No Warranties</h3>
+              <p>Settle is provided <strong>"as is"</strong> and <strong>"as available"</strong> without warranties of any kind — express, implied, or statutory. We make no guarantees that the service will be uninterrupted, error-free, or that any specific title will be available on any platform at any given time. Streaming catalogs change daily — always verify availability on the platform directly.</p>
+
+              <h3>7. Limitation of Liability</h3>
+              <p>To the fullest extent permitted by law, Settle and its operators will not be liable for any indirect, incidental, special, or consequential damages arising from your use of — or inability to use — the service. Our total liability for any claim is limited to zero dollars, reflecting that the service is free.</p>
+
+              <h3>8. Analytics</h3>
+              <p>We use PostHog to collect anonymous usage data (e.g. which modes are used, how often picks are generated). No personally identifiable information is collected. You can opt out by enabling your browser's "Do Not Track" setting or using an ad blocker.</p>
+
+              <h3>9. Changes to These Terms</h3>
+              <p>We may update these terms at any time. Continued use of the app after changes are posted means you accept the updated terms. The effective date at the top of this page will always reflect the latest revision.</p>
+
+              <h3>10. Contact</h3>
+              <p>Questions about these terms? Email us at <strong>hello@trysettle.app</strong></p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share card modal */}
+      {showShareModal && (
+        <div className="share-overlay" onClick={closeShareModal}>
+          <div
+            className="share-modal"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="share-modal-title"
+          >
+            <div className="share-modal-header">
+              <h2 id="share-modal-title" className="share-modal-title">Your Pick Card</h2>
+              <button
+                className="share-modal-close"
+                onClick={closeShareModal}
+                aria-label="Close share dialog"
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+
+            {shareCardLoading ? (
+              <div className="share-modal-loading" role="status">
+                <div className="share-spinner" aria-hidden="true" />
+                <span>Generating card…</span>
+              </div>
+            ) : shareCardReady ? (
+              <>
+                <div className="share-preview-wrap" ref={sharePreviewRef}>
+                  {shareCardUrl && (
+                    <img className="share-preview-img" src={shareCardUrl} alt={`Share card for ${shareItemRef.current?.title || 'pick'}`} />
+                  )}
+                </div>
+                <div className="share-modal-actions">
+                  {shareCardUrl ? (
+                    <>
+                      <button className="share-action-primary" onClick={shareImageCard}>
+                        {imageCopied ? (
+                          '✓ Copied to clipboard!'
+                        ) : (
+                          <>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                              <line x1="22" y1="2" x2="11" y2="13" />
+                              <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                            </svg>
+                            Share Image
+                          </>
+                        )}
+                      </button>
+                      <button className="share-action-secondary" onClick={downloadImage} aria-label="Download share card as PNG">
+                        ↓ Download
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button className="share-action-primary" onClick={() => { closeShareModal(); shareAsText(shareItemRef.current); }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                          <line x1="22" y1="2" x2="11" y2="13" />
+                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                        Share as text
+                      </button>
+                      <button className="share-action-secondary" onClick={closeShareModal}>Close</button>
+                    </>
+                  )}
+                </div>
+              </>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Share copied toast */}
+      {shareCopied && (
+        <div className="toast" role="status">Link copied to clipboard!</div>
+      )}
+
+      {/* Consent banner */}
+      {showConsent && (
+        <div className="consent-banner" role="region" aria-label="Storage consent">
+          <div className="consent-text">
+            <span aria-hidden="true">🔒</span> We save your preferences and watch history <strong>on your device only</strong>. Nothing is shared externally.
+          </div>
+          <div className="consent-actions">
+            <button className="consent-decline" onClick={() => handleConsent(false)}>Decline</button>
+            <button className="consent-accept" onClick={() => handleConsent(true)}>Got it</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default App;

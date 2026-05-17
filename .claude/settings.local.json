@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git --version)",
+      "Bash(npm start *)",
+      "Bash(nohup npm *)",
+      "Bash(echo \"PID: $!\")",
+      "Bash(node -e ' *)",
+      "Bash(npx react-scripts *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(curl -sI \"https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg\")",
+      "Bash(curl -sI -H \"Origin: http://localhost:3000\" \"https://image.tmdb.org/t/p/w500/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg\")",
+      "Bash(python -c \"import reportlab; print\\('reportlab ok'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :3000)",
+      "Bash(Get-Process -Id 24436)",
+      "Bash(Select-Object Name, Id, Path)",
+      "Bash(curl -s http://localhost:3000/static/js/main.b1e38355.js)",
+      "Bash(curl -s http://localhost:3000/)",
+      "Bash(curl -s http://localhost:3000/static/js/bundle.js)",
+      "Bash(npm install *)",
+      "Bash(node -e \"const p = require\\('./node_modules/posthog-js/package.json'\\); console.log\\('posthog-js version:', p.version\\)\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" \"https://us.i.posthog.com/decide/?v=3&ip=1&_=test\")",
+      "Bash(lsof -ti:3000)",
+      "Bash(xargs kill *)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; Write-Output \"Done\")",
+      "WebSearch",
+      "Read(//c/Users/andra/Downloads/**)",
+      "Bash(python generate_streaming_intel.py)",
+      "Bash(python generate_app_progress.py)",
+      "PowerShell(Get-WmiObject Win32_Process -Filter \"ProcessId=22892\")",
+      "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\dexscreener.js\")",
+      "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\pumpfun.js\")"
+    ]
+  }
+}
