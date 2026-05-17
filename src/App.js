@@ -127,7 +127,7 @@ function App() {
   const [maxCertification, setMaxCertification] = useState(() => loadPrefs().maxCertification || null);
   const [maxRuntime, setMaxRuntime] = useState(() => loadPrefs().maxRuntime || null);
   const [shareCopied, setShareCopied] = useState(false);
-  const [imageCopied, setImageCopied] = useState(false);
+
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareCardUrl, setShareCardUrl] = useState(null);
   const [shareCardLoading, setShareCardLoading] = useState(false);
@@ -701,16 +701,6 @@ function App() {
         setTimeout(() => setShareCopied(false), 2500);
       } catch {}
     }
-  };
-
-  // Download the card as a PNG file
-  const downloadImage = () => {
-    if (!shareCardUrl) return;
-    const item = shareItemRef.current;
-    const a    = document.createElement('a');
-    a.href     = shareCardUrl;
-    a.download = `${item?.title?.replace(/[^a-z0-9]/gi, '-').toLowerCase() || 'pick'}-streaming.png`;
-    a.click();
   };
 
   // Share via native share sheet (Instagram, WhatsApp, etc.)
