@@ -7,30 +7,20 @@ const SERVICE_COLORS = {
   'In Theaters':  '#EF9F27',
 };
 
-// Two-stage image loader. Both stages produce a canvas-safe result.
-//
-// Stage 1: fetch → createImageBitmap(blob)
-//   Fetches the raw bytes, decodes them into an ImageBitmap.
-//   An ImageBitmap has NO URL origin — it came from a Blob — so drawing it
-//   to canvas never taints it, regardless of where the bytes came from.
-//
-// Stage 2: <img crossOrigin="anonymous">
-//   Falls back to a standard CORS image load. Safe as long as the server
-//   sends Access-Control-Allow-Origin (TMDB CDN does).
+// Two-stage image loader — produces a canvas-safe result in both paths.
+// Stage 1: fetch → createImageBitmap(blob) — no URL origin, never taints canvas.
+// Stage 2: <img crossOrigin="anonymous"> — safe when server sends CORS headers (TMDB does).
 async function loadImage(src) {
-  // Stage 1 — fetch → ImageBitmap (no URL origin, canvas-safe by design)
   try {
     const res    = await fetch(src);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob   = await res.blob();
     const bitmap = await createImageBitmap(blob);
-    console.log('[ShareCard] poster loaded via fetch→createImageBitmap');
     return bitmap;
   } catch (e) {
     console.warn('[ShareCard] fetch→ImageBitmap failed:', e.message);
   }
 
-  // Stage 2 — crossOrigin anonymous (canvas-safe if server sends CORS headers)
   try {
     const img = await new Promise((resolve, reject) => {
       const el = new Image();
@@ -39,7 +29,6 @@ async function loadImage(src) {
       el.onerror = () => reject(new Error('crossOrigin blocked'));
       el.src = src;
     });
-    console.log('[ShareCard] poster loaded via crossOrigin');
     return img;
   } catch (e) {
     console.warn('[ShareCard] crossOrigin failed:', e.message);
@@ -48,24 +37,25 @@ async function loadImage(src) {
   throw new Error('loadImage: all stages failed for ' + src);
 }
 
-// Returns y of last line drawn
-function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
+function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 2) {
   const words = text.split(' ');
-  let line  = '';
-  let ly    = y;
+  let line = '';
+  let ly   = y;
   let lines = 0;
   for (let w = 0; w < words.length; w++) {
-    const word = words[w];
-    const test = line ? `${line} ${word}` : word;
+    const test = line ? `${line} ${words[w]}` : words[w];
     if (ctx.measureText(test).width > maxWidth && line) {
       ctx.fillText(line, x, ly);
-      line = word;
+      line = words[w];
       ly  += lineHeight;
       lines++;
       if (lines >= maxLines - 1) {
         const remaining = words.slice(w).join(' ');
-        const truncated = truncateToFit(ctx, remaining, maxWidth - 36);
-        ctx.fillText(truncated, x, ly);
+        let truncated = remaining;
+        while (ctx.measureText(truncated + '…').width > maxWidth && truncated.length > 0) {
+          truncated = truncated.slice(0, -1);
+        }
+        ctx.fillText(truncated + (truncated !== remaining ? '…' : ''), x, ly);
         return ly;
       }
     } else {
@@ -74,15 +64,6 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
   }
   ctx.fillText(line, x, ly);
   return ly;
-}
-
-function truncateToFit(ctx, text, maxWidth) {
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  let truncated = text;
-  while (ctx.measureText(truncated + '…').width > maxWidth && truncated.length > 0) {
-    truncated = truncated.slice(0, -1);
-  }
-  return truncated + '…';
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -96,12 +77,11 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 
 function starsFrom(rating) {
-  const r    = parseFloat(rating) || 0;
-  const full = Math.min(5, Math.max(0, Math.round(r / 2)));
+  const full = Math.min(5, Math.max(0, Math.round((parseFloat(rating) || 0) / 2)));
   return '★'.repeat(full) + '☆'.repeat(5 - full);
 }
 
-// Grain drawn onto an OFFSCREEN canvas, then composited via drawImage.
+// Subtle film grain composited via offscreen canvas so putImageData doesn't overwrite pixels
 function addGrain(ctx, W, H) {
   const off  = document.createElement('canvas');
   off.width  = W;
@@ -109,208 +89,201 @@ function addGrain(ctx, W, H) {
   const octx = off.getContext('2d');
   const data = octx.createImageData(W, H);
   for (let i = 0; i < data.data.length; i += 4) {
-    const v          = (Math.random() * 28) | 0;
-    data.data[i]     = v;
-    data.data[i + 1] = v;
-    data.data[i + 2] = v;
-    data.data[i + 3] = 22;
+    const v = (Math.random() * 30) | 0;
+    data.data[i] = data.data[i + 1] = data.data[i + 2] = v;
+    data.data[i + 3] = 20;
   }
   octx.putImageData(data, 0, 0);
-
   ctx.globalCompositeOperation = 'overlay';
-  ctx.globalAlpha = 0.18;
+  ctx.globalAlpha = 0.15;
   ctx.drawImage(off, 0, 0);
   ctx.globalCompositeOperation = 'source-over';
   ctx.globalAlpha = 1;
 }
 
-function drawFallbackPoster(ctx, W, H, serviceColor) {
-  const g = ctx.createLinearGradient(0, 0, W, H);
-  g.addColorStop(0, serviceColor + '55');
-  g.addColorStop(1, '#111');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, W, H);
-
-  ctx.save();
-  ctx.font         = '160px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle    = serviceColor + '44';
-  ctx.textAlign    = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('🎬', W / 2, H / 2);
-  ctx.restore();
-}
-
 export async function generateShareCard({ result, mode, playerNames }) {
-  // 1080×1920 — the universal standard for Instagram Stories, WhatsApp Status,
-  // and Snapchat (9:16 ratio). Sized correctly so platforms don't upscale it.
+  // 1080×1920 — universal 9:16 standard for Instagram Stories, WhatsApp Status, Snapchat.
   const W   = 1080;
   const H   = 1920;
-  const PAD = 54;  // 30 × 1.8 scale factor
-  // Poster takes ~52% of card height, text panel gets the remaining 920px
-  const POSTER_BOTTOM = 1000;
-  const serviceColor  = SERVICE_COLORS[result.service] || '#888';
+  // Horizontal padding respects Instagram's safe zone (~8% from sides = ~86px).
+  // Left side especially matters — Instagram's × button sits in top-left.
+  const PAD = 90;
+  const serviceColor = SERVICE_COLORS[result.service] || '#888';
 
   const canvas  = document.createElement('canvas');
   canvas.width  = W;
   canvas.height = H;
   const ctx     = canvas.getContext('2d');
 
-  // ── 1. Base background ───────────────────────────────────────────────
+  // ── 1. Dark base (visible if poster fails) ───────────────────────────
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, 0, W, H);
 
-  // ── 2. Poster (full-width, top ~52%) ─────────────────────────────────
+  // ── 2. Poster — FULL BLEED, cover mode ──────────────────────────────
+  // Scale so the poster fills the entire 1080×1920 canvas (object-fit: cover).
+  // For a standard 2:3 TMDB poster this crops ~100px from each side, keeping
+  // the centered subject fully visible.
   const posterBase =
     process.env.NODE_ENV === 'development'
       ? '/tmdb-images'
       : 'https://image.tmdb.org';
 
-  let posterLoaded = false;
   if (result.posterPath) {
     try {
-      const img   = await loadImage(`${posterBase}/t/p/w780${result.posterPath}`);
-      const scale = W / img.width;
-      const drawH = img.height * scale;
+      const img = await loadImage(`${posterBase}/t/p/w780${result.posterPath}`);
+      const imgAspect    = img.width / img.height;
+      const canvasAspect = W / H;
 
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, W, POSTER_BOTTOM);
-      ctx.clip();
-      ctx.drawImage(img, 0, 0, W, drawH);
-      ctx.restore();
-      posterLoaded = true;
+      let dw, dh, dx, dy;
+      if (imgAspect > canvasAspect) {
+        // Poster wider than canvas ratio — fit to height, crop sides
+        dh = H; dw = H * imgAspect;
+        dx = (W - dw) / 2; dy = 0;
+      } else {
+        // Poster taller than canvas ratio — fit to width, anchor to top
+        // (keeps the face / key art at the top in frame)
+        dw = W; dh = W / imgAspect;
+        dx = 0; dy = 0;
+      }
+
+      ctx.drawImage(img, dx, dy, dw, dh);
     } catch {
-      // falls through to fallback below
+      // Fallback: service-colored gradient if poster fails
+      const g = ctx.createLinearGradient(0, 0, W, H);
+      g.addColorStop(0, serviceColor + '66');
+      g.addColorStop(1, '#111');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, W, H);
+      ctx.font         = '180px system-ui';
+      ctx.fillStyle    = serviceColor + '33';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🎬', W / 2, H / 2);
     }
   }
 
-  if (!posterLoaded) {
-    drawFallbackPoster(ctx, W, POSTER_BOTTOM, serviceColor);
-  }
+  // ── 3. Top vignette — makes branding readable over any poster ────────
+  const topGrad = ctx.createLinearGradient(0, 0, 0, H * 0.28);
+  topGrad.addColorStop(0,   'rgba(0,0,0,0.82)');
+  topGrad.addColorStop(0.5, 'rgba(0,0,0,0.35)');
+  topGrad.addColorStop(1,   'rgba(0,0,0,0)');
+  ctx.fillStyle = topGrad;
+  ctx.fillRect(0, 0, W, H * 0.28);
 
-  // ── 3. Gradient: poster fades to black ───────────────────────────────
-  const fadeGrad = ctx.createLinearGradient(0, POSTER_BOTTOM * 0.6, 0, POSTER_BOTTOM + 6);
-  fadeGrad.addColorStop(0, 'rgba(10,10,10,0)');
-  fadeGrad.addColorStop(1, 'rgba(10,10,10,1)');
-  ctx.fillStyle = fadeGrad;
-  ctx.fillRect(0, 0, W, POSTER_BOTTOM + 6);
+  // ── 4. Bottom overlay — strong fade for text readability ─────────────
+  // Starts fully transparent at 42% height, deepens to ~95% opacity at bottom.
+  const botGrad = ctx.createLinearGradient(0, H * 0.42, 0, H);
+  botGrad.addColorStop(0,    'rgba(0,0,0,0)');
+  botGrad.addColorStop(0.28, 'rgba(0,0,0,0.60)');
+  botGrad.addColorStop(0.55, 'rgba(0,0,0,0.88)');
+  botGrad.addColorStop(1,    'rgba(0,0,0,0.97)');
+  ctx.fillStyle = botGrad;
+  ctx.fillRect(0, 0, W, H);
 
-  // ── 4. Bottom panel ───────────────────────────────────────────────────
-  ctx.fillStyle = '#0a0a0a';
-  ctx.fillRect(0, POSTER_BOTTOM, W, H - POSTER_BOTTOM);
+  // ── 5. Film grain ─────────────────────────────────────────────────────
+  addGrain(ctx, W, H);
 
-  // Subtle glow — service color only at the very bottom edge
-  const glowGrad = ctx.createRadialGradient(W / 2, H + 180, 18, W / 2, H + 180, W * 0.9);
-  glowGrad.addColorStop(0, serviceColor + '28');
-  glowGrad.addColorStop(0.6, serviceColor + '0a');
-  glowGrad.addColorStop(1, 'transparent');
-  ctx.fillStyle = glowGrad;
-  ctx.fillRect(0, POSTER_BOTTOM, W, H - POSTER_BOTTOM);
-
-  // Accent line — thin, centered fade
-  const accentGrad = ctx.createLinearGradient(0, 0, W, 0);
-  accentGrad.addColorStop(0,    'transparent');
-  accentGrad.addColorStop(0.2,  serviceColor + '99');
-  accentGrad.addColorStop(0.5,  serviceColor + 'cc');
-  accentGrad.addColorStop(0.8,  serviceColor + '99');
-  accentGrad.addColorStop(1,    'transparent');
-  ctx.fillStyle = accentGrad;
-  ctx.fillRect(0, POSTER_BOTTOM, W, 3);
-
-  // ── 5. App branding top-left (over poster) ────────────────────────────
-  ctx.font         = '500 20px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle    = 'rgba(255,255,255,0.6)';
+  // ── 6. App branding — top center ─────────────────────────────────────
+  // Prominent enough to catch the eye but not competing with the poster art.
+  ctx.textAlign    = 'center';
   ctx.textBaseline = 'top';
-  ctx.textAlign    = 'left';
-  ctx.fillText('🎬  Settle', PAD, 36);
+  ctx.font         = '600 32px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle    = 'rgba(255,255,255,0.90)';
+  ctx.fillText('🎬  SETTLE', W / 2, 72);
 
-  // ── 6. Mode pill ──────────────────────────────────────────────────────
+  // Tagline below branding
+  ctx.font      = '400 22px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.45)';
+  ctx.fillText('trysettle.app', W / 2, 116);
+
+  // ── 7. Bottom text block ──────────────────────────────────────────────
+  // All text anchored from the bottom up so it never bleeds off-canvas.
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'top';
+
+  // Fixed y positions, working bottom-up from a safe bottom edge (H - 100)
+  const SAFE_BOT  = H - 100;  // 100px from physical bottom edge
+  const genreTagH = 46;
+  const TAGS_BOT  = SAFE_BOT - genreTagH;         // bottom of genre row  = 1774
+  const SVC_Y     = TAGS_BOT - 60;                // service name top     = 1714
+  const META_Y    = SVC_Y - 46;                   // year · type · stars  = 1668
+  const TITLE_BOT = META_Y - 28;                  // bottom of title text = 1640
+  const TITLE_TOP = TITLE_BOT - 148;              // title start (2×74px) = 1492
+  const PILL_Y    = TITLE_TOP - 62;               // mode pill top        = 1430
+
+  // ── Mode pill ─────────────────────────────────────────────────────────
   const modeText =
     mode === 'couple'  ? '💑  Our Pick Tonight'
     : mode === 'theater' ? '🎟️  In Theaters'
     : "🎬  Tonight's Pick";
 
-  ctx.font = '600 20px system-ui, -apple-system, sans-serif';
-  const pillW = ctx.measureText(modeText).width + 44;
-  const pillH = 44;
-  const pillX = PAD;
-  const pillY = POSTER_BOTTOM + 32;
+  ctx.font = '600 22px system-ui, -apple-system, sans-serif';
+  const pillW = ctx.measureText(modeText).width + 48;
+  const pillH = 48;
 
-  roundRect(ctx, pillX, pillY, pillW, pillH, 22);
-  ctx.fillStyle   = serviceColor + '25';
+  roundRect(ctx, PAD, PILL_Y, pillW, pillH, 24);
+  ctx.fillStyle   = serviceColor + '30';
   ctx.fill();
-  ctx.strokeStyle = serviceColor + '66';
-  ctx.lineWidth   = 2;
+  ctx.strokeStyle = serviceColor + '80';
+  ctx.lineWidth   = 1.5;
   ctx.stroke();
   ctx.fillStyle    = serviceColor;
   ctx.textBaseline = 'middle';
-  ctx.fillText(modeText, pillX + 22, pillY + pillH / 2);
+  ctx.fillText(modeText, PAD + 24, PILL_Y + pillH / 2);
 
-  // ── 7. Title ──────────────────────────────────────────────────────────
-  let curY = pillY + pillH + 32;
-  ctx.font         = 'bold 50px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle    = '#f5f5f5';
+  // ── Title ─────────────────────────────────────────────────────────────
+  ctx.font         = 'bold 66px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle    = '#ffffff';
   ctx.textBaseline = 'top';
-  curY = wrapText(ctx, result.title, PAD, curY, W - PAD * 2, 65) + 65;
+  // Shadow for legibility on light posters
+  ctx.shadowColor   = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur    = 18;
+  ctx.shadowOffsetY = 3;
+  wrapText(ctx, result.title, PAD, TITLE_TOP, W - PAD * 2, 74, 2);
+  ctx.shadowColor  = 'transparent';
+  ctx.shadowBlur   = 0;
+  ctx.shadowOffsetY = 0;
 
-  // ── 8. Year · Type ────────────────────────────────────────────────────
-  curY += 4;
-  ctx.font      = '400 24px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle = '#999';
-  ctx.fillText(`${result.year} · ${result.type}`, PAD, curY);
-  curY += 40;
+  // ── Year · Type · Stars ───────────────────────────────────────────────
+  ctx.font      = '400 26px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  const stars   = starsFrom(result.rating);
+  ctx.fillText(`${result.year}  ·  ${result.type}  ·  ${stars}`, PAD, META_Y);
 
-  // ── 9. Stars ──────────────────────────────────────────────────────────
-  ctx.font      = '25px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle = '#EF9F27';
-  ctx.fillText(starsFrom(result.rating), PAD, curY);
-  curY += 44;
-
-  // ── 10. Service dot + name ────────────────────────────────────────────
+  // ── Service name ──────────────────────────────────────────────────────
+  // Service dot
   ctx.beginPath();
-  ctx.arc(PAD + 9, curY + 11, 8, 0, Math.PI * 2);
+  ctx.arc(PAD + 10, SVC_Y + 14, 8, 0, Math.PI * 2);
   ctx.fillStyle = serviceColor;
   ctx.fill();
-  ctx.font         = '600 22px system-ui, -apple-system, sans-serif';
+  // Service text
+  ctx.font         = '700 28px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = serviceColor;
   ctx.textBaseline = 'top';
-  ctx.fillText(result.service, PAD + 26, curY);
-  curY += 50;
+  ctx.fillText(result.service, PAD + 28, SVC_Y);
 
-  // ── 11. Genre tags ────────────────────────────────────────────────────
-  const genreList = (result.genres || []).slice(0, 4);
+  // ── Genre tags ────────────────────────────────────────────────────────
+  const genreList = (result.genres || []).slice(0, 3);
   if (genreList.length > 0) {
-    ctx.font = '500 20px system-ui, -apple-system, sans-serif';
+    ctx.font = '500 22px system-ui, -apple-system, sans-serif';
     let tagX = PAD;
-    const tagH = 40;
-    const tagY = curY;
     for (const genre of genreList) {
-      const label  = genre.name || String(genre);
+      const label = genre.name || String(genre);
       const labelW = ctx.measureText(label).width;
-      const tagW   = labelW + 32;
+      const tagW   = labelW + 36;
       if (tagX + tagW > W - PAD) break;
-      roundRect(ctx, tagX, tagY, tagW, tagH, 20);
-      ctx.fillStyle   = 'rgba(255,255,255,0.07)';
+      roundRect(ctx, tagX, TAGS_BOT, tagW, genreTagH, 23);
+      ctx.fillStyle   = 'rgba(255,255,255,0.10)';
       ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.14)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
       ctx.lineWidth   = 1;
       ctx.stroke();
-      ctx.fillStyle    = '#ccc';
+      ctx.fillStyle    = 'rgba(255,255,255,0.85)';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, tagX + 16, tagY + tagH / 2);
-      tagX += tagW + 14;
+      ctx.fillText(label, tagX + 18, TAGS_BOT + genreTagH / 2);
+      tagX += tagW + 16;
     }
   }
-
-  // ── 12. Film grain ────────────────────────────────────────────────────
-  addGrain(ctx, W, H);
-
-  // ── 13. Footer URL — pinned to bottom ────────────────────────────────
-  ctx.font         = '400 20px system-ui, -apple-system, sans-serif';
-  ctx.fillStyle    = 'rgba(255,255,255,0.25)';
-  ctx.textBaseline = 'bottom';
-  ctx.textAlign    = 'center';
-  ctx.fillText('trysettle.app', W / 2, H - 36);
 
   return canvas;
 }
