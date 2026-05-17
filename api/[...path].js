@@ -16,6 +16,11 @@ module.exports = async function handler(req, res) {
   const { path, ...queryParams } = req.query;
   const segments = Array.isArray(path) ? path : (path ? [path] : []);
 
+  // Debug — remove after confirming routing works
+  if (segments[0] === '_debug') {
+    return res.json({ path, segments, queryParams, url: req.url });
+  }
+
   // segments[0] is the service: 'tmdb' or 'watchmode'
   const service  = segments[0];
   const subPath  = segments.slice(1).join('/');
