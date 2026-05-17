@@ -353,6 +353,11 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden;
   background: #151515;
   flex-shrink: 0;
+  /* Force GPU compositing layer — fixes iOS Safari's failure to paint images
+     inside overflow:hidden + border-radius stacking contexts */
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  isolation: isolate;
 }
 
 .sequel-wrap {
@@ -2004,9 +2009,12 @@ input[type="range"]::-moz-range-thumb {
   background: #0a0a0a;
   z-index: 2000;
   display: flex;
-  align-items: center;
+  align-items: flex-start;   /* allow card to start at top so it's scrollable inside overlay */
   justify-content: center;
   padding: 2rem;
+  overflow-y: auto;           /* scroll happens inside the overlay, not on the body */
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; /* prevent scroll chaining to the body on iOS */
 }
 
 .onboarding-card {
@@ -2017,6 +2025,8 @@ input[type="range"]::-moz-range-thumb {
   flex-direction: column;
   align-items: center;
   gap: 16px;
+  margin: auto;   /* vertically centers card when overlay has extra space */
+  padding-bottom: env(safe-area-inset-bottom, 0px); /* honour iPhone notch/home bar */
 }
 
 .onboarding-icon { font-size: 48px; line-height: 1; }

@@ -158,6 +158,17 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot]);
 
+  // Lock body scroll while onboarding is open — prevents solo mode from bleeding
+  // through on iOS when the user drags the onboarding overlay upward.
+  useEffect(() => {
+    if (showOnboarding) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [showOnboarding]);
+
   // Load genres and fire app_loaded event on mount
   useEffect(() => {
     loadGenres();
@@ -1505,6 +1516,7 @@ function App() {
                   <img
                     src={tmdbService.getPosterUrl(result.posterPath)}
                     alt=""
+                    onError={e => { e.currentTarget.style.display = 'none'; }}
                   />
                 ) : (
                   <div
