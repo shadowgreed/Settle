@@ -121,6 +121,9 @@ function App() {
   const [hasSearched, setHasSearched] = useState(false);
   const [noMoodSelected, setNoMoodSelected] = useState(false);
   const [fetchError, setFetchError] = useState(false);
+  const [fetchErrorType, setFetchErrorType] = useState(null); // 'timeout' | 'network'
+  const [genreError, setGenreError] = useState(false);
+  const [importError, setImportError] = useState(false);
   const [maxCertification, setMaxCertification] = useState(() => loadPrefs().maxCertification || null);
   const [maxRuntime, setMaxRuntime] = useState(() => loadPrefs().maxRuntime || null);
   const [shareCopied, setShareCopied] = useState(false);
@@ -307,14 +310,16 @@ function App() {
         .sort((a, b) => a.name.localeCompare(b.name));
 
       setGenres(allWithCustom);
+      setGenreError(false);
     } catch (error) {
       console.error('Error loading genres:', error);
       // Retry once after 2s — common cause is a transient network blip on cold load.
-      // If it still fails, the user gets a clear empty state and can retry by picking,
-      // which falls back to genre-less discovery (TMDB still returns results without genre filters).
+      // If it still fails, surface a genre error so the user can manually retry.
       setTimeout(() => {
         if (genres.length === 0) {
-          tmdbService.getGenres('movie').then(() => loadGenres()).catch(() => {});
+          tmdbService.getGenres('movie').then(() => loadGenres()).catch(() => {
+            setGenreError(true);
+          });
         }
       }, 2000);
     }
@@ -551,9 +556,8 @@ function App() {
         setImportSuccess(true);
         setTimeout(() => setImportSuccess(false), 3000);
       } catch {
-        // Non-critical — just show a browser alert so the user knows the file was wrong
-        // without crashing state. A custom toast would require error state wiring.
-        window.alert('Could not read that file. Please use a Settle export file.');
+        setImportError(true);
+        setTimeout(() => setImportError(false), 4000);
       }
       // Reset so the same file can be re-imported if needed
       e.target.value = '';
@@ -765,6 +769,18 @@ function App() {
     setResult(null);
     setPickReason(null);
     setFetchError(false);
+    setFetchErrorType(null);
+
+    // 20-second hard timeout — if TMDB is stalling (cold-start pile-up, rate
+    // limit, slow network) the spinner would otherwise hang indefinitely.
+    let fetchTimedOut = false;
+    const fetchTimeout = setTimeout(() => {
+      fetchTimedOut = true;
+      setFetchErrorType('timeout');
+      setFetchError(true);
+      setLoading(false);
+      setHasSearched(true);
+    }, 20000);
 
     try {
       let allResults = [];
@@ -957,10 +973,16 @@ function App() {
       });
     } catch (error) {
       console.error('Error fetching content:', error);
-      setFetchError(true);
+      if (!fetchTimedOut) {
+        setFetchErrorType('network');
+        setFetchError(true);
+      }
     } finally {
-      setLoading(false);
-      setHasSearched(true);
+      clearTimeout(fetchTimeout);
+      if (!fetchTimedOut) {
+        setLoading(false);
+        setHasSearched(true);
+      }
     }
   };
 
@@ -1169,7 +1191,17 @@ function App() {
             </button>
             {showAllGenres && (
               <div className="chip-grid genre-expand" id={genreListId} role="group" aria-label="Genres">
-                {genres.map(genre => {
+                {genreError && genres.length === 0 ? (
+                  <div className="genre-error" role="alert">
+                    <span>Couldn't load genres.</span>
+                    <button
+                      className="genre-error-retry"
+                      onClick={() => { setGenreError(false); loadGenres(); }}
+                    >
+                      Retry
+                    </button>
+                  </div>
+                ) : genres.map(genre => {
                   const active = activeSlot.includes(genre.id);
                   return (
                     <button
@@ -1558,7 +1590,11 @@ function App() {
       {fetchError && !loading && (
         <div className="error-card" role="alert">
           <div className="error-icon" aria-hidden="true">⚠️</div>
-          <div className="error-msg">Couldn't connect. Check your connection and try again.</div>
+          <div className="error-msg">
+            {fetchErrorType === 'timeout'
+              ? 'Request timed out — TMDB is taking too long. Check your connection and try again.'
+              : 'Couldn\'t connect. Check your connection and try again.'}
+          </div>
           <button className="error-retry" onClick={() => pickContent(false)}>Try again</button>
         </div>
       )}
@@ -1935,6 +1971,9 @@ function App() {
               </label>
               {importSuccess && (
                 <span className="import-success" role="status">✓ Profile restored</span>
+              )}
+              {importError && (
+                <span className="import-error" role="alert">⚠️ Invalid file — please use a Settle export</span>
               )}
             </div>
           </div>

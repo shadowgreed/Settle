@@ -31,7 +31,9 @@
       "Bash(python generate_app_progress.py)",
       "PowerShell(Get-WmiObject Win32_Process -Filter \"ProcessId=22892\")",
       "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\dexscreener.js\")",
-      "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\pumpfun.js\")"
+      "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\pumpfun.js\")",
+      "mcp__Claude_in_Chrome__read_network_requests",
+      "mcp__Claude_in_Chrome__computer"
     ]
   }
 }

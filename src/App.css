@@ -2315,8 +2315,9 @@ input[type="range"]::-moz-range-thumb {
 @media (max-width: 480px) {
   .app { padding: 1.25rem 0.875rem; }
 
-  .mode-tabs { gap: 5px; }
-  .mtab { padding: 8px 10px; font-size: 12px; }
+  /* Mode tabs wrap rather than compress to unreadable widths */
+  .mode-tabs { gap: 5px; flex-wrap: wrap; }
+  .mtab { padding: 8px 10px; font-size: 12px; min-width: 0; flex: 1 1 auto; text-align: center; }
 
   .row2 { grid-template-columns: 1fr; gap: 8px; }
 
@@ -2332,6 +2333,10 @@ input[type="range"]::-moz-range-thumb {
 
   .result-title { font-size: 16px; }
   .desc         { font-size: 12px; }
+
+  /* Poster column shrinks from 110px → 90px so the info column has breathing room */
+  .result-inner { grid-template-columns: 90px 1fr; }
+  .poster       { width: 90px; height: 135px; }
 
   /* Cinema overlay — poster scales down for narrow viewports */
   .cinema-overlay { padding: 1.25rem; }
@@ -2394,9 +2399,10 @@ input[type="range"]::-moz-range-thumb {
   .onboarding-icon    { font-size: 40px; }
   .onboarding-mode    { padding: 11px 12px; gap: 10px; }
 
-  /* Result card — tighten inner grid spacing */
-  .result-inner   { padding: 10px; gap: 10px; }
+  /* Result card — tighten inner grid spacing, shrink poster further */
+  .result-inner   { padding: 10px; gap: 8px; grid-template-columns: 80px 1fr; }
   .skeleton-card  { padding: 10px; gap: 10px; }
+  .poster         { width: 80px; height: 120px; }
   .result-title   { font-size: 15px; }
 }
 
@@ -2744,6 +2750,36 @@ input[type="range"]::-moz-range-thumb {
   color: #4ac678;
   white-space: nowrap;
   animation: fadeInUp 0.2s ease;
+}
+.import-error {
+  font-size: 12px;
+  color: #f87171;
+  white-space: nowrap;
+  animation: fadeInUp 0.2s ease;
+}
+
+/* Genre error inline — shown when genre list fails to load */
+.genre-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: #f87171;
+  padding: 6px 2px;
+}
+.genre-error-retry {
+  background: transparent;
+  border: 1px solid #f87171;
+  color: #f87171;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.genre-error-retry:hover {
+  background: #f87171;
+  color: #0a0a0a;
 }
 
 /* ─────────────────────────────────────────────────────────────
