@@ -45,7 +45,7 @@ class WatchmodeService {
 
     try {
       const res = await fetch(
-        `${WATCHMODE_BASE_URL}/search/?search_field=${tmdbField}&search_value=${tmdbId}`
+        `${WATCHMODE_BASE_URL}?_p=search&search_field=${tmdbField}&search_value=${tmdbId}`
       );
       if (!res.ok) { this._setCache(cacheKey, null); return null; }
       const json = await res.json();
@@ -67,7 +67,7 @@ class WatchmodeService {
 
     try {
       const res = await fetch(
-        `${WATCHMODE_BASE_URL}/title/${watchmodeId}/sources/?regions=US`
+        `${WATCHMODE_BASE_URL}?_p=title/${watchmodeId}/sources&regions=US`
       );
       if (!res.ok) { this._setCache(cacheKey, []); return []; }
       const sources = await res.json();

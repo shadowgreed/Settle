@@ -19,9 +19,17 @@ const CACHE_DURATION = 1000 * 60 * 30; // 30 minutes
 
 class TMDBService {
   constructor() {
-    // No api_key param here — the proxy adds it server-side
-    this.api = axios.create({
-      baseURL: TMDB_BASE_URL,
+    // No api_key param here — the proxy adds it server-side.
+    // Request interceptor converts the URL path into a `_p` query param so
+    // all calls go to /api/tmdb?_p=<endpoint> — avoids Vercel catch-all routing.
+    this.api = axios.create({ baseURL: TMDB_BASE_URL });
+    this.api.interceptors.request.use(config => {
+      const path = (config.url || '').replace(/^\//, '');
+      if (path) {
+        config.url = '';
+        config.params = { _p: path, ...config.params };
+      }
+      return config;
     });
   }
 
