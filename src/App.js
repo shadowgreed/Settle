@@ -136,9 +136,9 @@ function App() {
   const shareCanvasRef = useRef(null);
   const sharePreviewRef = useRef(null);
   const importFileRef = useRef(null);
-  // Set to true after a successful native share so the app resets to the
-  // mode/filter view when the user returns from Instagram, WhatsApp, etc.
-  const resetOnReturnRef = useRef(false);
+  // Flagged true the moment navigator.share() is called so the visibilitychange
+  // handler knows the app was left via a share action and should close the modal.
+  const shareInProgressRef = useRef(false);
   const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
@@ -197,19 +197,17 @@ function App() {
     return () => { document.body.style.overflow = ''; };
   }, [showOnboarding]);
 
-  // After a successful share, reset to the mode view when the user returns
-  // from Instagram, WhatsApp, etc. — mirrors Netflix's post-share behaviour.
-  // Only fires when resetOnReturnRef is true (set by shareImageCard on success)
-  // so switching apps for an unrelated reason never clears the pick.
+  // When the user returns from Instagram/WhatsApp after sharing, dismiss the
+  // share modal so they land back on their pick card — not a frozen modal.
+  // The flag is set the moment navigator.share() fires (before iOS switches
+  // apps), so this works even when the share promise hasn't resolved yet.
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && resetOnReturnRef.current) {
-        resetOnReturnRef.current = false;
-        setResult(null);
-        setHasSearched(false);
-        setPickReason(null);
-        setFetchError(false);
-        setMatchCount(0);
+      if (document.visibilityState === 'visible' && shareInProgressRef.current) {
+        shareInProgressRef.current = false;
+        setShowShareModal(false);
+        setShareCardUrl(null);
+        setShareCardReady(false);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
@@ -735,15 +733,19 @@ function App() {
     const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
     if (navigator.canShare?.({ files: [file] })) {
+      // Arm the flag BEFORE calling share — iOS switches apps before the
+      // promise resolves, so setting it after would be too late.
+      shareInProgressRef.current = true;
       try {
         await navigator.share({ files: [file], title: item?.title });
-        // Share completed — arm the reset so the user lands on their mode
-        // view when they return from Instagram / WhatsApp, not the pick card.
-        resetOnReturnRef.current = true;
+        // Promise resolved while still in-app (rare on iOS, common on Android).
+        // Close the modal directly; the visibilitychange handler is a no-op now.
+        shareInProgressRef.current = false;
         closeShareModal();
       } catch (err) {
-        // AbortError = user dismissed the share sheet without sharing — no reset.
-        // Any other error also leaves the card intact.
+        // User dismissed the share sheet without sharing — clear the flag
+        // and leave the modal open so they can try again.
+        shareInProgressRef.current = false;
       }
     }
   };
