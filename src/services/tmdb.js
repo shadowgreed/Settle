@@ -45,7 +45,7 @@ class TMDBService {
   }
 
   // Discover content by streaming service and filters
-  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxRuntime = null }) {
+  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxRuntime = null, maxPages = null }) {
     const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${maxRuntime}`;
 
     return this.getCached(cacheKey, async () => {
@@ -82,13 +82,12 @@ class TMDBService {
       }
 
       const endpoint = type === 'movie' ? '/discover/movie' : '/discover/tv';
-      // Cap pages at 3 (normal) / 2 (hidden gems).
-      // With 5 services × 2 formats the peak concurrent burst is ~30 requests —
-      // safely under TMDB's 40 req/10s limit even when genres are selected.
-      // 3 pages × 20 results = 60 results per query, more than enough for the picker.
-      const maxPages = hiddenGems ? 2 : 3;
+      // Page cap priority: explicit caller override > hidden gems (2) >
+      // genre-filtered (1 — combined OR query already covers the mood well) >
+      // unfiltered browse (3, wider net needed for random variety).
+      const pageCap = maxPages !== null ? maxPages : hiddenGems ? 2 : genre ? 1 : 3;
       const firstPage = await this.api.get(endpoint, { params: { ...params, page: 1 } });
-      const totalPages = Math.min(firstPage.data.total_pages, maxPages);
+      const totalPages = Math.min(firstPage.data.total_pages, pageCap);
 
       // Page 1 is already fetched — collect remaining pages in a small parallel batch
       const remainingNums = Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 2);

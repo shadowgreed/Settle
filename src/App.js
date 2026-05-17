@@ -7,6 +7,27 @@ import './App.css';
 
 const STEAMY_KEYWORDS = '256466|738|3182|286925|41404|41260|278555|298666';
 
+// Concurrency limiter — runs up to `limit` async tasks in parallel,
+// queuing the rest until a slot opens. Prevents cold-start pile-ups when
+// many Vercel serverless functions would otherwise all fire at once.
+// Returns results in the same shape as Promise.allSettled.
+async function runConcurrent(fns, limit = 5) {
+  const results = new Array(fns.length);
+  let next = 0;
+  async function worker() {
+    while (next < fns.length) {
+      const idx = next++;
+      try {
+        results[idx] = { status: 'fulfilled', value: await fns[idx]() };
+      } catch (e) {
+        results[idx] = { status: 'rejected', reason: e };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, fns.length) }, worker));
+  return results;
+}
+
 const MOODS = [
   { emoji: '😂', label: 'Fun',        ids: [35, 16] },
   { emoji: '❤️', label: 'Romantic',   ids: [10749, 18] },
@@ -763,14 +784,16 @@ function App() {
           : await tmdbService.getNowPlaying();
       } else {
         const activeFormats = selectedFormats;
-        const fetchPromises = [];
+        // Collect thunks (not live promises) so runConcurrent can control
+        // how many fire at once and avoid cold-start pile-ups.
+        const fetchFns = [];
 
         for (const service of selectedServices) {
           for (const format of activeFormats) {
             const type = format === 'Movie' ? 'movie' : 'tv';
 
             if (activeGenres.length === 0) {
-              fetchPromises.push(
+              fetchFns.push(() =>
                 tmdbService.discoverContent({
                   service,
                   type,
@@ -781,15 +804,36 @@ function App() {
                 })
               );
             } else {
-              for (const genreId of activeGenres) {
-                const isSteamy = genreId === 'steamy';
-                const isAnime = genreId === 'anime';
-                fetchPromises.push(
+              // Split keyword-based special genres (steamy, anime) from regular
+              // TMDB genre IDs. Regular IDs are combined into one OR query
+              // (e.g. "35|16") so we fire 1 request per service+format instead
+              // of N requests — reduces peak burst from ~20 to ~10.
+              const regularIds = activeGenres.filter(id => id !== 'steamy' && id !== 'anime');
+              const specialIds = activeGenres.filter(id => id === 'steamy' || id === 'anime');
+
+              if (regularIds.length > 0) {
+                const combinedGenre = regularIds.join('|'); // TMDB OR query
+                fetchFns.push(() =>
                   tmdbService.discoverContent({
                     service,
                     type,
-                    genre: (isSteamy || isAnime) ? null : genreId,
-                    keywords: isSteamy ? STEAMY_KEYWORDS : isAnime ? ANIME_KEYWORD : null,
+                    genre: combinedGenre,
+                    minRating,
+                    hiddenGems: false,
+                    maxCertification,
+                    maxRuntime: type !== 'movie' ? null : maxRuntime
+                  })
+                );
+              }
+
+              for (const id of specialIds) {
+                const isSteamy = id === 'steamy';
+                fetchFns.push(() =>
+                  tmdbService.discoverContent({
+                    service,
+                    type,
+                    genre: null,
+                    keywords: isSteamy ? STEAMY_KEYWORDS : ANIME_KEYWORD,
                     minRating,
                     hiddenGems: false,
                     maxCertification,
@@ -801,9 +845,9 @@ function App() {
           }
         }
 
-        // allSettled — a single failed query (rate limit, network blip) won't
-        // cancel the rest. Fulfilled results are still surfaced to the picker.
-        const batchResults = await Promise.allSettled(fetchPromises);
+        // Cap concurrency at 5 — prevents simultaneous cold-start saturation.
+        // A single failed query (rate limit, network blip) won't cancel the rest.
+        const batchResults = await runConcurrent(fetchFns, 5);
         batchResults.forEach(r => {
           if (r.status === 'fulfilled') allResults.push(...r.value);
         });
