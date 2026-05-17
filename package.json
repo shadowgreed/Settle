@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "axios": "^1.6.0",
     "posthog-js": "^1.372.6",
     "react": "^18.2.0",
