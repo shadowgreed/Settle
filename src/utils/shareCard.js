@@ -13,15 +13,10 @@ const SERVICE_COLORS = {
 //   Fetches the raw bytes, decodes them into an ImageBitmap.
 //   An ImageBitmap has NO URL origin — it came from a Blob — so drawing it
 //   to canvas never taints it, regardless of where the bytes came from.
-//   This is the most reliable approach and works on all modern browsers.
 //
 // Stage 2: <img crossOrigin="anonymous">
 //   Falls back to a standard CORS image load. Safe as long as the server
 //   sends Access-Control-Allow-Origin (TMDB CDN does).
-//
-// Note: the old "blob URL → <img>" Stage 1 was removed because revoking the
-// blob URL before ctx.drawImage() caused some browsers to re-check origin on
-// the dead URL and mark the canvas as tainted.
 async function loadImage(src) {
   // Stage 1 — fetch → ImageBitmap (no URL origin, canvas-safe by design)
   try {
@@ -50,8 +45,6 @@ async function loadImage(src) {
     console.warn('[ShareCard] crossOrigin failed:', e.message);
   }
 
-  // If both stages fail (e.g. network offline), throw so the caller
-  // can render a fallback gradient instead of a tainted canvas.
   throw new Error('loadImage: all stages failed for ' + src);
 }
 
@@ -70,9 +63,8 @@ function wrapText(ctx, text, x, y, maxWidth, lineHeight, maxLines = 3) {
       ly  += lineHeight;
       lines++;
       if (lines >= maxLines - 1) {
-        // Truncate remaining words into last line
         const remaining = words.slice(w).join(' ');
-        const truncated = truncateToFit(ctx, remaining, maxWidth - 20);
+        const truncated = truncateToFit(ctx, remaining, maxWidth - 36);
         ctx.fillText(truncated, x, ly);
         return ly;
       }
@@ -110,8 +102,6 @@ function starsFrom(rating) {
 }
 
 // Grain drawn onto an OFFSCREEN canvas, then composited via drawImage.
-// putImageData bypasses globalCompositeOperation and OVERWRITES pixel data,
-// which is why the original version blanked everything out.
 function addGrain(ctx, W, H) {
   const off  = document.createElement('canvas');
   off.width  = W;
@@ -123,12 +113,10 @@ function addGrain(ctx, W, H) {
     data.data[i]     = v;
     data.data[i + 1] = v;
     data.data[i + 2] = v;
-    data.data[i + 3] = 22;   // subtle alpha on the offscreen canvas
+    data.data[i + 3] = 22;
   }
-  octx.putImageData(data, 0, 0); // safe to use putImageData here — it's on the offscreen
+  octx.putImageData(data, 0, 0);
 
-  // Now draw the offscreen onto the main canvas using 'overlay' compositing,
-  // so the grain tints highlights and deepens shadows without destroying the image.
   ctx.globalCompositeOperation = 'overlay';
   ctx.globalAlpha = 0.18;
   ctx.drawImage(off, 0, 0);
@@ -144,7 +132,7 @@ function drawFallbackPoster(ctx, W, H, serviceColor) {
   ctx.fillRect(0, 0, W, H);
 
   ctx.save();
-  ctx.font         = '88px system-ui, -apple-system, sans-serif';
+  ctx.font         = '160px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = serviceColor + '44';
   ctx.textAlign    = 'center';
   ctx.textBaseline = 'middle';
@@ -153,12 +141,13 @@ function drawFallbackPoster(ctx, W, H, serviceColor) {
 }
 
 export async function generateShareCard({ result, mode, playerNames }) {
-  const W   = 600;
-  const H   = 840;
-  const PAD = 30;
-  // 435 = 580 × 0.75 — 25% smaller poster area so the card doesn't feel
-  // poster-dominated when displayed full-screen on Instagram / WhatsApp stories.
-  const POSTER_BOTTOM = 435;
+  // 1080×1920 — the universal standard for Instagram Stories, WhatsApp Status,
+  // and Snapchat (9:16 ratio). Sized correctly so platforms don't upscale it.
+  const W   = 1080;
+  const H   = 1920;
+  const PAD = 54;  // 30 × 1.8 scale factor
+  // Poster takes ~52% of card height, text panel gets the remaining 920px
+  const POSTER_BOTTOM = 1000;
   const serviceColor  = SERVICE_COLORS[result.service] || '#888';
 
   const canvas  = document.createElement('canvas');
@@ -170,10 +159,7 @@ export async function generateShareCard({ result, mode, playerNames }) {
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, 0, W, H);
 
-  // ── 2. Poster (full-width, top ~60%) ─────────────────────────────────
-  // In development, route through the CRA dev proxy (/tmdb-images → image.tmdb.org)
-  // so the request originates from localhost and no CORS headers are needed.
-  // In production the CDN serves CORS headers natively.
+  // ── 2. Poster (full-width, top ~52%) ─────────────────────────────────
   const posterBase =
     process.env.NODE_ENV === 'development'
       ? '/tmdb-images'
@@ -182,7 +168,7 @@ export async function generateShareCard({ result, mode, playerNames }) {
   let posterLoaded = false;
   if (result.posterPath) {
     try {
-      const img   = await loadImage(`${posterBase}/t/p/w500${result.posterPath}`);
+      const img   = await loadImage(`${posterBase}/t/p/w780${result.posterPath}`);
       const scale = W / img.width;
       const drawH = img.height * scale;
 
@@ -202,19 +188,19 @@ export async function generateShareCard({ result, mode, playerNames }) {
     drawFallbackPoster(ctx, W, POSTER_BOTTOM, serviceColor);
   }
 
-  // ── 3. Gradient: poster fades to black — starts at 60% down ──────────
-  const fadeGrad = ctx.createLinearGradient(0, POSTER_BOTTOM * 0.6, 0, POSTER_BOTTOM + 4);
+  // ── 3. Gradient: poster fades to black ───────────────────────────────
+  const fadeGrad = ctx.createLinearGradient(0, POSTER_BOTTOM * 0.6, 0, POSTER_BOTTOM + 6);
   fadeGrad.addColorStop(0, 'rgba(10,10,10,0)');
   fadeGrad.addColorStop(1, 'rgba(10,10,10,1)');
   ctx.fillStyle = fadeGrad;
-  ctx.fillRect(0, 0, W, POSTER_BOTTOM + 4);
+  ctx.fillRect(0, 0, W, POSTER_BOTTOM + 6);
 
   // ── 4. Bottom panel ───────────────────────────────────────────────────
   ctx.fillStyle = '#0a0a0a';
   ctx.fillRect(0, POSTER_BOTTOM, W, H - POSTER_BOTTOM);
 
   // Subtle glow — service color only at the very bottom edge
-  const glowGrad = ctx.createRadialGradient(W / 2, H + 100, 10, W / 2, H + 100, W * 0.9);
+  const glowGrad = ctx.createRadialGradient(W / 2, H + 180, 18, W / 2, H + 180, W * 0.9);
   glowGrad.addColorStop(0, serviceColor + '28');
   glowGrad.addColorStop(0.6, serviceColor + '0a');
   glowGrad.addColorStop(1, 'transparent');
@@ -229,14 +215,14 @@ export async function generateShareCard({ result, mode, playerNames }) {
   accentGrad.addColorStop(0.8,  serviceColor + '99');
   accentGrad.addColorStop(1,    'transparent');
   ctx.fillStyle = accentGrad;
-  ctx.fillRect(0, POSTER_BOTTOM, W, 1.5);
+  ctx.fillRect(0, POSTER_BOTTOM, W, 3);
 
   // ── 5. App branding top-left (over poster) ────────────────────────────
-  ctx.font         = '500 11px system-ui, -apple-system, sans-serif';
+  ctx.font         = '500 20px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = 'rgba(255,255,255,0.6)';
   ctx.textBaseline = 'top';
   ctx.textAlign    = 'left';
-  ctx.fillText('🎬  Settle', PAD, 20);
+  ctx.fillText('🎬  Settle', PAD, 36);
 
   // ── 6. Mode pill ──────────────────────────────────────────────────────
   const modeText =
@@ -244,87 +230,87 @@ export async function generateShareCard({ result, mode, playerNames }) {
     : mode === 'theater' ? '🎟️  In Theaters'
     : "🎬  Tonight's Pick";
 
-  ctx.font = '600 11px system-ui, -apple-system, sans-serif';
-  const pillW = ctx.measureText(modeText).width + 24;
-  const pillH = 24;
+  ctx.font = '600 20px system-ui, -apple-system, sans-serif';
+  const pillW = ctx.measureText(modeText).width + 44;
+  const pillH = 44;
   const pillX = PAD;
-  const pillY = POSTER_BOTTOM + 18;
+  const pillY = POSTER_BOTTOM + 32;
 
-  roundRect(ctx, pillX, pillY, pillW, pillH, 12);
+  roundRect(ctx, pillX, pillY, pillW, pillH, 22);
   ctx.fillStyle   = serviceColor + '25';
   ctx.fill();
   ctx.strokeStyle = serviceColor + '66';
-  ctx.lineWidth   = 1;
+  ctx.lineWidth   = 2;
   ctx.stroke();
   ctx.fillStyle    = serviceColor;
   ctx.textBaseline = 'middle';
-  ctx.fillText(modeText, pillX + 12, pillY + pillH / 2);
+  ctx.fillText(modeText, pillX + 22, pillY + pillH / 2);
 
   // ── 7. Title ──────────────────────────────────────────────────────────
-  let curY = pillY + pillH + 18;
-  ctx.font         = 'bold 28px system-ui, -apple-system, sans-serif';
+  let curY = pillY + pillH + 32;
+  ctx.font         = 'bold 50px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = '#f5f5f5';
   ctx.textBaseline = 'top';
-  curY = wrapText(ctx, result.title, PAD, curY, W - PAD * 2, 36) + 36;
+  curY = wrapText(ctx, result.title, PAD, curY, W - PAD * 2, 65) + 65;
 
   // ── 8. Year · Type ────────────────────────────────────────────────────
-  curY += 2;
-  ctx.font      = '400 13px system-ui, -apple-system, sans-serif';
+  curY += 4;
+  ctx.font      = '400 24px system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#999';
   ctx.fillText(`${result.year} · ${result.type}`, PAD, curY);
-  curY += 22;
+  curY += 40;
 
   // ── 9. Stars ──────────────────────────────────────────────────────────
-  ctx.font      = '14px system-ui, -apple-system, sans-serif';
+  ctx.font      = '25px system-ui, -apple-system, sans-serif';
   ctx.fillStyle = '#EF9F27';
   ctx.fillText(starsFrom(result.rating), PAD, curY);
-  curY += 24;
+  curY += 44;
 
   // ── 10. Service dot + name ────────────────────────────────────────────
   ctx.beginPath();
-  ctx.arc(PAD + 5, curY + 6, 4.5, 0, Math.PI * 2);
+  ctx.arc(PAD + 9, curY + 11, 8, 0, Math.PI * 2);
   ctx.fillStyle = serviceColor;
   ctx.fill();
-  ctx.font         = '600 12px system-ui, -apple-system, sans-serif';
+  ctx.font         = '600 22px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = serviceColor;
   ctx.textBaseline = 'top';
-  ctx.fillText(result.service, PAD + 17, curY);
-  curY += 28;
+  ctx.fillText(result.service, PAD + 26, curY);
+  curY += 50;
 
   // ── 11. Genre tags ────────────────────────────────────────────────────
   const genreList = (result.genres || []).slice(0, 4);
   if (genreList.length > 0) {
-    ctx.font = '500 11px system-ui, -apple-system, sans-serif';
+    ctx.font = '500 20px system-ui, -apple-system, sans-serif';
     let tagX = PAD;
-    const tagH = 22;
+    const tagH = 40;
     const tagY = curY;
     for (const genre of genreList) {
       const label  = genre.name || String(genre);
       const labelW = ctx.measureText(label).width;
-      const tagW   = labelW + 18;
+      const tagW   = labelW + 32;
       if (tagX + tagW > W - PAD) break;
-      roundRect(ctx, tagX, tagY, tagW, tagH, 11);
+      roundRect(ctx, tagX, tagY, tagW, tagH, 20);
       ctx.fillStyle   = 'rgba(255,255,255,0.07)';
       ctx.fill();
       ctx.strokeStyle = 'rgba(255,255,255,0.14)';
-      ctx.lineWidth   = 0.5;
+      ctx.lineWidth   = 1;
       ctx.stroke();
       ctx.fillStyle    = '#ccc';
       ctx.textBaseline = 'middle';
-      ctx.fillText(label, tagX + 9, tagY + tagH / 2);
-      tagX += tagW + 8;
+      ctx.fillText(label, tagX + 16, tagY + tagH / 2);
+      tagX += tagW + 14;
     }
   }
 
-  // ── 12. Film grain (composited safely via offscreen canvas) ───────────
+  // ── 12. Film grain ────────────────────────────────────────────────────
   addGrain(ctx, W, H);
 
   // ── 13. Footer URL — pinned to bottom ────────────────────────────────
-  ctx.font         = '400 11px system-ui, -apple-system, sans-serif';
+  ctx.font         = '400 20px system-ui, -apple-system, sans-serif';
   ctx.fillStyle    = 'rgba(255,255,255,0.25)';
   ctx.textBaseline = 'bottom';
   ctx.textAlign    = 'center';
-  ctx.fillText('trysettle.app', W / 2, H - 18);
+  ctx.fillText('trysettle.app', W / 2, H - 36);
 
   return canvas;
 }

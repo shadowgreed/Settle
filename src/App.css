@@ -2310,6 +2310,13 @@ input[type="range"]::-moz-range-thumb {
 }
 .share-action-secondary:hover { border-color: #777; color: #f5f5f5; }
 
+.share-desktop-hint {
+  font-size: 13px;
+  color: #888;
+  text-align: center;
+  margin: 0;
+  padding: 8px 0;
+}
 
 /* ── Mobile responsiveness ── */
 @media (max-width: 480px) {

@@ -713,31 +713,20 @@ function App() {
     a.click();
   };
 
-  // Primary share action: native share sheet (mobile) → clipboard → download
+  // Share via native share sheet (Instagram, WhatsApp, etc.)
+  // Only available on mobile browsers that support the Web Share API with files.
   const shareImageCard = async () => {
     const canvas = shareCanvasRef.current;
     if (!canvas) return;
     const item = shareItemRef.current;
     const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    const file = new File([blob], 'streaming-pick.png', { type: 'image/png' });
+    const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
-    // Mobile — native share sheet with image file
     if (navigator.canShare?.({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: item?.title });
         closeShareModal();
-        return;
       } catch {}
-    }
-
-    // Desktop — copy to clipboard so user can paste anywhere
-    try {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      setImageCopied(true);
-      setTimeout(() => setImageCopied(false), 2500);
-    } catch {
-      // Last resort — download the file
-      downloadImage();
     }
   };
 
@@ -2442,36 +2431,16 @@ function App() {
                   )}
                 </div>
                 <div className="share-modal-actions">
-                  {shareCardUrl ? (
-                    <>
-                      <button className="share-action-primary" onClick={shareImageCard}>
-                        {imageCopied ? (
-                          '✓ Copied to clipboard!'
-                        ) : (
-                          <>
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                              <line x1="22" y1="2" x2="11" y2="13" />
-                              <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                            </svg>
-                            Share Image
-                          </>
-                        )}
-                      </button>
-                      <button className="share-action-secondary" onClick={downloadImage} aria-label="Download share card as PNG">
-                        ↓ Download
-                      </button>
-                    </>
+                  {'share' in navigator ? (
+                    <button className="share-action-primary" onClick={shareImageCard}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                      Share
+                    </button>
                   ) : (
-                    <>
-                      <button className="share-action-primary" onClick={() => { closeShareModal(); shareAsText(shareItemRef.current); }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                          <line x1="22" y1="2" x2="11" y2="13" />
-                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                        </svg>
-                        Share as text
-                      </button>
-                      <button className="share-action-secondary" onClick={closeShareModal}>Close</button>
-                    </>
+                    <p className="share-desktop-hint">Open on mobile to share to Instagram or WhatsApp</p>
                   )}
                 </div>
               </>
