@@ -136,6 +136,9 @@ function App() {
   const shareCanvasRef = useRef(null);
   const sharePreviewRef = useRef(null);
   const importFileRef = useRef(null);
+  // Set to true after a successful native share so the app resets to the
+  // mode/filter view when the user returns from Instagram, WhatsApp, etc.
+  const resetOnReturnRef = useRef(false);
   const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
@@ -193,6 +196,25 @@ function App() {
     }
     return () => { document.body.style.overflow = ''; };
   }, [showOnboarding]);
+
+  // After a successful share, reset to the mode view when the user returns
+  // from Instagram, WhatsApp, etc. — mirrors Netflix's post-share behaviour.
+  // Only fires when resetOnReturnRef is true (set by shareImageCard on success)
+  // so switching apps for an unrelated reason never clears the pick.
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && resetOnReturnRef.current) {
+        resetOnReturnRef.current = false;
+        setResult(null);
+        setHasSearched(false);
+        setPickReason(null);
+        setFetchError(false);
+        setMatchCount(0);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, []);
 
   // Load genres and fire app_loaded event on mount
   useEffect(() => {
@@ -715,8 +737,14 @@ function App() {
     if (navigator.canShare?.({ files: [file] })) {
       try {
         await navigator.share({ files: [file], title: item?.title });
+        // Share completed — arm the reset so the user lands on their mode
+        // view when they return from Instagram / WhatsApp, not the pick card.
+        resetOnReturnRef.current = true;
         closeShareModal();
-      } catch {}
+      } catch (err) {
+        // AbortError = user dismissed the share sheet without sharing — no reset.
+        // Any other error also leaves the card intact.
+      }
     }
   };
 
