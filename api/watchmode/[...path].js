@@ -13,7 +13,7 @@
  * Watchmode data is stable — edge-cached for 24 hours (mirrors the 7-day
  * localStorage cache in watchmode.js so the CDN absorbs repeat lookups).
  */
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }

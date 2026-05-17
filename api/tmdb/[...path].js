@@ -11,7 +11,7 @@
  *   - Genre lists / collections: 24 hours (rarely change)
  *   - Everything else: 30 minutes (matches the in-memory cache in tmdb.js)
  */
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
