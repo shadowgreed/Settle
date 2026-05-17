@@ -98,6 +98,7 @@ function App() {
   // Fetched lazily per pick, like collection data. null while loading or not theater.
   const [theaterReleaseInfo, setTheaterReleaseInfo] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [noMoodSelected, setNoMoodSelected] = useState(false);
   const [fetchError, setFetchError] = useState(false);
   const [maxCertification, setMaxCertification] = useState(() => loadPrefs().maxCertification || null);
   const [maxRuntime, setMaxRuntime] = useState(() => loadPrefs().maxRuntime || null);
@@ -327,6 +328,7 @@ function App() {
 
   const handleMoodClick = (moodIds, player = 'solo') => {
     setTryAnotherCount(0);
+    setNoMoodSelected(false); // dismiss the "pick a mood" warning
     setSelectedGenres(prev => {
       const current = prev[player] || [];
       // Only treat as "deselect" if ALL of this mood's IDs are already selected.
@@ -720,6 +722,24 @@ function App() {
       setMatchCount(0);
       return;
     }
+
+    // Require at least one mood to be selected before fetching.
+    // Hidden gems intentionally bypass genre filtering, but we still
+    // want users to confirm intent — skip the guard for that path.
+    if (!hiddenGems) {
+      const hasMood =
+        mode === 'couple'
+          ? (selectedGenres.p1.length > 0 || selectedGenres.p2.length > 0)
+          : (selectedGenres[mode === 'theater' ? 'theater' : 'solo'] || []).length > 0;
+
+      if (!hasMood) {
+        setHasSearched(true);
+        setMatchCount(0);
+        setNoMoodSelected(true);
+        return;
+      }
+    }
+    setNoMoodSelected(false);
     setLoading(true);
     setResult(null);
     setPickReason(null);
@@ -1501,9 +1521,11 @@ function App() {
 
       {hasSearched && matchCount === 0 && !loading && !result && !fetchError && (
         <div className="nomatch" role="status">
-          {mode !== 'theater' && selectedServices.length === 0
-            ? <><span aria-hidden="true">👆 </span>Select at least one streaming service above to get started.</>
-            : 'No matches found. Try enabling more services or adjusting your filters.'}
+          {noMoodSelected
+            ? <><span aria-hidden="true">🎭 </span>Pick a mood above to get your recommendation.</>
+            : mode !== 'theater' && selectedServices.length === 0
+              ? <><span aria-hidden="true">👆 </span>Select at least one streaming service above to get started.</>
+              : 'No matches found. Try enabling more services or adjusting your filters.'}
         </div>
       )}
 
