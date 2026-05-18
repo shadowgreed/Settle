@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { signInWithGoogle, signInWithApple, sendMagicLink, completeMagicLinkSignIn } from '../services/auth';
+import { signInWithGoogle, sendMagicLink, completeMagicLinkSignIn } from '../services/auth';
 import './AuthGate.css';
 
 export default function AuthGate() {
@@ -31,19 +31,6 @@ export default function AuthGate() {
       setView('options');
       if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
         setError('Google sign-in failed. Please try again.');
-      }
-    }
-  };
-
-  const handleApple = async () => {
-    setError('');
-    try {
-      setView('loading');
-      await signInWithApple();
-    } catch (err) {
-      setView('options');
-      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
-        setError('Apple sign-in failed. Please try again.');
       }
     }
   };
