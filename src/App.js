@@ -4,6 +4,9 @@ import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
 import { trackAppLoaded, trackPickGenerated } from './services/analytics';
+import AuthGate from './components/AuthGate';
+import { onAuthChange, signOut } from './services/auth';
+import { migrateLocalToCloud, pushUserData, buildPayload } from './services/cloudSync';
 import './App.css';
 
 const STEAMY_KEYWORDS = '256466|738|3182|286925|41404|41260|278555|298666';
@@ -166,6 +169,75 @@ function App() {
 
   // History panel tab — 'watched' | 'saved'
   const [historyTab, setHistoryTab] = useState('watched');
+
+  // ── Auth & cloud sync ──────────────────────────────────────────────────────
+  // undefined = auth still initialising, null = signed out, object = signed in
+  const [user, setUser] = useState(undefined);
+  const syncTimerRef = useRef(null);
+
+  // Hydrate all local state from a Firestore cloud document.
+  // Called once after a successful sign-in.
+  const hydrateFromCloud = (data) => {
+    if (!data) return;
+    if (data.tasteProfile)        setTasteProfile(data.tasteProfile);
+    if (data.recentPicks)         setRecentPicks(data.recentPicks);
+    if (data.savedForLater)       setSavedForLater(data.savedForLater);
+    if (data.watchHistory)        setWatchHistory(data.watchHistory);
+    if (data.playerNames)         setPlayerNames(data.playerNames);
+    if (data.consent != null) {
+      setConsent(data.consent);
+      if (data.consent) setShowConsent(false);
+    }
+    if (data.onboarded)           setShowOnboarding(false);
+    if (data.prefs) {
+      const p = data.prefs;
+      if (p.mode)                 setMode(p.mode);
+      if (p.services)             setSelectedServices(p.services);
+      if (p.genres)               setSelectedGenres(g => ({ ...g, ...p.genres }));
+      if (p.formats)              setSelectedFormats(p.formats);
+      if (p.minRating != null)    setMinRating(p.minRating);
+      if ('maxCertification' in p) setMaxCertification(p.maxCertification);
+      if ('maxRuntime' in p)       setMaxRuntime(p.maxRuntime);
+    }
+  };
+
+  // Auth state listener — runs once on mount.
+  // When a user signs in, migrate / pull their cloud data and hydrate state.
+  useEffect(() => {
+    const unsub = onAuthChange(async (firebaseUser) => {
+      if (!firebaseUser) {
+        setUser(null);
+        return;
+      }
+      try {
+        const cloudData = await migrateLocalToCloud(firebaseUser.uid);
+        if (cloudData) hydrateFromCloud(cloudData);
+      } catch (e) {
+        console.warn('[Auth] Cloud hydration failed:', e.message);
+      }
+      setUser(firebaseUser);
+    });
+    return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Debounced cloud sync — pushes current state to Firestore 2 s after the last
+  // change. Requires consent + a signed-in user.
+  useEffect(() => {
+    if (!user || !consent) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      pushUserData(user.uid, buildPayload({
+        tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
+        mode, selectedServices, selectedGenres, selectedFormats, minRating,
+        maxCertification, maxRuntime,
+      }));
+    }, 2000);
+    return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, consent, tasteProfile, recentPicks, savedForLater, watchHistory,
+      playerNames, mode, selectedServices, selectedGenres, selectedFormats,
+      minRating, maxCertification, maxRuntime]);
 
   // Global Escape-to-close for any open overlay/modal (a11y: 2.1.2 No Keyboard Trap)
   useEffect(() => {
@@ -1146,8 +1218,39 @@ function App() {
   const compatScore = mode === 'couple' ? getCompatibilityScore() : null;
   const statusMsg = mode === 'couple' ? getStatusMessage() : null;
 
+  // ── Auth guards ────────────────────────────────────────────────────────────
+  if (user === undefined) {
+    // Firebase auth is still initialising — show the branded loading screen
+    return (
+      <div className="authgate">
+        <div className="authgate-brand">
+          <span className="authgate-emoji" aria-hidden="true">🎬</span>
+          <span className="authgate-wordmark">SETTLE</span>
+        </div>
+        <div className="authgate-spinner" aria-label="Loading…" />
+      </div>
+    );
+  }
+  if (!user) return <AuthGate />;
+
   return (
     <div className="app">
+      {/* Account bar — user identity + sign-out */}
+      <div className="account-bar">
+        <span className="account-email" title={user.email || user.displayName || ''}>
+          {user.photoURL
+            ? <img className="account-avatar" src={user.photoURL} alt="" aria-hidden="true" referrerPolicy="no-referrer" />
+            : <span className="account-avatar-fallback" aria-hidden="true">👤</span>
+          }
+          <span className="account-name">
+            {user.displayName || user.email?.split('@')[0] || 'Account'}
+          </span>
+        </span>
+        <button className="account-signout" onClick={() => signOut()} aria-label="Sign out">
+          Sign out
+        </button>
+      </div>
+
       <div className="mode-tabs" role="group" aria-label="Mode">
         <button
           className={`mtab ${mode === 'solo' ? 'on' : ''}`}
@@ -2337,23 +2440,26 @@ function App() {
               </button>
             </div>
             <div className="privacy-body">
-              <p><strong>Your data stays on your device.</strong> Settle stores preferences, watch history, and your taste profile in your browser's localStorage. Nothing is sent to any server we operate.</p>
-              <h3>What we store locally</h3>
+              <p>Settle is designed to store as little data as possible. Here's exactly what we collect and why.</p>
+              <h3>Account data</h3>
+              <p>Signing in with Google, Apple, or email magic link creates an account via <strong>Firebase Authentication</strong>. We store your email address and display name to identify your account. This data is held by Google Firebase and subject to <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer">Firebase's privacy policy</a>.</p>
+              <h3>Cloud sync</h3>
+              <p>When you give consent, your preferences, watch history, and taste profile are synced to <strong>Firebase Firestore</strong> so they follow you across devices. This includes:</p>
               <ul>
-                <li>Your selected services, genres, and filters</li>
+                <li>Selected services, genres, and filters</li>
                 <li>Watch history (last 30 titles)</li>
                 <li>Your taste profile (up/down votes)</li>
-                <li>Anti-repeat list (last 100 picks)</li>
-                <li>Player names for Couples mode</li>
+                <li>Saved picks and player names</li>
               </ul>
+              <p>You can revoke consent at any time — your cloud data will no longer be updated. To delete your stored data, contact us at the email below.</p>
               <h3>Third-party services</h3>
               <ul>
                 <li><strong>TMDB API</strong> — fetches movie and series data. Subject to <a href="https://www.themoviedb.org/privacy-policy" target="_blank" rel="noopener noreferrer">TMDB's privacy policy</a>.</li>
                 <li><strong>Watchmode API</strong> — fetches Disney+ and Apple TV direct streaming links. Subject to Watchmode's privacy policy.</li>
-                <li><strong>Amazon Prime Video</strong> — Prime Video search links route directly to primevideo.com. No third-party API is used.</li>
+                <li><strong>Amazon Prime Video</strong> — search links route directly to primevideo.com. No API is used.</li>
               </ul>
-              <h3>How to clear your data</h3>
-              <p>Go to your browser settings → Clear site data for this site. This removes all locally stored preferences and history.</p>
+              <h3>How to delete your data</h3>
+              <p>Email us at <strong>hello@trysettle.app</strong> and we will delete your account and all associated cloud data within 30 days.</p>
               <h3>Contact</h3>
               <p>Questions? Reach out at <strong>hello@trysettle.app</strong></p>
             </div>
@@ -2387,7 +2493,7 @@ function App() {
               <p>By using Settle you agree to these terms. If you don't agree, please don't use the app.</p>
 
               <h3>1. What Settle Is</h3>
-              <p>Settle is a free, browser-based tool that helps you decide what to watch. It requires no account, no payment, and no registration. We don't store any personal information on our servers — all your preferences and history live in your own browser.</p>
+              <p>Settle is a free, browser-based tool that helps you decide what to watch. It requires no payment. A free account (via Google, Apple, or email) is needed to save your preferences and watch history across devices.</p>
 
               <h3>2. The Service Is Provided Free of Charge</h3>
               <p>Settle is offered at no cost. We reserve the right to modify, suspend, or discontinue the service at any time without notice. We won't be liable to you or any third party for doing so.</p>
