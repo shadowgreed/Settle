@@ -1,6 +1,5 @@
 import {
   GoogleAuthProvider,
-  OAuthProvider,
   signInWithPopup,
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
@@ -13,16 +12,16 @@ import { auth } from './firebase';
 const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Apple — requires Apple Developer Service ID configured in Firebase console.
-const appleProvider = new OAuthProvider('apple.com');
-appleProvider.addScope('email');
-appleProvider.addScope('name');
+// NOTE: Apple sign-in is intentionally omitted until an Apple Developer
+// Service ID is configured. To re-enable, restore the OAuthProvider import
+// and the signInWithApple export, then wire the button in AuthGate.js.
+
+const PENDING_EMAIL_KEY = 'settle_pending_email';
+const PENDING_EMAIL_TTL_MS = 60 * 60 * 1000; // 1 hour — matches Firebase link expiry
 
 // ── Sign-in methods ──────────────────────────────────────────────────────────
 
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
-
-export const signInWithApple = () => signInWithPopup(auth, appleProvider);
 
 // Magic link — sends a sign-in email. The link opens the app, which calls
 // completeMagicLinkSignIn() on mount to finish the flow.
@@ -32,8 +31,36 @@ export const sendMagicLink = async (email) => {
     handleCodeInApp: true,
   };
   await sendSignInLinkToEmail(auth, email, actionCodeSettings);
-  // Store email so we can complete sign-in when the link is clicked
-  localStorage.setItem('settle_pending_email', email);
+  // Store with expiry so a never-completed link doesn't leave an email lying
+  // around in storage. Firebase magic links themselves expire in 1 hour.
+  try {
+    localStorage.setItem(
+      PENDING_EMAIL_KEY,
+      JSON.stringify({ email, exp: Date.now() + PENDING_EMAIL_TTL_MS })
+    );
+  } catch {}
+};
+
+// Read the pending email if it exists and hasn't expired.
+// Cleans up expired entries automatically.
+const readPendingEmail = () => {
+  try {
+    const raw = localStorage.getItem(PENDING_EMAIL_KEY);
+    if (!raw) return null;
+    // Legacy format: a bare string (pre-expiry-tracking). Treat as expired.
+    if (raw[0] !== '{') {
+      localStorage.removeItem(PENDING_EMAIL_KEY);
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed?.email || !parsed?.exp || Date.now() > parsed.exp) {
+      localStorage.removeItem(PENDING_EMAIL_KEY);
+      return null;
+    }
+    return parsed.email;
+  } catch {
+    return null;
+  }
 };
 
 // Called on every app mount — completes the email link sign-in if the URL
@@ -41,17 +68,18 @@ export const sendMagicLink = async (email) => {
 export const completeMagicLinkSignIn = async () => {
   if (!isSignInWithEmailLink(auth, window.location.href)) return null;
 
-  let email = localStorage.getItem('settle_pending_email');
+  let email = readPendingEmail();
   if (!email) {
-    // If the user opened the link on a different device they won't have the
-    // email stored — prompt them for it.
+    // If the user opened the link on a different device, prompt them.
+    // (window.prompt is blocked in some iOS in-app browsers — that path returns
+    // null and the AuthGate resets to its options view.)
     email = window.prompt('Please confirm your email address:');
     if (!email) return null;
   }
 
   try {
     const result = await signInWithEmailLink(auth, email, window.location.href);
-    localStorage.removeItem('settle_pending_email');
+    try { localStorage.removeItem(PENDING_EMAIL_KEY); } catch {}
     // Clean the magic link params from the URL
     window.history.replaceState(null, '', window.location.pathname);
     return result;

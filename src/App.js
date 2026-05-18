@@ -6,9 +6,26 @@ import { generateShareCard } from './utils/shareCard';
 import { trackAppLoaded, trackPickGenerated } from './services/analytics';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
+import { PrivacyBody, TermsBody } from './components/LegalContent';
 import { onAuthChange, signOut } from './services/auth';
 import { migrateLocalToCloud, pushUserData, buildPayload } from './services/cloudSync';
 import './App.css';
+
+// All localStorage keys that hold per-account user data. Cleared on sign-out
+// so the next account on the same device doesn't inherit the previous user's
+// taste profile, history, prefs, etc.
+const USER_DATA_KEYS = [
+  'streaming-prefs',
+  'streaming-seen',
+  'streaming-history',
+  'streaming-taste-profile',
+  'streaming-player-names',
+  'settle-saved',
+  'sd_onboarded',
+  'onboarding_complete',
+  'sd_consent',
+  'settle_pending_email',
+];
 
 const STEAMY_KEYWORDS = '256466|738|3182|286925|41404|41260|278555|298666';
 
@@ -183,15 +200,22 @@ function App() {
   const [user, setUser] = useState(undefined);
   const syncTimerRef = useRef(null);
 
+  // Monotonic counter that lets pickContent() abandon results from a prior
+  // call when the user spam-taps "Try another" — only the latest generation's
+  // result is allowed to land in state.
+  const pickGenerationRef = useRef(0);
+
   // Hydrate all local state from a Firestore cloud document.
   // Called once after a successful sign-in.
+  // Uses explicit type checks so an intentionally empty array on another device
+  // (e.g. "I removed all services") replicates rather than being skipped.
   const hydrateFromCloud = (data) => {
     if (!data) return;
-    if (data.tasteProfile)        setTasteProfile(data.tasteProfile);
-    if (data.recentPicks)         setRecentPicks(data.recentPicks);
-    if (data.savedForLater)       setSavedForLater(data.savedForLater);
-    if (data.watchHistory)        setWatchHistory(data.watchHistory);
-    if (data.playerNames)         setPlayerNames(data.playerNames);
+    if (data.tasteProfile && typeof data.tasteProfile === 'object') setTasteProfile(data.tasteProfile);
+    if (Array.isArray(data.recentPicks))   setRecentPicks(data.recentPicks);
+    if (Array.isArray(data.savedForLater)) setSavedForLater(data.savedForLater);
+    if (Array.isArray(data.watchHistory))  setWatchHistory(data.watchHistory);
+    if (data.playerNames && typeof data.playerNames === 'object') setPlayerNames(data.playerNames);
     if (data.consent != null) {
       setConsent(data.consent);
       if (data.consent) setShowConsent(false);
@@ -199,21 +223,34 @@ function App() {
     if (data.onboarded)           setShowOnboarding(false);
     if (data.prefs) {
       const p = data.prefs;
-      if (p.mode)                 setMode(p.mode);
-      if (p.services)             setSelectedServices(p.services);
-      if (p.genres)               setSelectedGenres(g => ({ ...g, ...p.genres }));
-      if (p.formats)              setSelectedFormats(p.formats);
-      if (p.minRating != null)    setMinRating(p.minRating);
-      if ('maxCertification' in p) setMaxCertification(p.maxCertification);
-      if ('maxRuntime' in p)       setMaxRuntime(p.maxRuntime);
+      if (p.mode)                            setMode(p.mode);
+      if (Array.isArray(p.services))         setSelectedServices(p.services);
+      if (p.genres && typeof p.genres === 'object') setSelectedGenres(g => ({ ...g, ...p.genres }));
+      if (Array.isArray(p.formats))          setSelectedFormats(p.formats);
+      if (p.minRating != null)               setMinRating(p.minRating);
+      if ('maxCertification' in p)           setMaxCertification(p.maxCertification);
+      if ('maxRuntime' in p)                 setMaxRuntime(p.maxRuntime);
     }
   };
 
   // Auth state listener — runs once on mount.
   // When a user signs in, migrate / pull their cloud data and hydrate state.
+  // Hard-caps the loading state at 10s so a stalled Firebase init doesn't
+  // pin the spinner forever — the AuthGate shows and the user can retry.
   useEffect(() => {
+    let didSetUser = false;
+    const fallbackTimer = setTimeout(() => {
+      if (!didSetUser) {
+        console.warn('[Auth] Listener did not resolve within 10s — defaulting to signed-out.');
+        didSetUser = true;
+        setUser(null);
+      }
+    }, 10000);
+
     const unsub = onAuthChange(async (firebaseUser) => {
       if (!firebaseUser) {
+        didSetUser = true;
+        clearTimeout(fallbackTimer);
         setUser(null);
         return;
       }
@@ -223,11 +260,33 @@ function App() {
       } catch (e) {
         console.warn('[Auth] Cloud hydration failed:', e.message);
       }
+      didSetUser = true;
+      clearTimeout(fallbackTimer);
       setUser(firebaseUser);
     });
-    return () => unsub();
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsub();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Clears every per-account localStorage key and resets in-memory state to
+  // defaults, then triggers Firebase sign-out. The auto-save effects are
+  // short-circuited by setting consent=false synchronously before the writes.
+  const handleSignOut = async () => {
+    setConsent(false);          // stops auto-save effects from running
+    setRecentPicks([]);
+    setWatchHistory([]);
+    setSavedForLater([]);
+    setTasteProfile({ solo: {}, p1: {}, p2: {} });
+    setPlayerNames({ p1: 'Him', p2: 'Her' });
+    setResult(null);
+    setPickReason(null);
+    setHasSearched(false);
+    USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    try { await signOut(); } catch (e) { console.warn('[Auth] signOut failed:', e.message); }
+  };
 
   // Debounced cloud sync — pushes current state to Firestore 2 s after the last
   // change. Requires consent + a signed-in user.
@@ -264,16 +323,20 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot]);
 
-  // Lock body scroll while onboarding is open — prevents solo mode from bleeding
-  // through on iOS when the user drags the onboarding overlay upward.
+  // Lock body scroll while any modal is open — prevents the underlying app from
+  // scrolling on iOS when the user drags inside the overlay. Restores the prior
+  // value on close so we don't fight other scripts that might set overflow.
   useEffect(() => {
-    if (showOnboarding) {
+    const anyOpen =
+      showOnboarding || showHistory || showShareModal || showPrivacy ||
+      showTerms || showBallot || cinemaMode || !!ratingPopup;
+    if (anyOpen) {
+      const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+      return () => { document.body.style.overflow = prev; };
     }
-    return () => { document.body.style.overflow = ''; };
-  }, [showOnboarding]);
+  }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
+      showBallot, cinemaMode, ratingPopup]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -347,6 +410,11 @@ function App() {
     setP2Vote(null);
   }, [result]);
 
+  // Reset the consecutive "Try another" counter on mode change — otherwise a
+  // switch from solo→couple would carry over a stale count and surface the
+  // mood-nudge banner immediately after the mode change.
+  useEffect(() => { setTryAnotherCount(0); }, [mode]);
+
   // Ballot reveal tension — 1 s suspense before showing outcome + haptic pulse
   useEffect(() => {
     if (ballotStep !== 'reveal') return;
@@ -401,11 +469,15 @@ function App() {
     return () => { cancelled = true; };
   }, [result]);
 
-  const loadGenres = async () => {
+  // `isRetry` flag avoids reading state from a closure (which would be stale
+  // because this function is called from a [] -deps effect on mount). Instead
+  // we pass an explicit "already retried" signal so the second failure surfaces
+  // the genre error rather than retrying forever.
+  const loadGenres = async (isRetry = false) => {
     try {
       const movieGenres = await tmdbService.getGenres('movie');
       const tvGenres = await tmdbService.getGenres('tv');
-      
+
       // Merge and deduplicate
       const EXCLUDED_GENRES = ['Action & Adventure', 'Sci-Fi & Fantasy', 'TV Movie', 'War & Politics', 'Soap'];
       const allGenres = [...movieGenres, ...tvGenres];
@@ -427,14 +499,12 @@ function App() {
     } catch (error) {
       console.error('Error loading genres:', error);
       // Retry once after 2s — common cause is a transient network blip on cold load.
-      // If it still fails, surface a genre error so the user can manually retry.
-      setTimeout(() => {
-        if (genres.length === 0) {
-          tmdbService.getGenres('movie').then(() => loadGenres()).catch(() => {
-            setGenreError(true);
-          });
-        }
-      }, 2000);
+      // If the retry also fails, surface a genre error so the user can manually retry.
+      if (!isRetry) {
+        setTimeout(() => { loadGenres(true); }, 2000);
+      } else {
+        setGenreError(true);
+      }
     }
   };
 
@@ -872,11 +942,18 @@ function App() {
     setFetchError(false);
     setFetchErrorType(null);
 
+    // Bump the generation token so any earlier in-flight pickContent() that
+    // resolves *after* this call returns is silently ignored — prevents a
+    // stale "Try another" result from popping in on top of a newer pick.
+    const myGen = ++pickGenerationRef.current;
+    const isCurrent = () => myGen === pickGenerationRef.current;
+
     // 20-second hard timeout — if TMDB is stalling (cold-start pile-up, rate
     // limit, slow network) the spinner would otherwise hang indefinitely.
     let fetchTimedOut = false;
     const fetchTimeout = setTimeout(() => {
       fetchTimedOut = true;
+      if (!isCurrent()) return;
       setFetchErrorType('timeout');
       setFetchError(true);
       setLoading(false);
@@ -1001,6 +1078,7 @@ function App() {
         if (filtered.length === 0) filtered = unique.filter(item => item.rating >= 7.0);
       }
 
+      if (!isCurrent()) return; // a newer pickContent() took over
       setMatchCount(filtered.length);
 
       if (filtered.length === 0) {
@@ -1054,6 +1132,7 @@ function App() {
         rand -= weights[i];
         if (rand <= 0) { picked = pool[i]; break; }
       }
+      if (!isCurrent()) return;
       setResult(picked);
       setPickReason(
         coinFlip
@@ -1074,13 +1153,13 @@ function App() {
       });
     } catch (error) {
       console.error('Error fetching content:', error);
-      if (!fetchTimedOut) {
+      if (!fetchTimedOut && isCurrent()) {
         setFetchErrorType('network');
         setFetchError(true);
       }
     } finally {
       clearTimeout(fetchTimeout);
-      if (!fetchTimedOut) {
+      if (!fetchTimedOut && isCurrent()) {
         setLoading(false);
         setHasSearched(true);
       }
@@ -1271,7 +1350,7 @@ function App() {
               <span aria-hidden="true">🔥</span> {s}
             </span>
           ) : null; })()}
-          <button className="account-signout" onClick={() => signOut()} aria-label="Sign out">
+          <button className="account-signout" onClick={handleSignOut} aria-label="Sign out">
             Sign out
           </button>
         </div>
@@ -2428,50 +2507,7 @@ function App() {
               </button>
             </div>
             <div className="privacy-body">
-              <p className="terms-effective">Effective May 18, 2026 · trysettle.app</p>
-              <p>Settle is designed to collect as little data as possible. Here's exactly what we store and why.</p>
-
-              <h3>1. Account &amp; Authentication</h3>
-              <p>A free account is required to use Settle. Sign-in is handled by <strong>Firebase Authentication</strong> (Google LLC). When you sign in with Google or email magic link, we receive and store your email address and display name solely to identify your account. We do not store passwords — magic links expire after 1 hour and are single-use.</p>
-              <p>This authentication data is held by Google Firebase and subject to the <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener noreferrer">Firebase Privacy Policy</a>.</p>
-
-              <h3>2. Cloud Sync (Firestore)</h3>
-              <p>When you grant storage consent, your in-app data is synced to <strong>Firebase Firestore</strong> so it follows you across devices. This includes:</p>
-              <ul>
-                <li>Selected streaming services, genres, mood filters, and format preferences</li>
-                <li>Watch history (last 30 titles with your vote per entry)</li>
-                <li>Your taste profile (up/down vote weights per genre)</li>
-                <li>Saved picks ("Save for Later" bookmarks)</li>
-                <li>Player names (Couples mode)</li>
-                <li>Onboarding completion status</li>
-              </ul>
-              <p>If you decline consent, all data stays on-device only (localStorage + IndexedDB). You can revoke consent at any time by clearing app data in your browser settings — your cloud document will no longer receive updates.</p>
-
-              <h3>3. Local &amp; Offline Storage</h3>
-              <p>Settle uses your browser's <strong>localStorage</strong> and <strong>IndexedDB</strong> to cache preferences and enable offline use as a Progressive Web App (PWA). This data never leaves your device unless you are signed in and have granted cloud sync consent.</p>
-
-              <h3>4. Analytics</h3>
-              <p>We use <strong>PostHog</strong> to collect anonymous, aggregated usage data — for example, which modes are used and how often picks are generated. No personally identifiable information is included. Analytics are only activated after you accept the storage consent prompt. You can also opt out by enabling your browser's "Do Not Track" setting or using a content blocker.</p>
-
-              <h3>5. Share Cards</h3>
-              <p>The "Share Pick" feature generates an image entirely within your browser using the HTML Canvas API. No image data is transmitted to our servers or any third party. The poster artwork is fetched from TMDB's CDN directly by your device.</p>
-
-              <h3>6. Third-Party Services</h3>
-              <ul>
-                <li><strong>TMDB API</strong> — movie and series data (titles, posters, ratings). Subject to the <a href="https://www.themoviedb.org/privacy-policy" target="_blank" rel="noopener noreferrer">TMDB Privacy Policy</a>.</li>
-                <li><strong>Watchmode API</strong> — direct streaming links for Disney+ and Apple TV. Subject to Watchmode's privacy policy.</li>
-                <li><strong>Google Fonts</strong> — typefaces loaded from fonts.googleapis.com. Subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a>.</li>
-                <li><strong>Netflix, Prime Video, Max, Apple TV, Disney+</strong> — outbound search or direct links only. We do not share any user data with these platforms.</li>
-              </ul>
-
-              <h3>7. Data Retention &amp; Deletion</h3>
-              <p>You may request deletion of your account and all associated Firestore data at any time by emailing <strong>hello@trysettle.app</strong>. We will process your request within 30 days. Local browser data (localStorage, IndexedDB) can be cleared directly through your browser settings.</p>
-
-              <h3>8. Children's Privacy</h3>
-              <p>Settle is not directed at children under 13. We do not knowingly collect personal information from anyone under 13. If you believe a child has provided us with personal data, contact us and we will delete it promptly.</p>
-
-              <h3>9. Contact</h3>
-              <p>Questions? Reach out at <strong>hello@trysettle.app</strong></p>
+              <PrivacyBody />
             </div>
           </div>
         </div>
@@ -2498,56 +2534,7 @@ function App() {
               </button>
             </div>
             <div className="privacy-body">
-              <p className="terms-effective">Effective May 18, 2026 · trysettle.app</p>
-
-              <p>By using Settle you agree to these terms. If you don't agree, please don't use the app.</p>
-
-              <h3>1. What Settle Is</h3>
-              <p>Settle is a free, browser-based streaming pick app. It helps solo viewers, couples, and groups decide what to watch across Netflix, Max, Disney+, Apple TV, and Prime Video. A free account — via Google sign-in or email magic link — is required to use the app. Your account lets us sync your preferences, watch history, and taste profile across devices.</p>
-
-              <h3>2. The Service Is Provided Free of Charge</h3>
-              <p>Settle is offered at no cost. We reserve the right to modify, suspend, or discontinue the service at any time without notice. We won't be liable to you or any third party for doing so.</p>
-
-              <h3>3. Third-Party Content &amp; APIs</h3>
-              <p>All movie and series data (titles, posters, ratings, descriptions) is sourced from <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">TMDB</a> and used under their API terms. Streaming availability and direct links are provided by <a href="https://www.watchmode.com" target="_blank" rel="noopener noreferrer">Watchmode</a>. We don't own, curate, or guarantee the accuracy of this content. Streaming catalogs change daily — always verify availability on the platform directly.</p>
-              <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
-
-              <h3>4. User Accounts &amp; Data</h3>
-              <p>You are responsible for maintaining the security of your account. We use Firebase Authentication (Google LLC) to manage sign-in — we do not store passwords. Your in-app data (preferences, history, taste profile) is stored in Firebase Firestore when you grant consent. You may request deletion of your account and data at any time by emailing <strong>hello@trysettle.app</strong>.</p>
-
-              <h3>5. Share Cards</h3>
-              <p>Settle can generate shareable pick images ("share cards") via the in-app Share button. These images are created entirely within your browser and are not stored on our servers. You are responsible for any content you choose to share publicly. Movie poster images remain the property of their respective studios and rights holders — share cards are intended for personal, non-commercial use only.</p>
-
-              <h3>6. Progressive Web App (PWA)</h3>
-              <p>Settle can be installed to your home screen as a PWA. The app uses browser localStorage and IndexedDB to cache data for offline use. This local data is private to your device and is not transmitted unless you are signed in with cloud sync enabled.</p>
-
-              <h3>7. Acceptable Use</h3>
-              <p>You agree not to:</p>
-              <ul>
-                <li>Scrape, crawl, or automate requests to the app</li>
-                <li>Attempt to reverse-engineer or tamper with the service</li>
-                <li>Use the app in any way that violates applicable laws</li>
-                <li>Misrepresent affiliation with Settle</li>
-              </ul>
-              <p>We reserve the right to suspend or terminate access for anyone who abuses the service.</p>
-
-              <h3>8. Intellectual Property</h3>
-              <p>The Settle app, its design, code, and original content are owned by us and protected by applicable intellectual property laws. Movie posters, titles, and metadata remain the property of their respective studios and rights holders. The TMDB logo and branding belong to TMDB.</p>
-
-              <h3>9. No Warranties</h3>
-              <p>Settle is provided <strong>"as is"</strong> and <strong>"as available"</strong> without warranties of any kind — express, implied, or statutory. We make no guarantees that the service will be uninterrupted or error-free.</p>
-
-              <h3>10. Limitation of Liability</h3>
-              <p>To the fullest extent permitted by law, Settle and its operators will not be liable for any indirect, incidental, special, or consequential damages arising from your use of — or inability to use — the service. Our total liability for any claim is limited to zero dollars, reflecting that the service is free.</p>
-
-              <h3>11. Analytics</h3>
-              <p>We use PostHog to collect anonymous, aggregated usage data (e.g. which modes are used, how often picks are generated). Analytics are only activated after you accept the storage consent prompt, and no personally identifiable information is collected. You may opt out by enabling your browser's "Do Not Track" setting or using a content blocker.</p>
-
-              <h3>12. Changes to These Terms</h3>
-              <p>We may update these terms at any time. Continued use of the app after changes are posted means you accept the updated terms. The effective date at the top of this page will always reflect the latest revision.</p>
-
-              <h3>13. Contact</h3>
-              <p>Questions about these terms? Email us at <strong>hello@trysettle.app</strong></p>
+              <TermsBody />
             </div>
           </div>
         </div>

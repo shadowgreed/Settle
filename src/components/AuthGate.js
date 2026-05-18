@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { signInWithGoogle, sendMagicLink, completeMagicLinkSignIn } from '../services/auth';
+import { PrivacyBody, TermsBody } from './LegalContent';
 import './AuthGate.css';
 
 export default function AuthGate() {
@@ -7,6 +8,24 @@ export default function AuthGate() {
   const [email,       setEmail]       = useState('');
   const [error,       setError]       = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
+  const [legalModal,  setLegalModal]  = useState(null);      // 'privacy' | 'terms' | null
+
+  // Close legal modal on Escape
+  useEffect(() => {
+    if (!legalModal) return;
+    const onKey = (e) => { if (e.key === 'Escape') setLegalModal(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [legalModal]);
+
+  // Lock body scroll while legal modal is open
+  useEffect(() => {
+    if (legalModal) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => { document.body.style.overflow = prev; };
+    }
+  }, [legalModal]);
 
   // Handle magic link return — if the URL contains a sign-in link, complete it
   useEffect(() => {
@@ -147,10 +166,38 @@ export default function AuthGate() {
 
       <p className="authgate-legal">
         By continuing, you agree to our{' '}
-        <button className="authgate-legal-link" onClick={() => window.open('/terms', '_blank')}>Terms</button>
+        <button type="button" className="authgate-legal-link" onClick={() => setLegalModal('terms')}>Terms</button>
         {' '}and{' '}
-        <button className="authgate-legal-link" onClick={() => window.open('/privacy', '_blank')}>Privacy Policy</button>.
+        <button type="button" className="authgate-legal-link" onClick={() => setLegalModal('privacy')}>Privacy Policy</button>.
       </p>
+
+      {legalModal && (
+        <div className="privacy-overlay" onClick={() => setLegalModal(null)}>
+          <div
+            className="privacy-modal"
+            onClick={e => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="authgate-legal-title"
+          >
+            <div className="privacy-header">
+              <h2 id="authgate-legal-title" className="privacy-title">
+                {legalModal === 'privacy' ? 'Privacy Policy' : 'Terms of Service'}
+              </h2>
+              <button
+                className="privacy-close"
+                onClick={() => setLegalModal(null)}
+                aria-label={`Close ${legalModal === 'privacy' ? 'privacy policy' : 'terms of service'}`}
+              >
+                <span aria-hidden="true">✕</span>
+              </button>
+            </div>
+            <div className="privacy-body">
+              {legalModal === 'privacy' ? <PrivacyBody /> : <TermsBody />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

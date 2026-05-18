@@ -33,14 +33,31 @@ export default function Onboarding({ onDone }) {
   const [showCompletion, setShowCompletion]       = useState(false);
   const [completionVisible, setCompletionVisible] = useState(false);
   const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
   const transitioning = useRef(false);
+  const transitionTimerRef = useRef(null);
+  const doneTimerRef = useRef(null);
+  const raf1Ref = useRef(null);
+  const raf2Ref = useRef(null);
+
+  // Clear any pending timers/RAFs on unmount so callbacks don't fire on a
+  // stale tree (e.g. user backgrounds the tab mid-transition).
+  useEffect(() => {
+    return () => {
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+      if (doneTimerRef.current)       clearTimeout(doneTimerRef.current);
+      if (raf1Ref.current)            cancelAnimationFrame(raf1Ref.current);
+      if (raf2Ref.current)            cancelAnimationFrame(raf2Ref.current);
+    };
+  }, []);
 
   const goTo = useCallback((idx) => {
     if (idx < 0 || idx > 3 || transitioning.current) return;
     transitioning.current = true;
     setSlide(idx);
     setAnimKey(k => k + 1);
-    setTimeout(() => { transitioning.current = false; }, 650);
+    if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    transitionTimerRef.current = setTimeout(() => { transitioning.current = false; }, 650);
   }, []);
 
   const next = useCallback(() => goTo(slide + 1), [slide, goTo]);
@@ -48,8 +65,11 @@ export default function Onboarding({ onDone }) {
 
   const handleDone = useCallback(() => {
     setShowCompletion(true);
-    requestAnimationFrame(() => requestAnimationFrame(() => setCompletionVisible(true)));
-    setTimeout(onDone, 1800);
+    raf1Ref.current = requestAnimationFrame(() => {
+      raf2Ref.current = requestAnimationFrame(() => setCompletionVisible(true));
+    });
+    if (doneTimerRef.current) clearTimeout(doneTimerRef.current);
+    doneTimerRef.current = setTimeout(onDone, 1800);
   }, [onDone]);
 
   // Keyboard navigation
@@ -62,14 +82,23 @@ export default function Onboarding({ onDone }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [next, prev]);
 
-  // Touch/swipe
-  const onTouchStart = (e) => { touchStartX.current = e.touches[0].clientX; };
-  const onTouchEnd   = (e) => {
+  // Touch/swipe — reject mostly-vertical drags so a downward flick doesn't
+  // change slides when the user is just trying to scroll/reset.
+  const onTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+  const onTouchEnd = (e) => {
     if (touchStartX.current === null) return;
     const dx = e.changedTouches[0].clientX - touchStartX.current;
-    if (dx < -50) next();
-    else if (dx > 50) prev();
+    const dy = e.changedTouches[0].clientY - touchStartY.current;
+    // Only treat as a horizontal swipe if dx dominates dy by 1.5×
+    if (Math.abs(dx) > Math.abs(dy) * 1.5) {
+      if (dx < -50) next();
+      else if (dx > 50) prev();
+    }
     touchStartX.current = null;
+    touchStartY.current = null;
   };
 
   const ctaLabels = ["Let's go →", 'Continue →', 'One more →', 'Start with Settle'];

@@ -54,17 +54,37 @@ export const buildPayload = (state) => ({
 // When a user signs in for the first time on a device that already has local
 // data, migrate that data to the cloud so it isn't lost.
 // Strategy: if the cloud has a profile, cloud wins. If cloud is empty, push local.
+// Caller is responsible for guaranteeing the local data belongs to this account
+// (App.js clears localStorage on signOut to prevent cross-account leakage).
 export const migrateLocalToCloud = async (uid) => {
   const cloudData = await pullUserData(uid);
   if (cloudData) return cloudData; // cloud is canonical — use it
 
-  // No cloud data yet — promote localStorage to cloud
+  // No cloud data yet — promote localStorage to cloud (only if it looks like
+  // a real user with at least one persisted preference, to avoid pushing
+  // an empty default payload from a brand-new device.)
   const local = readLocalData();
-  if (local) {
+  if (local && hasMeaningfulData(local)) {
     await pushUserData(uid, local);
     return local;
   }
   return null;
+};
+
+// True if local data contains anything worth preserving — at least one
+// taste vote, history entry, saved pick, or non-default preference.
+const hasMeaningfulData = (local) => {
+  if (!local) return false;
+  const profileNonEmpty = Object.values(local.tasteProfile || {}).some(
+    p => p && Object.keys(p).length > 0
+  );
+  return (
+    profileNonEmpty
+    || (local.watchHistory?.length ?? 0) > 0
+    || (local.savedForLater?.length ?? 0) > 0
+    || (local.recentPicks?.length ?? 0) > 0
+    || local.onboarded === true
+  );
 };
 
 // Read everything from localStorage into the payload shape.
