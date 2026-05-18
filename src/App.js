@@ -745,12 +745,13 @@ function App() {
     const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
     if (navigator.canShare?.({ files: [file] })) {
+      // Dismiss the modal BEFORE the OS share sheet opens — this is the only
+      // approach that works reliably on iOS Safari and Edge, where
+      // visibilitychange / pageshow don't fire consistently when returning
+      // from Instagram's in-app share flow.
+      closeShareModal();
       try {
         await navigator.share({ files: [file], title: item?.title });
-        // Promise resolved in-app (Android / rare iOS path) — close directly.
-        // On iOS the user has already left the app by the time this resolves,
-        // so the visibilitychange/pageshow listener handles it instead.
-        closeShareModal();
       } catch {}
     }
   };
