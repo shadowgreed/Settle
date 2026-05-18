@@ -195,21 +195,36 @@ function App() {
     return () => { document.body.style.overflow = ''; };
   }, [showOnboarding]);
 
-  // Fallback: if the flushSync close didn't commit before bfcache froze the
-  // page, this catches the return. pageshow with e.persisted===true means
-  // exactly "iOS restored this page from bfcache" — the precise signal for
-  // "user came back from Instagram/WhatsApp". Always-on listener ([] deps)
-  // so it survives across the entire session regardless of modal state.
+  // Multi-signal share-modal cleanup.
+  // sessionStorage flag 'settle_sharing' is written before navigator.share()
+  // and cleared after. On return from Instagram/WhatsApp, whichever of the
+  // three signals fires first (visibilitychange, pageshow, window focus) will
+  // call dismissIfSharing() and close the modal. Using all three covers:
+  //   visibilitychange — standard app-switch on most browsers
+  //   pageshow persisted — iOS bfcache restore on Safari
+  //   window focus — iOS Edge and cases where the above miss
   useEffect(() => {
-    const handlePageShow = (e) => {
-      if (e.persisted) {
+    const dismissIfSharing = () => {
+      if (sessionStorage.getItem('settle_sharing')) {
+        sessionStorage.removeItem('settle_sharing');
         setShowShareModal(false);
         setShareCardUrl(null);
         setShareCardReady(false);
       }
     };
-    window.addEventListener('pageshow', handlePageShow);
-    return () => window.removeEventListener('pageshow', handlePageShow);
+
+    const onVisibility = () => { if (document.visibilityState === 'visible') dismissIfSharing(); };
+    const onPageShow   = (e) => { if (e.persisted) dismissIfSharing(); };
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('focus',    dismissIfSharing);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('focus',    dismissIfSharing);
+    };
   }, []);
 
   // Load genres and fire app_loaded event on mount
@@ -731,14 +746,18 @@ function App() {
     const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
     if (navigator.canShare?.({ files: [file] })) {
-      // flushSync forces React to commit the modal-close to the DOM
-      // synchronously before navigator.share() is called. Without this,
-      // React batches the update and iOS bfcache snapshots the page with
-      // the modal still visible — so the user returns to a frozen modal.
-      flushSync(() => closeShareModal());
+      // 1. Mark share in progress in sessionStorage — survives bfcache freeze
+      //    and live-background alike, cleared by whichever return signal fires.
+      sessionStorage.setItem('settle_sharing', '1');
+      // 2. flushSync commits the modal-close to the DOM synchronously so the
+      //    bfcache snapshot (taken when iOS switches to Instagram) is clean.
+      try { flushSync(() => closeShareModal()); } catch { closeShareModal(); }
+      // 3. Hand off to the OS share sheet.
       try {
         await navigator.share({ files: [file], title: item?.title });
       } catch {}
+      // 4. If we're still in-app (Android / cancelled), clear the flag now.
+      sessionStorage.removeItem('settle_sharing');
     }
   };
 
