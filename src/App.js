@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
@@ -194,37 +195,22 @@ function App() {
     return () => { document.body.style.overflow = ''; };
   }, [showOnboarding]);
 
-  // Close the share modal whenever the user returns to the app while it's open.
-  // The effect only attaches listeners while showShareModal=true, so this can
-  // never fire outside a share session.
-  //
-  // Two events for full iOS coverage:
-  //   visibilitychange — fires on most app-switches in mobile browsers
-  //   pageshow         — fires when iOS restores the page from bfcache, which
-  //                      is the reliable "user came back" signal on Safari and
-  //                      is what catches the cases visibilitychange misses.
-  //
-  // Why not use a flag: iOS rejects navigator.share() the instant the user
-  // picks a destination app (before switching), so any flag set after the
-  // promise is already cleared by the time the user returns.
+  // Fallback: if the flushSync close didn't commit before bfcache froze the
+  // page, this catches the return. pageshow with e.persisted===true means
+  // exactly "iOS restored this page from bfcache" — the precise signal for
+  // "user came back from Instagram/WhatsApp". Always-on listener ([] deps)
+  // so it survives across the entire session regardless of modal state.
   useEffect(() => {
-    if (!showShareModal) return;
-
-    const closeOnReturn = () => {
-      if (document.visibilityState === 'visible') {
+    const handlePageShow = (e) => {
+      if (e.persisted) {
         setShowShareModal(false);
         setShareCardUrl(null);
         setShareCardReady(false);
       }
     };
-
-    document.addEventListener('visibilitychange', closeOnReturn);
-    window.addEventListener('pageshow', closeOnReturn);
-    return () => {
-      document.removeEventListener('visibilitychange', closeOnReturn);
-      window.removeEventListener('pageshow', closeOnReturn);
-    };
-  }, [showShareModal]);
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, []);
 
   // Load genres and fire app_loaded event on mount
   useEffect(() => {
@@ -745,11 +731,11 @@ function App() {
     const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
     if (navigator.canShare?.({ files: [file] })) {
-      // Dismiss the modal BEFORE the OS share sheet opens — this is the only
-      // approach that works reliably on iOS Safari and Edge, where
-      // visibilitychange / pageshow don't fire consistently when returning
-      // from Instagram's in-app share flow.
-      closeShareModal();
+      // flushSync forces React to commit the modal-close to the DOM
+      // synchronously before navigator.share() is called. Without this,
+      // React batches the update and iOS bfcache snapshots the page with
+      // the modal still visible — so the user returns to a frozen modal.
+      flushSync(() => closeShareModal());
       try {
         await navigator.share({ files: [file], title: item?.title });
       } catch {}
