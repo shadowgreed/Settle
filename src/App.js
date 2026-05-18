@@ -136,9 +136,6 @@ function App() {
   const shareCanvasRef = useRef(null);
   const sharePreviewRef = useRef(null);
   const importFileRef = useRef(null);
-  // Flagged true the moment navigator.share() is called so the visibilitychange
-  // handler knows the app was left via a share action and should close the modal.
-  const shareInProgressRef = useRef(false);
   const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
@@ -197,22 +194,37 @@ function App() {
     return () => { document.body.style.overflow = ''; };
   }, [showOnboarding]);
 
-  // When the user returns from Instagram/WhatsApp after sharing, dismiss the
-  // share modal so they land back on their pick card — not a frozen modal.
-  // The flag is set the moment navigator.share() fires (before iOS switches
-  // apps), so this works even when the share promise hasn't resolved yet.
+  // Close the share modal whenever the user returns to the app while it's open.
+  // The effect only attaches listeners while showShareModal=true, so this can
+  // never fire outside a share session.
+  //
+  // Two events for full iOS coverage:
+  //   visibilitychange — fires on most app-switches in mobile browsers
+  //   pageshow         — fires when iOS restores the page from bfcache, which
+  //                      is the reliable "user came back" signal on Safari and
+  //                      is what catches the cases visibilitychange misses.
+  //
+  // Why not use a flag: iOS rejects navigator.share() the instant the user
+  // picks a destination app (before switching), so any flag set after the
+  // promise is already cleared by the time the user returns.
   useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible' && shareInProgressRef.current) {
-        shareInProgressRef.current = false;
+    if (!showShareModal) return;
+
+    const closeOnReturn = () => {
+      if (document.visibilityState === 'visible') {
         setShowShareModal(false);
         setShareCardUrl(null);
         setShareCardReady(false);
       }
     };
-    document.addEventListener('visibilitychange', handleVisibility);
-    return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, []);
+
+    document.addEventListener('visibilitychange', closeOnReturn);
+    window.addEventListener('pageshow', closeOnReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', closeOnReturn);
+      window.removeEventListener('pageshow', closeOnReturn);
+    };
+  }, [showShareModal]);
 
   // Load genres and fire app_loaded event on mount
   useEffect(() => {
@@ -733,20 +745,13 @@ function App() {
     const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
 
     if (navigator.canShare?.({ files: [file] })) {
-      // Arm the flag BEFORE calling share — iOS switches apps before the
-      // promise resolves, so setting it after would be too late.
-      shareInProgressRef.current = true;
       try {
         await navigator.share({ files: [file], title: item?.title });
-        // Promise resolved while still in-app (rare on iOS, common on Android).
-        // Close the modal directly; the visibilitychange handler is a no-op now.
-        shareInProgressRef.current = false;
+        // Promise resolved in-app (Android / rare iOS path) — close directly.
+        // On iOS the user has already left the app by the time this resolves,
+        // so the visibilitychange/pageshow listener handles it instead.
         closeShareModal();
-      } catch (err) {
-        // User dismissed the share sheet without sharing — clear the flag
-        // and leave the modal open so they can try again.
-        shareInProgressRef.current = false;
-      }
+      } catch {}
     }
   };
 
