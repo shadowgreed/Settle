@@ -5,6 +5,7 @@ import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
 import { trackAppLoaded, trackPickGenerated } from './services/analytics';
 import AuthGate from './components/AuthGate';
+import Onboarding from './components/Onboarding';
 import { onAuthChange, signOut } from './services/auth';
 import { migrateLocalToCloud, pushUserData, buildPayload } from './services/cloudSync';
 import './App.css';
@@ -143,7 +144,14 @@ function App() {
   const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
-  const [showOnboarding, setShowOnboarding] = useState(() => localStorage.getItem('sd_onboarded') !== 'true');
+  const [showOnboarding, setShowOnboarding] = useState(() => {
+    // Dev override: ?onboarding=1 forces the flow regardless of stored state
+    if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('onboarding') === '1') return true;
+    // Check both legacy key (sd_onboarded) and new key (onboarding_complete)
+    const legacy = localStorage.getItem('sd_onboarded') === 'true';
+    const current = localStorage.getItem('onboarding_complete') === 'true';
+    return !(legacy || current);
+  });
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [showBallot, setShowBallot] = useState(false);
@@ -693,6 +701,7 @@ function App() {
 
   const handleOnboardingDone = () => {
     safeSet('sd_onboarded', 'true');
+    safeSet('onboarding_complete', 'true');
     setShowOnboarding(false);
   };
 
@@ -2395,57 +2404,8 @@ function App() {
         </div>
       )}
 
-      {/* Onboarding overlay */}
-      {showOnboarding && (
-        <div className="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
-          <div className="onboarding-card">
-            <div className="onboarding-icon" aria-hidden="true">🎬</div>
-            <h1 id="onboarding-title" className="onboarding-title">Settle</h1>
-            <p className="onboarding-tagline">Stop scrolling. Get a pick in seconds.</p>
-            <div className="onboarding-modes">
-              <div className="onboarding-mode">
-                <span className="onboarding-mode-icon" aria-hidden="true">👤</span>
-                <div>
-                  <div className="onboarding-mode-name">Solo</div>
-                  <div className="onboarding-mode-desc">Pick your mood, get a match</div>
-                </div>
-              </div>
-              <div className="onboarding-mode">
-                <span className="onboarding-mode-icon" aria-hidden="true">💑</span>
-                <div>
-                  <div className="onboarding-mode-name">Couples</div>
-                  <div className="onboarding-mode-desc">Both pick genres, app finds the overlap</div>
-                </div>
-              </div>
-              <div className="onboarding-mode">
-                <span className="onboarding-mode-icon" aria-hidden="true">🎟️</span>
-                <div>
-                  <div className="onboarding-mode-name">In Theaters</div>
-                  <div className="onboarding-mode-desc">Live US theater listings, updated weekly</div>
-                </div>
-              </div>
-              <div className="onboarding-mode">
-                <span className="onboarding-mode-icon" aria-hidden="true">💎</span>
-                <div>
-                  <div className="onboarding-mode-name">Hidden Gems</div>
-                  <div className="onboarding-mode-desc">High-rated, under-the-radar picks you haven't heard of</div>
-                </div>
-              </div>
-            </div>
-            {/* Feature strip — surfaces key capabilities first-timers would miss */}
-            <div className="onboarding-features">
-              <span className="onboarding-feature-pill">★ Save picks for later</span>
-              <span className="onboarding-feature-pill">🧠 Learns your taste</span>
-              <span className="onboarding-feature-pill">🕐 Watch history</span>
-            </div>
-
-            <button className="onboarding-cta" onClick={handleOnboardingDone}>
-              Let's go →
-            </button>
-            <p className="onboarding-note">Works with Netflix, Max, Disney+, Apple TV & Prime Video</p>
-          </div>
-        </div>
-      )}
+      {/* Onboarding — cinematic 4-slide flow */}
+      {showOnboarding && <Onboarding onDone={handleOnboardingDone} />}
 
       {/* Privacy Policy modal */}
       {showPrivacy && (

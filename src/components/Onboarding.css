@@ -1,0 +1,454 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Onboarding.css — Cinematic 4-slide onboarding for Settle
+   Fonts: Cormorant Garamond (display) + Outfit (UI)
+   All animations are CSS-only per spec. No JS animation libraries.
+───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Root shell ──────────────────────────────────────────────────────────── */
+.ob-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  color: #fff;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── Background: poster-colour grid ─────────────────────────────────────── */
+.ob-bg-grid {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-template-rows: repeat(4, 1fr);
+  transform: scale(1.08) rotate(-2deg);
+  transform-origin: center center;
+  filter: saturate(0.4) brightness(0.35);
+  pointer-events: none;
+}
+
+.ob-bg-cell {
+  width: 100%;
+  height: 100%;
+}
+
+/* ── Vignette overlay ────────────────────────────────────────────────────── */
+.ob-bg-vignette {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 50%, transparent 30%, rgba(0,0,0,0.72) 100%);
+  pointer-events: none;
+}
+
+/* ── Ambient light (changes per slide) ──────────────────────────────────── */
+.ob-bg-ambient {
+  position: absolute;
+  inset: 0;
+  transition: background 800ms ease;
+  pointer-events: none;
+}
+
+/* ── Film grain ──────────────────────────────────────────────────────────── */
+.ob-grain {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* ── Skip button ─────────────────────────────────────────────────────────── */
+.ob-skip {
+  position: absolute;
+  top: 20px;
+  right: 24px;
+  z-index: 10;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.55);
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  padding: 7px 16px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: color 200ms, background 200ms, border-color 200ms;
+}
+
+.ob-skip:hover,
+.ob-skip:focus-visible {
+  background: rgba(255,255,255,0.14);
+  border-color: rgba(255,255,255,0.30);
+  color: rgba(255,255,255,0.85);
+  outline: none;
+}
+
+/* ── Slide track ─────────────────────────────────────────────────────────── */
+.ob-track {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  /* width is auto — each slide is 100vw */
+  transition: transform 650ms cubic-bezier(0.77, 0, 0.175, 1);
+  will-change: transform;
+}
+
+.ob-slide {
+  flex: 0 0 100vw;
+  width: 100vw;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 32px;
+  position: relative;
+}
+
+/* ── Slide 0: Brand Reveal ───────────────────────────────────────────────── */
+.ob-brand-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.ob-brand-name {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: clamp(72px, 18vw, 110px);
+  font-weight: 300;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  color: #fff;
+  margin: 0;
+
+  animation: ob-fade-up 800ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ob-brand-rule {
+  width: 60px;
+  height: 1px;
+  background: rgba(255,255,255,0.35);
+  animation: ob-fade-up 800ms 120ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ob-brand-tagline {
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: clamp(15px, 3.5vw, 18px);
+  font-weight: 300;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.55);
+  margin: 0;
+  animation: ob-fade-up 800ms 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Swipe hint — only visible on slide 0 */
+.ob-swipe-hint {
+  position: absolute;
+  bottom: 120px;
+  width: 100%;
+  text-align: center;
+  animation: ob-swipe-pulse 2.4s 1200ms ease-in-out infinite;
+}
+
+.ob-swipe-arrow {
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 300;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.30);
+}
+
+@keyframes ob-swipe-pulse {
+  0%, 100% { opacity: 0.4; transform: translateX(0); }
+  50%       { opacity: 0.8; transform: translateX(6px); }
+}
+
+/* ── Slides 1–3: Content slides ──────────────────────────────────────────── */
+.ob-slide-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Icon */
+.ob-icon {
+  font-size: 48px;
+  line-height: 1;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.ob-icon-gold {
+  /* ✦ star glyph on slide 3 — gold tint via filter */
+  filter: sepia(1) saturate(3) hue-rotate(5deg) brightness(1.1);
+}
+
+/* Eyebrow label */
+.ob-eyebrow {
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+  margin: 0;
+}
+
+/* Headline */
+.ob-headline {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: clamp(44px, 11vw, 64px);
+  font-weight: 300;
+  line-height: 1.08;
+  color: #fff;
+  margin: 0;
+}
+
+.ob-headline em {
+  font-style: italic;
+  color: rgba(255,255,255,0.70);
+}
+
+/* Body copy */
+.ob-body {
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: clamp(15px, 3.8vw, 17px);
+  font-weight: 300;
+  line-height: 1.6;
+  color: rgba(255,255,255,0.58);
+  margin: 0;
+  max-width: 340px;
+}
+
+/* Service dots (slide 3) */
+.ob-service-dots {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.ob-service-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  opacity: 0.85;
+  flex-shrink: 0;
+}
+
+/* ── Bottom bar: dots + CTA ──────────────────────────────────────────────── */
+.ob-bottom {
+  position: absolute;
+  bottom: env(safe-area-inset-bottom, 0px);
+  left: 0;
+  right: 0;
+  padding: 0 32px 44px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  pointer-events: none; /* children re-enable */
+}
+
+/* Progress dots */
+.ob-dots {
+  display: flex;
+  gap: 8px;
+  pointer-events: all;
+}
+
+.ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,0.25);
+  padding: 0;
+  cursor: pointer;
+  transition: background 300ms, transform 300ms, width 300ms;
+}
+
+.ob-dot-active {
+  background: rgba(255,255,255,0.90);
+  width: 20px;
+  border-radius: 3px;
+}
+
+.ob-dot:focus-visible {
+  outline: 2px solid rgba(255,255,255,0.6);
+  outline-offset: 3px;
+}
+
+/* CTA button */
+.ob-cta {
+  pointer-events: all;
+  width: 100%;
+  max-width: 340px;
+  padding: 18px 32px;
+  border-radius: 100px;
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1),
+              background 300ms, border-color 300ms, color 300ms,
+              box-shadow 300ms;
+  border: 1.5px solid transparent;
+}
+
+.ob-cta:active {
+  transform: scale(0.96);
+}
+
+/* Ghost variant (slides 0–2) */
+.ob-cta-ghost {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.22);
+  color: rgba(255,255,255,0.88);
+}
+
+.ob-cta-ghost:hover,
+.ob-cta-ghost:focus-visible {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.40);
+  color: #fff;
+  outline: none;
+}
+
+/* Gold gradient variant (slide 3) */
+.ob-cta-gold {
+  background: linear-gradient(135deg, #C9A96E 0%, #E8C87A 50%, #B8914A 100%);
+  border-color: transparent;
+  color: #1A1208;
+  font-weight: 600;
+  box-shadow: 0 4px 24px rgba(201, 169, 110, 0.35);
+}
+
+.ob-cta-gold:hover,
+.ob-cta-gold:focus-visible {
+  box-shadow: 0 6px 32px rgba(201, 169, 110, 0.50);
+  transform: translateY(-1px) scale(1.01);
+  outline: none;
+}
+
+/* ── Animation: staggered fade-up ────────────────────────────────────────── */
+@keyframes ob-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Slide content animation classes with stagger */
+.ob-anim-icon {
+  animation: ob-spring-bounce 700ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ob-anim-eyebrow {
+  animation: ob-fade-up 600ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ob-anim-headline {
+  animation: ob-fade-up 650ms 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ob-anim-body {
+  animation: ob-fade-up 650ms 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Icon spring bounce */
+@keyframes ob-spring-bounce {
+  0%   { opacity: 0; transform: scale(0.4) translateY(16px); }
+  60%  { opacity: 1; transform: scale(1.12) translateY(-4px); }
+  80%  { transform: scale(0.95) translateY(2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ── Completion overlay ───────────────────────────────────────────────────── */
+.ob-completion {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(10, 10, 10, 0.96);
+  opacity: 0;
+  transition: opacity 400ms ease;
+  pointer-events: none;
+}
+
+.ob-completion-in {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.ob-completion-icon {
+  font-size: 52px;
+  animation: ob-completion-bounce 700ms 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  /* Gold tint on the ✦ */
+  filter: sepia(1) saturate(4) hue-rotate(5deg) brightness(1.2);
+}
+
+@keyframes ob-completion-bounce {
+  0%   { opacity: 0; transform: scale(0.3); }
+  70%  { transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.ob-completion-title {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 42px;
+  font-weight: 300;
+  color: #fff;
+  margin: 0;
+  animation: ob-fade-up 500ms 380ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.ob-completion-sub {
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 16px;
+  font-weight: 300;
+  letter-spacing: 0.10em;
+  color: rgba(255,255,255,0.45);
+  margin: 0;
+  animation: ob-fade-up 500ms 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── Reduced-motion overrides ─────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ob-track                { transition: none; }
+  .ob-bg-ambient           { transition: none; }
+  .ob-brand-name,
+  .ob-brand-rule,
+  .ob-brand-tagline,
+  .ob-anim-icon,
+  .ob-anim-eyebrow,
+  .ob-anim-headline,
+  .ob-anim-body,
+  .ob-completion-icon,
+  .ob-completion-title,
+  .ob-completion-sub       { animation: none; opacity: 1; transform: none; }
+  .ob-swipe-hint           { animation: none; }
+  .ob-cta                  { transition: background 150ms; }
+  .ob-dot                  { transition: background 150ms; }
+}
