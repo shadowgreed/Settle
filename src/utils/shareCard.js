@@ -285,5 +285,13 @@ export async function generateShareCard({ result, mode, playerNames }) {
     }
   }
 
+  // ── 8. Footer branding — passive brand impression on every share ─────
+  // Sits below the safe zone, centered, small enough not to compete with content.
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font         = '500 24px system-ui, -apple-system, sans-serif';
+  ctx.fillStyle    = 'rgba(255,255,255,0.28)';
+  ctx.fillText('🎬  SETTLE  ·  trysettle.app', W / 2, H - 52);
+
   return canvas;
 }

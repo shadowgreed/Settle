@@ -1246,9 +1246,26 @@ function App() {
             {user.displayName || user.email?.split('@')[0] || 'Account'}
           </span>
         </span>
-        <button className="account-signout" onClick={() => signOut()} aria-label="Sign out">
-          Sign out
-        </button>
+        <div className="account-bar-right">
+          {savedForLater.length > 0 && (
+            <button
+              className="account-stat"
+              onClick={() => { setShowHistory(true); setHistoryTab('saved'); }}
+              title="Saved for later"
+              aria-label={`${savedForLater.length} saved picks`}
+            >
+              <span aria-hidden="true">★</span> {savedForLater.length}
+            </button>
+          )}
+          {mode === 'couple' && (() => { const s = getStreakInfo(); return s ? (
+            <span className="account-stat account-streak" title={`${s}-night streak`} aria-label={`${s}-night streak`}>
+              <span aria-hidden="true">🔥</span> {s}
+            </span>
+          ) : null; })()}
+          <button className="account-signout" onClick={() => signOut()} aria-label="Sign out">
+            Sign out
+          </button>
+        </div>
       </div>
 
       <div className="mode-tabs" role="group" aria-label="Mode">
@@ -1728,7 +1745,18 @@ function App() {
             ? <><span aria-hidden="true">🎭 </span>Pick a mood above to get your recommendation.</>
             : mode !== 'theater' && selectedServices.length === 0
               ? <><span aria-hidden="true">👆 </span>Select at least one streaming service above to get started.</>
-              : 'No matches found. Try enabling more services or adjusting your filters.'}
+              : <div className="nomatch-empty">
+                  <div className="nomatch-icon" aria-hidden="true">🎯</div>
+                  <div className="nomatch-title">You've out-filtered us.</div>
+                  <div className="nomatch-body">Your taste is too specific — and we respect it. Try loosening your mood, adding a service, or dropping a filter.</div>
+                  <button className="nomatch-reset" onClick={() => {
+                    setSelectedGenres(g => ({ ...g, [mode === 'couple' ? 'p1' : mode === 'theater' ? 'theater' : 'solo']: [] }));
+                    setHasSearched(false);
+                  }}>
+                    Reset mood →
+                  </button>
+                </div>
+          }
         </div>
       )}
 
