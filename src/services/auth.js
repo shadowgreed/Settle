@@ -64,29 +64,43 @@ const readPendingEmail = () => {
   }
 };
 
-// Called on every app mount — completes the email link sign-in if the URL
-// contains a Firebase sign-in link. Returns the UserCredential or null.
-export const completeMagicLinkSignIn = async () => {
-  if (!isSignInWithEmailLink(auth, window.location.href)) return null;
+// True if the current URL is a Firebase magic-link sign-in URL.
+// Used by AuthGate to decide whether to show the cross-device confirm form.
+export const isMagicLinkUrl = () =>
+  isSignInWithEmailLink(auth, window.location.href);
 
-  let email = readPendingEmail();
-  if (!email) {
-    // If the user opened the link on a different device, prompt them.
-    // (window.prompt is blocked in some iOS in-app browsers — that path returns
-    // null and the AuthGate resets to its options view.)
-    email = window.prompt('Please confirm your email address:');
-    if (!email) return null;
+// Called on every app mount — completes the email link sign-in if the URL
+// contains a Firebase sign-in link.
+//
+// Returns a discriminated result so the caller (AuthGate) can render the
+// appropriate UI for each branch without relying on window.prompt() (which
+// is blocked in iOS in-app browsers like Gmail/Outlook viewers):
+//
+//   { status: 'not-magic-link' }            — URL doesn't carry a sign-in link
+//   { status: 'success', result }           — signed in successfully
+//   { status: 'needs-email' }               — URL is magic but we have no
+//                                             stored email; UI should render
+//                                             a confirm-email form and call
+//                                             completeMagicLinkSignIn(email)
+//   { status: 'error', code, message }      — finalization failed (expired,
+//                                             email mismatch, network)
+export const completeMagicLinkSignIn = async (emailOverride) => {
+  if (!isSignInWithEmailLink(auth, window.location.href)) {
+    return { status: 'not-magic-link' };
   }
+
+  const email = emailOverride || readPendingEmail();
+  if (!email) return { status: 'needs-email' };
 
   try {
     const result = await signInWithEmailLink(auth, email, window.location.href);
     try { localStorage.removeItem(PENDING_EMAIL_KEY); } catch {}
     // Clean the magic link params from the URL
     window.history.replaceState(null, '', window.location.pathname);
-    return result;
+    return { status: 'success', result };
   } catch (err) {
     console.error('[Auth] Magic link completion failed:', err.message);
-    return null;
+    return { status: 'error', code: err.code, message: err.message };
   }
 };
 

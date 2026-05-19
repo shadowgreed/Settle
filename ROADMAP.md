@@ -3,38 +3,7 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-18 (post-audit + high-priority pass)
-
----
-
-## Medium priority
-
-### 4. Replace `window.prompt()` for cross-device magic link
-**Why:** `auth.js:completeMagicLinkSignIn` falls back to `window.prompt()`
-when the user opens the magic link on a device that didn't send it. Prompt is
-blocked in iOS in-app browsers (Gmail viewer, Outlook viewer) — returns
-`null`, sign-in silently fails, AuthGate just resets.
-
-**Approach:** Render an in-app form (similar to the existing `view === 'email'`
-state in AuthGate) when we detect the URL is a magic link but no pending
-email is stored. Submit → completes sign-in.
-
-### 5. Performance memoization pass
-**Why:** Helpers like `getActiveGenres`, `getOverlapGenres`, `getStatusMessage`,
-`getStreakInfo` are recomputed on every render and called multiple times per
-render in JSX. Genre lookups use `.find()` inside `.map()` — O(n²).
-
-**Approach:**
-- `useMemo` for the helpers above against their real dependencies.
-- Build a `genreById: Map` once via `useMemo` against `genres`, replace all
-  `genres.find(g => g.id === id)` callsites.
-- Same for `SERVICES.find(...)` inside `.map()` calls.
-
-### 6. Firestore SDK modernization
-**Why:** `enableIndexedDbPersistence` is deprecated; multi-tab will throw
-`failed-precondition` for the second tab.
-
-**Approach:** Migrate to `initializeFirestore({ localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) })`.
+Last updated: 2026-05-18 (post-audit + high + medium-priority passes)
 
 ---
 
@@ -110,6 +79,25 @@ consent, delete account, view privacy & terms. Currently scattered.
 ---
 
 ## Done in recent passes
+
+### Medium-priority audit pass · 2026-05-18
+
+- ✅ **Cross-device magic link without `window.prompt()`** — `auth.js`
+     `completeMagicLinkSignIn` now returns a discriminated status
+     (`success` / `needs-email` / `not-magic-link` / `error`). AuthGate
+     renders a new `confirm-email` view in the cross-device case,
+     replacing the prompt that was silently failing in iOS in-app
+     browsers (Gmail, Outlook viewers).
+- ✅ **Performance memoization** — `getActiveGenres` / `getOverlapGenres` /
+     `getCompatibilityScore` / `getStatusMessage` / `getStreakInfo`
+     converted to `useMemo` against their real dependencies. New
+     `genreById` and `serviceByName` Maps memoised once; replaces all
+     six `.find()` inside `.map()` callsites that were O(n²) per render.
+- ✅ **Firestore SDK modernization** — `firebase.js` migrated from the
+     deprecated `enableIndexedDbPersistence` to
+     `initializeFirestore({ localCache: persistentLocalCache({ tabManager:
+     persistentMultipleTabManager() }) })`. Multi-tab no longer throws
+     `failed-precondition` on the second tab.
 
 ### High-priority audit pass · 2026-05-18
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
@@ -629,10 +629,11 @@ function App() {
       .map(m => m.label)
       .slice(0, 2);
 
-    // Fall back to genre names if no mood match
+    // Fall back to genre names if no mood match. O(1) lookup via the
+    // memoised genreById Map (was .find() inside .map() = O(n²)).
     const matchedGenreNames = picked.genres
       .filter(id => activeGenreIds.includes(id))
-      .map(id => genres.find(g => g.id === id)?.name)
+      .map(id => genreById.get(id)?.name)
       .filter(Boolean)
       .slice(0, 2);
 
@@ -650,31 +651,50 @@ function App() {
     return `Top pick from your filters · ${picked.votes} ratings`;
   };
 
-  const getActiveGenres = () => {
-    if (mode === 'solo') return selectedGenres.solo;
-    
-    // In couple mode, find overlap first, then combine
-    const p1 = selectedGenres.p1;
-    const p2 = selectedGenres.p2;
+  // ── Memoised derived values ───────────────────────────────────────────────
+  // Replaces the old `getActiveGenres()` / `getOverlapGenres()` /
+  // `getCompatibilityScore()` helpers. These are read from JSX in multiple
+  // places per render; memoizing avoids recomputing the same .filter/.includes
+  // chains on every keystroke into the player-name input.
+  const activeGenres = useMemo(() => {
+    if (mode === 'solo') return selectedGenres.solo || [];
+    if (mode === 'theater') return selectedGenres.theater || [];
+    const p1 = selectedGenres.p1 || [];
+    const p2 = selectedGenres.p2 || [];
     const overlap = p1.filter(g => p2.includes(g));
-    
     return overlap.length > 0 ? overlap : [...new Set([...p1, ...p2])];
-  };
+  }, [mode, selectedGenres]);
 
-  const getOverlapGenres = () => {
+  const overlapGenres = useMemo(() => {
     if (mode !== 'couple') return [];
-    return selectedGenres.p1.filter(g => selectedGenres.p2.includes(g));
-  };
+    const p1 = selectedGenres.p1 || [];
+    const p2 = selectedGenres.p2 || [];
+    return p1.filter(g => p2.includes(g));
+  }, [mode, selectedGenres]);
 
-  const getCompatibilityScore = () => {
-    const p1 = selectedGenres.p1;
-    const p2 = selectedGenres.p2;
+  const compatScore = useMemo(() => {
+    if (mode !== 'couple') return null;
+    const p1 = selectedGenres.p1 || [];
+    const p2 = selectedGenres.p2 || [];
     if (p1.length === 0 && p2.length === 0) return null;
     if (p1.length === 0 || p2.length === 0) return 0;
     const overlap = p1.filter(g => p2.includes(g));
     const union = [...new Set([...p1, ...p2])];
     return Math.round((overlap.length / union.length) * 100);
-  };
+  }, [mode, selectedGenres]);
+
+  // O(1) lookups — replaces .find() inside .map() callsites that were O(n²).
+  const genreById = useMemo(() => {
+    const m = new Map();
+    genres.forEach(g => m.set(g.id, g));
+    return m;
+  }, [genres]);
+
+  const serviceByName = useMemo(() => {
+    const m = new Map();
+    SERVICES.forEach(s => m.set(s.name, s));
+    return m;
+  }, []);
 
   const savePlayerName = (player, value) => {
     const name = value.trim() || (player === 'p1' ? 'Him' : 'Her');
@@ -684,9 +704,12 @@ function App() {
     setEditingPlayer(null);
   };
 
-  const getStatusMessage = () => {
-    const score = getCompatibilityScore();
-    const overlap = getOverlapGenres();
+  // Memoised compatibility banner copy. Reads `compatScore` + `overlapGenres`
+  // (already memos) + playerNames — depends on all three.
+  const statusMsg = useMemo(() => {
+    if (mode !== 'couple') return null;
+    const score = compatScore;
+    const overlap = overlapGenres;
     const p1 = playerNames.p1;
     const p2 = playerNames.p2;
     const pair = `${p1} & ${p2}`;
@@ -696,7 +719,7 @@ function App() {
     if (score < 50)    return { text: `${pair} — finding middle ground`, emoji: '🤝' };
     if (score < 75)    return { text: `${pair} — you're vibing!`, emoji: '✨' };
     return { text: `${pair} — perfect match!`, emoji: '🔥' };
-  };
+  }, [mode, compatScore, overlapGenres, playerNames]);
 
   // ── Save for later ────────────────────────────────────────────────────────
   const toggleSaveForLater = (item) => {
@@ -812,9 +835,10 @@ function App() {
   };
 
   // ── Couples streak ─────────────────────────────────────────────────────────
-  // Returns the length of the current "agreed" streak (consecutive couple-mode
-  // history entries where coupleAgreed === true), or null if streak < 2.
-  const getStreakInfo = () => {
+  // Length of the current "agreed" streak (consecutive couple-mode history
+  // entries where coupleAgreed === true), or null if streak < 2. Memoised
+  // because it's read from JSX in 3 places per render.
+  const streakInfo = useMemo(() => {
     const entries = watchHistory.filter(h => h.mode === 'couple');
     if (entries.length < 2) return null;
     let streak = 0;
@@ -823,7 +847,7 @@ function App() {
       else break;
     }
     return streak >= 2 ? streak : null;
-  };
+  }, [watchHistory]);
 
   const handleConsent = (accepted) => {
     // Persist the decision either way so the banner never re-appears on return visits.
@@ -911,7 +935,7 @@ function App() {
     setShowShareModal(true);
     try {
       const resolvedGenres = (item.genres || [])
-        .map(id => genres.find(g => g.id === id))
+        .map(id => genreById.get(id))
         .filter(Boolean)
         .slice(0, 4);
       const canvas = await generateShareCard({ result: { ...item, genres: resolvedGenres }, mode, playerNames });
@@ -1027,11 +1051,9 @@ function App() {
       let allResults = [];
       // Theater uses its own genre slot so solo selections never bleed across.
       // Hidden gems bypass genre filtering entirely (wide net by design).
-      const activeGenres = hiddenGems
-        ? []
-        : mode === 'theater'
-          ? (selectedGenres.theater || [])
-          : getActiveGenres();
+      // The `activeGenres` memo already handles solo/couple/theater branches,
+      // so we only need to special-case the hidden-gems "no filter" path here.
+      const activeGenresForFetch = hiddenGems ? [] : activeGenres;
 
       if (mode === 'theater') {
         allResults = familyFriendly
@@ -1049,7 +1071,7 @@ function App() {
           for (const format of activeFormats) {
             const type = format === 'Movie' ? 'movie' : 'tv';
 
-            if (activeGenres.length === 0) {
+            if (activeGenresForFetch.length === 0) {
               fetchFns.push(() =>
                 tmdbService.discoverContent({
                   service,
@@ -1065,8 +1087,8 @@ function App() {
               // TMDB genre IDs. Regular IDs are combined into one OR query
               // (e.g. "35|16") so we fire 1 request per service+format instead
               // of N requests — reduces peak burst from ~20 to ~10.
-              const regularIds = activeGenres.filter(id => id !== 'steamy' && id !== 'anime');
-              const specialIds = activeGenres.filter(id => id === 'steamy' || id === 'anime');
+              const regularIds = activeGenresForFetch.filter(id => id !== 'steamy' && id !== 'anime');
+              const specialIds = activeGenresForFetch.filter(id => id === 'steamy' || id === 'anime');
 
               if (regularIds.length > 0) {
                 const combinedGenre = regularIds.join('|'); // TMDB OR query
@@ -1128,7 +1150,7 @@ function App() {
 
       // Genre filter
       const virtualGenres = ['steamy', 'anime'];
-      const realGenres = activeGenres.filter(id => !virtualGenres.includes(id));
+      const realGenres = activeGenresForFetch.filter(id => !virtualGenres.includes(id));
       if (realGenres.length > 0 && !hiddenGems) {
         filtered = filtered.filter(item =>
           item.genres.some(genreId => realGenres.includes(genreId))
@@ -1200,7 +1222,7 @@ function App() {
       setPickReason(
         coinFlip
           ? '🎲 Chosen by fate — no algorithm, pure chance'
-          : generatePickReason(picked, activeGenres, hiddenGems, mode)
+          : generatePickReason(picked, activeGenresForFetch, hiddenGems, mode)
       );
       trackPickGenerated({
         service:     picked.service,
@@ -1358,7 +1380,7 @@ function App() {
 
   const getServiceColor = (serviceName) => {
     if (serviceName === 'In Theaters') return '#EF9F27';
-    return SERVICES.find(s => s.name === serviceName)?.color || '#888';
+    return serviceByName.get(serviceName)?.color || '#888';
   };
 
   const getGenreClass = (genreId, player) => {
@@ -1383,9 +1405,7 @@ function App() {
     return '';
   };
 
-  // Pre-compute per-render values to avoid redundant calls in JSX
-  const compatScore = mode === 'couple' ? getCompatibilityScore() : null;
-  const statusMsg = mode === 'couple' ? getStatusMessage() : null;
+  // `compatScore` and `statusMsg` are now provided by useMemo above.
 
   // ── Auth guards ────────────────────────────────────────────────────────────
   if (user === undefined) {
@@ -1426,11 +1446,11 @@ function App() {
               <span aria-hidden="true">★</span> {savedForLater.length}
             </button>
           )}
-          {mode === 'couple' && (() => { const s = getStreakInfo(); return s ? (
-            <span className="account-stat account-streak" title={`${s}-night streak`} aria-label={`${s}-night streak`}>
-              <span aria-hidden="true">🔥</span> {s}
+          {mode === 'couple' && streakInfo ? (
+            <span className="account-stat account-streak" title={`${streakInfo}-night streak`} aria-label={`${streakInfo}-night streak`}>
+              <span aria-hidden="true">🔥</span> {streakInfo}
             </span>
-          ) : null; })()}
+          ) : null}
           <button
             className="account-settings-btn"
             onClick={() => setShowSettings(true)}
@@ -1555,22 +1575,19 @@ function App() {
       {mode === 'couple' && (
         <>
           {/* Streak banner — visible on home screen for returning couples */}
-          {(() => {
-            const streak = getStreakInfo();
-            return streak ? (
+          {streakInfo ? (
               <div className="couple-streak-banner" role="status" aria-live="polite">
                 <span aria-hidden="true">🔥</span>
                 <span>
-                  {streak}-night streak{streak >= 5 ? ' — you two are on fire' : ' — keep it going'}
+                  {streakInfo}-night streak{streakInfo >= 5 ? ' — you two are on fire' : ' — keep it going'}
                 </span>
               </div>
-            ) : null;
-          })()}
+            ) : null}
 
           {/* Status + compatibility */}
           <div className="couple-status" role="status" aria-live="polite">
             <div className="couple-status-text">
-              <span aria-hidden="true">{statusMsg.emoji}</span> {statusMsg.text}
+              <span aria-hidden="true">{statusMsg?.emoji}</span> {statusMsg?.text}
             </div>
             {compatScore !== null && (
               <div className={`compat-score ${compatScore >= 75 ? 'high' : compatScore >= 40 ? 'mid' : 'low'}`}>
@@ -1708,12 +1725,12 @@ function App() {
           </div>
 
           {/* Shared zone */}
-          {getOverlapGenres().length > 0 && (
+          {overlapGenres.length > 0 && (
             <div className="shared-zone">
               <div className="shared-zone-label">Both want</div>
               <div className="shared-chips">
-                {getOverlapGenres().map(id => {
-                  const genre = genres.find(g => g.id === id);
+                {overlapGenres.map(id => {
+                  const genre = genreById.get(id);
                   return genre && (
                     <span key={id} className="shared-chip">{genre.name}</span>
                   );
@@ -2026,7 +2043,7 @@ function App() {
               </div>
               <div className="pills">
                 {result.genres.slice(0, 3).map(genreId => {
-                  const genre = genres.find(g => g.id === genreId);
+                  const genre = genreById.get(genreId);
                   return genre && (
                     <span key={genreId} className="pill">{genre.name}</span>
                   );
@@ -2171,12 +2188,12 @@ function App() {
             {historyTab === 'watched' ? (
               <>
                 {/* Couples streak */}
-                {(() => { const streak = getStreakInfo(); return streak ? (
+                {streakInfo ? (
                   <div className="streak-info" role="status">
                     <span className="streak-fire" aria-hidden="true">🔥</span>
-                    <span>{streak} night{streak > 1 ? 's' : ''} in a row you both said yes</span>
+                    <span>{streakInfo} night{streakInfo > 1 ? 's' : ''} in a row you both said yes</span>
                   </div>
-                ) : null; })()}
+                ) : null}
 
                 {watchHistory.length === 0 ? (
                   <div className="history-empty">
@@ -2207,7 +2224,7 @@ function App() {
                             <div className="history-entry-bottom">
                               <span className="history-service" style={{
                                 color: entry.service === 'In Theaters' ? '#EF9F27'
-                                  : SERVICES.find(s => s.name === entry.service)?.color || '#999'
+                                  : serviceByName.get(entry.service)?.color || '#999'
                               }}>
                                 {entry.service}
                               </span>
@@ -2269,7 +2286,7 @@ function App() {
                           <div className="history-entry-bottom">
                             <span className="history-service" style={{
                               color: entry.service === 'In Theaters' ? '#EF9F27'
-                                : SERVICES.find(s => s.name === entry.service)?.color || '#999'
+                                : serviceByName.get(entry.service)?.color || '#999'
                             }}>
                               {entry.service}
                             </span>

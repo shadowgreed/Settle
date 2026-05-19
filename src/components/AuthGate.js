@@ -5,11 +5,16 @@ import useFocusTrap from '../hooks/useFocusTrap';
 import './AuthGate.css';
 
 export default function AuthGate() {
-  const [view,        setView]        = useState('options'); // 'options' | 'email' | 'sent' | 'loading'
-  const [email,       setEmail]       = useState('');
-  const [error,       setError]       = useState('');
-  const [linkLoading, setLinkLoading] = useState(false);
-  const [legalModal,  setLegalModal]  = useState(null);      // 'privacy' | 'terms' | null
+  // 'options' | 'email' | 'sent' | 'loading' | 'confirm-email'
+  // 'confirm-email' = magic-link URL detected but no stored email (likely
+  // opened on a different device than the one that sent the link).
+  const [view,         setView]         = useState('options');
+  const [email,        setEmail]        = useState('');
+  const [error,        setError]        = useState('');
+  const [linkLoading,  setLinkLoading]  = useState(false);
+  const [legalModal,   setLegalModal]   = useState(null);     // 'privacy' | 'terms' | null
+  const [confirmEmail, setConfirmEmail] = useState('');       // input for cross-device confirm
+  const [confirming,   setConfirming]   = useState(false);
   const legalModalRef = useRef(null);
   useFocusTrap(legalModalRef, !!legalModal);
 
@@ -30,19 +35,52 @@ export default function AuthGate() {
     }
   }, [legalModal]);
 
-  // Handle magic link return — if the URL contains a sign-in link, complete it
+  // Handle magic link return — if the URL contains a sign-in link, complete it.
+  // Three branches:
+  //   success         → auth listener will switch the user in; we just wait
+  //   needs-email     → cross-device case: render the confirm-email form
+  //   error / other   → fall back to the normal options view + show an error
   useEffect(() => {
     const finish = async () => {
       try {
         setView('loading');
-        const result = await completeMagicLinkSignIn();
-        if (!result) setView('options'); // not a magic link URL — show normal UI
+        const r = await completeMagicLinkSignIn();
+        if (r.status === 'success')         return; // auth listener takes over
+        if (r.status === 'needs-email')     { setView('confirm-email'); return; }
+        if (r.status === 'not-magic-link')  { setView('options'); return; }
+        // error
+        setView('options');
+        setError(r?.code === 'auth/invalid-action-code'
+          ? 'This sign-in link has expired or already been used. Send a fresh one.'
+          : 'Sign-in failed. Please send a fresh link and try again.');
       } catch {
         setView('options');
       }
     };
     finish();
   }, []);
+
+  // Cross-device confirm: user types their email, we retry completeMagicLinkSignIn.
+  const handleConfirmEmail = async (e) => {
+    e.preventDefault();
+    if (!confirmEmail.trim()) return;
+    setError('');
+    setConfirming(true);
+    try {
+      const r = await completeMagicLinkSignIn(confirmEmail.trim());
+      if (r.status === 'success') return; // auth listener takes over
+      if (r.status === 'error') {
+        // 'auth/invalid-email' on bad format, 'auth/invalid-action-code' on
+        // expired/used, plus the email-mismatch case which also returns
+        // invalid-action-code. Surface a single retry-friendly message.
+        setError(r?.code === 'auth/invalid-action-code'
+          ? "That doesn't match the email this link was sent to, or the link has expired."
+          : 'Could not sign in with that email. Try again or send a fresh link.');
+      }
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const handleGoogle = async () => {
     setError('');
@@ -101,6 +139,56 @@ export default function AuthGate() {
           <button className="authgate-back" onClick={() => { setView('email'); setError(''); }}>
             ← Use a different email
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Cross-device confirm: URL is a magic link but we don't have the pending
+  // email stored (user opened the link on a different device or browser).
+  // Render a small form so they can confirm — replaces the old window.prompt()
+  // path which is blocked in iOS in-app browsers (Gmail, Outlook viewers).
+  if (view === 'confirm-email') {
+    return (
+      <div className="authgate">
+        <div className="authgate-brand">
+          <span className="authgate-emoji" aria-hidden="true">🎬</span>
+          <span className="authgate-wordmark">SETTLE</span>
+        </div>
+        <p className="authgate-tagline">Confirm your email to finish signing in.</p>
+
+        <div className="authgate-card">
+          <form className="authgate-email-form" onSubmit={handleConfirmEmail}>
+            <label className="authgate-email-label" htmlFor="auth-confirm-email">
+              Email this link was sent to
+            </label>
+            <input
+              id="auth-confirm-email"
+              className="authgate-email-input"
+              type="email"
+              placeholder="you@example.com"
+              value={confirmEmail}
+              onChange={e => setConfirmEmail(e.target.value)}
+              autoFocus
+              required
+              autoComplete="email"
+            />
+            <button
+              type="submit"
+              className="authgate-btn authgate-btn-primary"
+              disabled={confirming || !confirmEmail.trim()}
+            >
+              {confirming ? 'Signing in…' : 'Continue'}
+            </button>
+            <button
+              type="button"
+              className="authgate-back"
+              onClick={() => { setView('options'); setError(''); setConfirmEmail(''); }}
+            >
+              ← Start over
+            </button>
+            {error && <p className="authgate-error" role="alert">{error}</p>}
+          </form>
         </div>
       </div>
     );

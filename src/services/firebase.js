@@ -1,6 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey:            process.env.REACT_APP_FIREBASE_API_KEY,
@@ -13,14 +17,16 @@ const firebaseConfig = {
 
 const app  = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db   = getFirestore(app);
 
-// Offline persistence — queued writes sync automatically when back online.
-// Silently ignored if IndexedDB isn't available (private mode, old browser).
-enableIndexedDbPersistence(db).catch(err => {
-  if (err.code !== 'failed-precondition' && err.code !== 'unimplemented') {
-    console.warn('[Firestore] Persistence error:', err.code);
-  }
+// Modern offline persistence (replaces the deprecated enableIndexedDbPersistence).
+// `persistentMultipleTabManager` lets multiple Settle tabs share the IndexedDB
+// cache instead of the second tab throwing `failed-precondition`. Settings here
+// are baked in at SDK init — `initializeFirestore` must be called before any
+// other Firestore API touches the default DB instance.
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager(),
+  }),
 });
 
 export default app;
