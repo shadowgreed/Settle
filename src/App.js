@@ -3,12 +3,14 @@ import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
-import { trackAppLoaded, trackPickGenerated } from './services/analytics';
+import { trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted } from './services/analytics';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
+import Settings from './components/Settings';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
-import { onAuthChange, signOut } from './services/auth';
-import { migrateLocalToCloud, pushUserData, buildPayload } from './services/cloudSync';
+import { onAuthChange, signOut, deleteCurrentUser } from './services/auth';
+import { migrateLocalToCloud, pushUserData, pushUserDataAuthoritative, buildPayload, deleteUserData } from './services/cloudSync';
+import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
 
 // All localStorage keys that hold per-account user data. Cleared on sign-out
@@ -121,6 +123,7 @@ function App() {
     catch { return []; }
   });
   const [showHistory, setShowHistory] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [playerNames, setPlayerNames] = useState(() => {
     try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'Him', p2: 'Her' }; }
@@ -205,6 +208,24 @@ function App() {
   // result is allowed to land in state.
   const pickGenerationRef = useRef(0);
 
+  // Refs for each modal container — useFocusTrap captures and restores focus
+  // so keyboard users can't Tab past the modal onto the page underneath.
+  const historyPanelRef = useRef(null);
+  const ratingPopupRef  = useRef(null);
+  const cinemaCardRef   = useRef(null);
+  const ballotCardRef   = useRef(null);
+  const privacyModalRef = useRef(null);
+  const termsModalRef   = useRef(null);
+  const shareModalRef   = useRef(null);
+
+  useFocusTrap(historyPanelRef, showHistory);
+  useFocusTrap(ratingPopupRef,  !!ratingPopup);
+  useFocusTrap(cinemaCardRef,   cinemaMode);
+  useFocusTrap(ballotCardRef,   showBallot);
+  useFocusTrap(privacyModalRef, showPrivacy);
+  useFocusTrap(termsModalRef,   showTerms);
+  useFocusTrap(shareModalRef,   showShareModal);
+
   // Hydrate all local state from a Firestore cloud document.
   // Called once after a successful sign-in.
   // Uses explicit type checks so an intentionally empty array on another device
@@ -288,6 +309,35 @@ function App() {
     try { await signOut(); } catch (e) { console.warn('[Auth] signOut failed:', e.message); }
   };
 
+  // ── Privacy & Data controls (wired into <Settings />) ────────────────────
+  // Withdraw consent: stop syncing to the cloud from this device. The existing
+  // cloud doc is left in place (the user can still sign in elsewhere); we just
+  // flip the local consent flag and persist the choice so the banner won't
+  // come back. The Settings modal stays open with a "Cloud sync is off" hint.
+  const handleWithdrawConsent = async () => {
+    setConsent(false);
+    safeSet('sd_consent', 'false');
+    trackConsentRevoked();
+  };
+
+  // Permanently delete the user's account: wipe Firestore doc → delete the
+  // Firebase Auth user → clear local data → sign out. Order matters:
+  //   • Firestore delete first so the doc doesn't linger if auth delete fails
+  //   • Auth delete second — Firebase may throw 'auth/requires-recent-login'
+  //     here; we let the Settings modal surface that error and ask the user
+  //     to sign back in.
+  //   • Local clear + signOut last so the AuthGate shows a clean slate.
+  const handleDeleteAccount = async () => {
+    if (!user) throw new Error('No signed-in user');
+    await deleteUserData(user.uid);     // throws → caught by Settings
+    await deleteCurrentUser();          // throws → caught by Settings
+    trackAccountDeleted();
+    USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
+    setShowSettings(false);
+    // deleteCurrentUser() already invalidates the auth session, so the
+    // onAuthChange listener will set user=null and route us back to AuthGate.
+  };
+
   // Debounced cloud sync — pushes current state to Firestore 2 s after the last
   // change. Requires consent + a signed-in user.
   useEffect(() => {
@@ -310,6 +360,7 @@ function App() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      if (showSettings)   { setShowSettings(false); return; }
       if (showShareModal) { closeShareModal(); return; }
       if (showPrivacy)    { setShowPrivacy(false); return; }
       if (showTerms)      { setShowTerms(false); return; }
@@ -321,7 +372,7 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot]);
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings]);
 
   // Lock body scroll while any modal is open — prevents the underlying app from
   // scrolling on iOS when the user drags inside the overlay. Restores the prior
@@ -329,14 +380,14 @@ function App() {
   useEffect(() => {
     const anyOpen =
       showOnboarding || showHistory || showShareModal || showPrivacy ||
-      showTerms || showBallot || cinemaMode || !!ratingPopup;
+      showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = prev; };
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
-      showBallot, cinemaMode, ratingPopup]);
+      showBallot, cinemaMode, ratingPopup, showSettings]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -649,19 +700,22 @@ function App() {
 
   // ── Save for later ────────────────────────────────────────────────────────
   const toggleSaveForLater = (item) => {
-    setSavedForLater(prev => {
-      const exists = prev.some(s => s.id === item.id);
-      const updated = exists
-        ? prev.filter(s => s.id !== item.id)
-        : [{
-            id: item.id, title: item.title, year: item.year,
-            posterPath: item.posterPath, service: item.service,
-            rating: item.rating, type: item.type,
-            genres: item.genres || [], savedAt: new Date().toISOString()
-          }, ...prev].slice(0, 20);
-      safeSet('settle-saved', JSON.stringify(updated));
-      return updated;
-    });
+    const exists = savedForLater.some(s => s.id === item.id);
+    const updated = exists
+      ? savedForLater.filter(s => s.id !== item.id)
+      : [{
+          id: item.id, title: item.title, year: item.year,
+          posterPath: item.posterPath, service: item.service,
+          rating: item.rating, type: item.type,
+          genres: item.genres || [], savedAt: new Date().toISOString()
+        }, ...savedForLater].slice(0, 20);
+    setSavedForLater(updated);
+    safeSet('settle-saved', JSON.stringify(updated));
+    if (exists) {
+      // Removal — flush authoritatively so the additive merge transaction
+      // can't resurrect the unstarred entry from the cloud copy.
+      flushAuthoritativeSync({ savedForLater: updated });
+    }
   };
 
   const isSaved = (item) => item && savedForLater.some(s => s.id === item.id);
@@ -738,6 +792,15 @@ function App() {
 
         setImportSuccess(true);
         setTimeout(() => setImportSuccess(false), 3000);
+
+        // Import is canonical — push the imported arrays authoritatively so
+        // the cloud copy is replaced rather than additively merged with the
+        // pre-import state.
+        flushAuthoritativeSync({
+          ...(data.watchHistory  != null && { watchHistory:  data.watchHistory  }),
+          ...(data.savedForLater != null && { savedForLater: data.savedForLater }),
+          ...(data.recentPicks   != null && { recentPicks:   data.recentPicks   }),
+        });
       } catch {
         setImportError(true);
         setTimeout(() => setImportError(false), 4000);
@@ -1256,6 +1319,24 @@ function App() {
   const clearHistory = () => {
     setWatchHistory([]);
     localStorage.removeItem('streaming-history');
+    // Authoritative overwrite — bypass the additive merge so a concurrent tab
+    // can't resurrect the entries we just deleted.
+    flushAuthoritativeSync({ watchHistory: [] });
+  };
+
+  // Helper: cancels any pending debounced merge push and immediately pushes
+  // the current state to Firestore using authoritative semantics (cloud arrays
+  // are replaced, not unioned). Used by destructive ops — clear history,
+  // remove saved picks — so concurrent tabs can't resurrect deleted entries.
+  const flushAuthoritativeSync = (overrides = {}) => {
+    if (!user || !consent) return;
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    pushUserDataAuthoritative(user.uid, buildPayload({
+      tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
+      mode, selectedServices, selectedGenres, selectedFormats, minRating,
+      maxCertification, maxRuntime,
+      ...overrides,
+    }));
   };
 
   const formatWatchedDate = (iso) => {
@@ -1350,11 +1431,33 @@ function App() {
               <span aria-hidden="true">🔥</span> {s}
             </span>
           ) : null; })()}
+          <button
+            className="account-settings-btn"
+            onClick={() => setShowSettings(true)}
+            aria-label="Privacy and data settings"
+            title="Privacy & data"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
           <button className="account-signout" onClick={handleSignOut} aria-label="Sign out">
             Sign out
           </button>
         </div>
       </div>
+
+      {/* Settings modal — Privacy & Data controls */}
+      {showSettings && (
+        <Settings
+          user={user}
+          consent={consent}
+          onClose={() => setShowSettings(false)}
+          onWithdrawConsent={handleWithdrawConsent}
+          onDeleteAccount={handleDeleteAccount}
+        />
+      )}
 
       <div className="mode-tabs" role="group" aria-label="Mode">
         <button
@@ -2024,11 +2127,13 @@ function App() {
       {showHistory && (
         <div className="history-overlay" onClick={() => setShowHistory(false)}>
           <div
+            ref={historyPanelRef}
             className="history-panel"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="history-title-heading"
+            tabIndex={-1}
           >
             <div className="history-header">
               <h2 id="history-title-heading" className="history-title">
@@ -2186,7 +2291,12 @@ function App() {
                       </button>
                     ))}
                   </div>
-                  <button className="history-clear" onClick={() => { setSavedForLater([]); localStorage.removeItem('settle-saved'); }}>
+                  <button className="history-clear" onClick={() => {
+                    setSavedForLater([]);
+                    localStorage.removeItem('settle-saved');
+                    // Authoritative overwrite (see clearHistory for rationale).
+                    flushAuthoritativeSync({ savedForLater: [] });
+                  }}>
                     Clear saved
                   </button>
                 </>
@@ -2223,11 +2333,13 @@ function App() {
       {ratingPopup && (
         <div className="rating-overlay" onClick={() => handleVote('skip')}>
           <div
+            ref={ratingPopupRef}
             className="rating-popup"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="rating-popup-title"
+            tabIndex={-1}
           >
             <h2 id="rating-popup-title" className="rating-popup-eyebrow">How was it?</h2>
             <div className="rating-popup-card">
@@ -2273,11 +2385,13 @@ function App() {
         return (
         <div className="cinema-overlay" onClick={() => { setCinemaMode(false); setReplayResult(null); }}>
           <div
+            ref={cinemaCardRef}
             className="cinema-card"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="cinema-title"
+            tabIndex={-1}
           >
             <div className="cinema-poster-wrap">
               {cinemaItem.posterPath ? (
@@ -2338,7 +2452,7 @@ function App() {
       {/* Secret ballot overlay */}
       {showBallot && result && (
         <div className="ballot-overlay" role="dialog" aria-modal="true" aria-label="Secret vote">
-          <div className="ballot-card">
+          <div ref={ballotCardRef} className="ballot-card" tabIndex={-1}>
 
             {/* Step — P1 votes */}
             {ballotStep === 'p1' && (
@@ -2490,11 +2604,13 @@ function App() {
       {showPrivacy && (
         <div className="privacy-overlay" onClick={() => setShowPrivacy(false)}>
           <div
+            ref={privacyModalRef}
             className="privacy-modal"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="privacy-modal-title"
+            tabIndex={-1}
           >
             <div className="privacy-header">
               <h2 id="privacy-modal-title" className="privacy-title">Privacy Policy</h2>
@@ -2517,11 +2633,13 @@ function App() {
       {showTerms && (
         <div className="privacy-overlay" onClick={() => setShowTerms(false)}>
           <div
+            ref={termsModalRef}
             className="privacy-modal"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="terms-modal-title"
+            tabIndex={-1}
           >
             <div className="privacy-header">
               <h2 id="terms-modal-title" className="privacy-title">Terms of Service</h2>
@@ -2544,11 +2662,13 @@ function App() {
       {showShareModal && (
         <div className="share-overlay" onClick={closeShareModal}>
           <div
+            ref={shareModalRef}
             className="share-modal"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="share-modal-title"
+            tabIndex={-1}
           >
             <div className="share-modal-header">
               <h2 id="share-modal-title" className="share-modal-title">Your Pick Card</h2>

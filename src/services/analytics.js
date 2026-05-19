@@ -45,3 +45,10 @@ export function trackPickGenerated({ service, type, rating, mode, isHiddenGem })
     hidden_gem: isHiddenGem,
   });
 }
+
+/**
+ * Privacy-control events. No PII — just an aggregate count of users
+ * exercising their data rights so we can monitor the rate.
+ */
+export function trackConsentRevoked()  { track('consent_revoked'); }
+export function trackAccountDeleted()  { track('account_deleted'); }

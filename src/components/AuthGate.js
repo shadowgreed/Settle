@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { signInWithGoogle, sendMagicLink, completeMagicLinkSignIn } from '../services/auth';
 import { PrivacyBody, TermsBody } from './LegalContent';
+import useFocusTrap from '../hooks/useFocusTrap';
 import './AuthGate.css';
 
 export default function AuthGate() {
@@ -9,6 +10,8 @@ export default function AuthGate() {
   const [error,       setError]       = useState('');
   const [linkLoading, setLinkLoading] = useState(false);
   const [legalModal,  setLegalModal]  = useState(null);      // 'privacy' | 'terms' | null
+  const legalModalRef = useRef(null);
+  useFocusTrap(legalModalRef, !!legalModal);
 
   // Close legal modal on Escape
   useEffect(() => {
@@ -174,11 +177,13 @@ export default function AuthGate() {
       {legalModal && (
         <div className="privacy-overlay" onClick={() => setLegalModal(null)}>
           <div
+            ref={legalModalRef}
             className="privacy-modal"
             onClick={e => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-labelledby="authgate-legal-title"
+            tabIndex={-1}
           >
             <div className="privacy-header">
               <h2 id="authgate-legal-title" className="privacy-title">

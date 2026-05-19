@@ -6,6 +6,7 @@ import {
   signInWithEmailLink,
   signOut as firebaseSignOut,
   onAuthStateChanged,
+  deleteUser as firebaseDeleteUser,
 } from 'firebase/auth';
 import { auth } from './firebase';
 
@@ -92,3 +93,13 @@ export const completeMagicLinkSignIn = async () => {
 export const signOut = () => firebaseSignOut(auth);
 
 export const onAuthChange = (callback) => onAuthStateChanged(auth, callback);
+
+// Permanently delete the current Firebase Auth user. Firebase requires the
+// user to have signed in recently — if too much time has passed it throws
+// 'auth/requires-recent-login' and we have to re-authenticate first. The
+// caller is responsible for catching that error and prompting the user to
+// sign in again before retrying.
+export const deleteCurrentUser = async () => {
+  if (!auth.currentUser) throw new Error('No signed-in user');
+  await firebaseDeleteUser(auth.currentUser);
+};

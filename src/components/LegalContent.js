@@ -28,7 +28,7 @@ export function PrivacyBody() {
         <li>Player names (Couples mode)</li>
         <li>Onboarding completion status</li>
       </ul>
-      <p>If you decline consent, all data stays on-device only (localStorage + IndexedDB). When you sign out, this device's locally-cached data is cleared automatically. You can revoke consent at any time by clearing app data in your browser settings — your cloud document will no longer receive updates.</p>
+      <p>If you decline consent, all data stays on-device only (localStorage + IndexedDB). When you sign out, this device's locally-cached data is cleared automatically. You can revoke consent at any time from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar) — your cloud document will no longer receive updates from this device.</p>
 
       <h3>3. Local &amp; Offline Storage</h3>
       <p>Settle uses your browser's <strong>localStorage</strong> and <strong>IndexedDB</strong> to cache preferences and enable offline use as a Progressive Web App (PWA). This data never leaves your device unless you are signed in and have granted cloud sync consent.</p>
@@ -48,7 +48,7 @@ export function PrivacyBody() {
       </ul>
 
       <h3>7. Data Retention &amp; Deletion</h3>
-      <p>You may request deletion of your account and all associated Firestore data at any time by emailing <strong>hello@trysettle.app</strong>. We will process your request within 30 days. Local browser data (localStorage, IndexedDB) is cleared automatically when you sign out, or can be cleared at any time through your browser settings.</p>
+      <p>You can permanently delete your account and all associated Firestore data yourself, at any time, from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar). The deletion is immediate. If you'd prefer we delete it for you, email <strong>hello@trysettle.app</strong> and we'll process the request within 30 days. Local browser data (localStorage, IndexedDB) is cleared automatically when you sign out, or can be cleared at any time through your browser settings.</p>
 
       <h3>8. Children's Privacy</h3>
       <p>Settle is not directed at children under 13. We do not knowingly collect personal information from anyone under 13. If you believe a child has provided us with personal data, contact us and we will delete it promptly.</p>
@@ -77,7 +77,7 @@ export function TermsBody() {
       <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
 
       <h3>4. User Accounts &amp; Data</h3>
-      <p>You are responsible for maintaining the security of your account. We use Firebase Authentication (Google LLC) to manage sign-in — we do not store passwords. Your in-app data (preferences, history, taste profile) is stored in Firebase Firestore when you grant consent. You may request deletion of your account and data at any time by emailing <strong>hello@trysettle.app</strong>.</p>
+      <p>You are responsible for maintaining the security of your account. We use Firebase Authentication (Google LLC) to manage sign-in — we do not store passwords. Your in-app data (preferences, history, taste profile) is stored in Firebase Firestore when you grant consent. You may delete your account and all associated data at any time from the in-app <strong>Privacy &amp; Data</strong> settings, or by emailing <strong>hello@trysettle.app</strong>.</p>
 
       <h3>5. Share Cards</h3>
       <p>Settle can generate shareable pick images ("share cards") via the in-app Share button. These images are created entirely within your browser and are not stored on our servers. You are responsible for any content you choose to share publicly. Movie poster images remain the property of their respective studios and rights holders — share cards are intended for personal, non-commercial use only.</p>

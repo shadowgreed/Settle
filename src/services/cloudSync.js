@@ -1,7 +1,14 @@
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { db } from './firebase';
 
 const userDoc = (uid) => doc(db, 'users', uid);
+
+// Delete the user's Firestore document. Used by the account-deletion flow.
+// Throws on failure so the caller can show an error state instead of
+// silently telling the user their data is gone.
+export const deleteUserData = async (uid) => {
+  await deleteDoc(userDoc(uid));
+};
 
 // ── Pull ─────────────────────────────────────────────────────────────────────
 // Returns the stored profile object, or null if this is a brand-new account.
@@ -15,19 +22,80 @@ export const pullUserData = async (uid) => {
   }
 };
 
-// ── Push ─────────────────────────────────────────────────────────────────────
-// Writes the full profile with merge:true so concurrent writes from other
-// devices don't wipe fields we didn't touch in this session.
+// ── Push (additive merge) ────────────────────────────────────────────────────
+// Default sync path. Runs in a Firestore transaction so two tabs adding picks
+// concurrently can't clobber each other's writes:
+//   • watchHistory + savedForLater are merged by `id` — local wins on
+//     conflict (the local entry is fresher, e.g. has the latest vote).
+//   • recentPicks is a set-union (IDs only, capped at 100).
+//   • All other fields take the local value (last writer wins per field).
+//
+// NOTE: this is "additive" — if a user removes an entry locally, it would be
+// re-added from the cloud copy. Explicit clears/removes must call
+// pushUserDataAuthoritative() instead so cloud is overwritten, not merged.
 export const pushUserData = async (uid, payload) => {
+  try {
+    await runTransaction(db, async (tx) => {
+      const snap = await tx.get(userDoc(uid));
+      const cloud = snap.exists() ? snap.data() : {};
+      tx.set(userDoc(uid), {
+        ...payload,
+        watchHistory:  mergeArrayById(cloud.watchHistory,  payload.watchHistory),
+        savedForLater: mergeArrayById(cloud.savedForLater, payload.savedForLater),
+        recentPicks:   mergeIdSet(cloud.recentPicks, payload.recentPicks, 100),
+        updatedAt:     serverTimestamp(),
+      }, { merge: true });
+    });
+  } catch (err) {
+    console.error('[Sync] Push (merge) failed:', err.message);
+  }
+};
+
+// ── Push (authoritative overwrite) ───────────────────────────────────────────
+// Used when the local state is the canonical truth — e.g. after a "Clear
+// history" or "Remove all saved picks" action. Skips the merge transaction
+// and overwrites the cloud arrays directly so a concurrent tab can't
+// resurrect entries the user just deleted.
+//
+// Still uses { merge: true } at the field level so untouched top-level fields
+// (e.g. tasteProfile, prefs) aren't wiped.
+export const pushUserDataAuthoritative = async (uid, payload) => {
   try {
     await setDoc(userDoc(uid), {
       ...payload,
       updatedAt: serverTimestamp(),
     }, { merge: true });
   } catch (err) {
-    console.error('[Sync] Push failed:', err.message);
+    console.error('[Sync] Push (authoritative) failed:', err.message);
   }
 };
+
+// Union two arrays of objects by `id` field. Local entry wins on conflict
+// because the local copy reflects the most recent vote/state from this tab.
+function mergeArrayById(cloudArr, localArr) {
+  if (!Array.isArray(cloudArr) && !Array.isArray(localArr)) return [];
+  const map = new Map();
+  (cloudArr || []).forEach(item => { if (item && item.id != null) map.set(item.id, item); });
+  (localArr || []).forEach(item => { if (item && item.id != null) map.set(item.id, item); });
+  return Array.from(map.values());
+}
+
+// Union two arrays of primitives (IDs) into a set, cap to most recent N.
+// "Recent" here means later in the array — recentPicks already appends.
+function mergeIdSet(cloudArr, localArr, cap) {
+  const combined = [...(cloudArr || []), ...(localArr || [])];
+  const seen = new Set();
+  const out = [];
+  // Iterate from the end so the most recent occurrence wins position.
+  for (let i = combined.length - 1; i >= 0; i--) {
+    const id = combined[i];
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.unshift(id);
+    }
+  }
+  return out.slice(-cap);
+}
 
 // ── Payload builder ───────────────────────────────────────────────────────────
 // Shapes current app state into the Firestore document structure.

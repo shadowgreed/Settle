@@ -3,50 +3,7 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-18 (post-audit)
-
----
-
-## Critical / High priority
-
-### 1. Focus traps in all modals (a11y)
-**Why:** Keyboard users can Tab out of any open modal (History, Share, Privacy,
-Terms, Cinema, Ballot, Rating popup, Onboarding) and end up focused on the
-background page that's still in the DOM. WCAG 2.1.2 violation.
-
-**Approach:** Build a `useFocusTrap(ref, isOpen)` hook that:
-- Captures the previously-focused element on open
-- Cycles Tab/Shift-Tab within the first/last focusable descendants
-- Restores focus on close
-- Apply to every modal listed above.
-
-Estimated ~80 LOC for the hook plus per-modal wiring. Reference:
-WAI-ARIA Authoring Practices "Modal Dialog" pattern.
-
-### 2. Consent revocation + account deletion UI
-**Why:** GDPR posture. The Privacy Policy claims consent can be revoked, but
-the only mechanism today is clearing browser data — and account deletion
-requires emailing hello@trysettle.app. We need first-class controls.
-
-**Approach:**
-- Add a "Privacy & Data" section in a Settings panel (new modal triggered from
-  the account bar).
-- "Withdraw consent" toggle — flips `sd_consent` to false, stops sync, leaves
-  the cloud doc orphaned (or optionally deletes it).
-- "Delete my account" button — confirmation modal → calls a Firebase callable
-  function that wipes the user's Firestore doc and revokes their auth identity.
-- Track in PostHog (anonymous count of revoke/delete events).
-
-### 3. Two-tab Firestore race
-**Why:** `pushUserData` uses `setDoc(..., { merge: true })` which merges per
-top-level field, not array-aware. Two tabs open → adding picks in tab A then
-tab B causes B's write to overwrite A's `watchHistory` array.
-
-**Approach:**
-- Switch `watchHistory`, `savedForLater`, `recentPicks` to use
-  `arrayUnion()` for adds, `arrayRemove()` for explicit removes.
-- For full overwrites (e.g. "Clear history"), use a sentinel field marker.
-- Test: open in two tabs, generate picks in each, verify both lands.
+Last updated: 2026-05-18 (post-audit + high-priority pass)
 
 ---
 
@@ -152,7 +109,27 @@ consent, delete account, view privacy & terms. Currently scattered.
 
 ---
 
-## Done in recent audit (commit 50855bf · 2026-05-18)
+## Done in recent passes
+
+### High-priority audit pass · 2026-05-18
+
+- ✅ **Focus traps in all modals** — built `useFocusTrap` hook, wired
+     to History, Share, Privacy, Terms, Cinema, Ballot, Rating popup,
+     Onboarding, AuthGate legal modal, Settings.
+- ✅ **Consent revoke + account deletion UI** — new `Settings` component
+     with a "Stop cloud sync" toggle and a "Delete account" flow gated by a
+     typed DELETE confirmation. Wired Firebase auth `deleteUser` and a
+     `deleteUserData` Firestore call. Privacy Policy + ToS updated to point
+     to the in-app controls instead of email-only. PostHog tracks
+     `consent_revoked` and `account_deleted` (anonymous, no PII).
+- ✅ **Two-tab Firestore race** — `pushUserData` now runs in a transaction
+     that merges array fields by `id` with local-wins-on-conflict semantics
+     (watchHistory, savedForLater) plus a set-union with cap for recentPicks.
+     Destructive paths (clearHistory, savedForLater clear, toggleSaveForLater
+     un-star, profile import) use the new `pushUserDataAuthoritative` to
+     overwrite cloud instead, so concurrent tabs can't resurrect deletions.
+
+### Initial audit pass · 2026-05-18 (commit 50855bf)
 
 - ✅ Sign-out clears per-account localStorage
 - ✅ `pickContent` generation token (stale-result race)

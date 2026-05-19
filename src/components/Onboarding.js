@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import useFocusTrap from '../hooks/useFocusTrap';
 import './Onboarding.css';
 
 // 4×6 = 24 poster-palette color cells — heavily muted via CSS filter
@@ -39,6 +40,8 @@ export default function Onboarding({ onDone }) {
   const doneTimerRef = useRef(null);
   const raf1Ref = useRef(null);
   const raf2Ref = useRef(null);
+  const rootRef = useRef(null);
+  useFocusTrap(rootRef, true);
 
   // Clear any pending timers/RAFs on unmount so callbacks don't fire on a
   // stale tree (e.g. user backgrounds the tab mid-transition).
@@ -105,12 +108,14 @@ export default function Onboarding({ onDone }) {
 
   return (
     <div
+      ref={rootRef}
       className="ob-root"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
       role="dialog"
       aria-modal="true"
       aria-label="Welcome to Settle"
+      tabIndex={-1}
     >
       {/* ── Background system ─────────────────────────────────────────── */}
       <div className="ob-bg-grid" aria-hidden="true">

@@ -1,0 +1,278 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   Settings modal — Privacy & Data controls.
+   Reuses the .privacy-* overlay scaffolding (App.css) where useful, but the
+   sectioned card layout is bespoke so it can scale to additional sections.
+───────────────────────────────────────────────────────────────────────────── */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: settings-fade-in 180ms ease-out;
+}
+
+@keyframes settings-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.settings-modal {
+  width: 100%;
+  max-width: 480px;
+  max-height: 88vh;
+  background: #0a0a0a;
+  border: 0.5px solid #222;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: settings-slide-up 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes settings-slide-up {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 0.5px solid #1a1a1a;
+  background: #111;
+}
+
+.settings-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #f5f5f5;
+  margin: 0;
+}
+
+.settings-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  overflow-y: auto;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: #888;
+  margin: 0;
+}
+
+.settings-section-desc {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #c0c0c0;
+  margin: 0;
+}
+
+.settings-hint {
+  font-size: 12px;
+  color: #777;
+  margin: 0;
+  font-style: italic;
+}
+
+.settings-account-line {
+  font-size: 14px;
+  color: #f5f5f5;
+  margin: 0;
+}
+
+.settings-account-email {
+  color: #999;
+  font-weight: 400;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+.settings-btn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 11px 18px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms, color 150ms, opacity 150ms;
+  min-height: 44px;
+  touch-action: manipulation;
+  align-self: flex-start;
+}
+
+.settings-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings-btn-ghost {
+  background: transparent;
+  border-color: #2a2a2a;
+  color: #d8d8d8;
+}
+.settings-btn-ghost:hover:not(:disabled) {
+  background: #161616;
+  border-color: #444;
+  color: #fff;
+}
+
+.settings-btn-warn {
+  background: #2a1f08;
+  border-color: #6b4f1c;
+  color: #f0c75a;
+}
+.settings-btn-warn:hover:not(:disabled) {
+  background: #382808;
+  border-color: #8a6826;
+}
+
+.settings-btn-danger-outline {
+  background: transparent;
+  border-color: #4a1c1c;
+  color: #ff7070;
+}
+.settings-btn-danger-outline:hover:not(:disabled) {
+  background: #1a0808;
+  border-color: #6a2828;
+  color: #ff9090;
+}
+
+.settings-btn-danger {
+  background: #c0070f;
+  border-color: #c0070f;
+  color: #fff;
+}
+.settings-btn-danger:hover:not(:disabled) {
+  background: #d80813;
+  border-color: #d80813;
+}
+
+/* ── Inline confirmation block ───────────────────────────────────────────── */
+.settings-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: #111;
+  border: 0.5px solid #2a2a2a;
+  border-radius: 8px;
+}
+
+.settings-confirm-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: #d8d8d8;
+  margin: 0;
+}
+
+.settings-confirm-input {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 10px 12px;
+  border: 1px solid #333;
+  background: #0a0a0a;
+  color: #f5f5f5;
+  border-radius: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  min-height: 44px;
+}
+
+.settings-confirm-input:focus {
+  outline: none;
+  border-color: #c0070f;
+}
+
+.settings-confirm-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.settings-confirm-actions .settings-btn {
+  align-self: stretch;
+  flex: 1 1 auto;
+  min-width: 130px;
+}
+
+/* ── Danger section emphasis ──────────────────────────────────────────────── */
+.settings-section-danger {
+  border-top: 0.5px solid #1a1a1a;
+  padding-top: 18px;
+}
+.settings-section-danger .settings-section-title {
+  color: #c66;
+}
+
+/* ── Error + footer ───────────────────────────────────────────────────────── */
+.settings-error {
+  font-size: 13px;
+  color: #ff7070;
+  background: rgba(192, 7, 15, 0.08);
+  border-left: 2px solid #c0070f;
+  padding: 10px 12px;
+  border-radius: 0 6px 6px 0;
+  margin: 0;
+}
+
+.settings-footer-note {
+  font-size: 11px;
+  color: #666;
+  margin: 0;
+  text-align: center;
+  padding-top: 8px;
+  border-top: 0.5px solid #161616;
+}
+
+/* ── Account-bar gear button trigger ─────────────────────────────────────── */
+.account-settings-btn {
+  background: transparent;
+  border: none;
+  color: #b8b8b8;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  transition: color 150ms, background 150ms;
+}
+.account-settings-btn:hover,
+.account-settings-btn:focus-visible {
+  color: #f5f5f5;
+  background: #1a1a1a;
+  outline: none;
+}
+
+/* Narrow viewports — full-width modal with snug margins */
+@media (max-width: 480px) {
+  .settings-overlay { padding: 10px; }
+  .settings-modal   { max-height: 92vh; }
+  .settings-body    { padding: 14px; gap: 18px; }
+  .settings-confirm-actions .settings-btn {
+    min-width: 0;
+    flex: 1 1 calc(50% - 5px);
+  }
+}
