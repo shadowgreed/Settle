@@ -164,13 +164,15 @@ function App() {
   const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
+  // Onboarding is NOT shown at mount — we defer the decision until after
+  // auth + cloud hydration resolve. Otherwise returning users on a new device
+  // (no localStorage flag yet, but `onboarded: true` in their cloud doc) see
+  // the entire 4-slide flow flash for ~500 ms before hydrate dismisses it.
+  // The decision is made in the auth listener below.
   const [showOnboarding, setShowOnboarding] = useState(() => {
-    // Dev override: ?onboarding=1 forces the flow regardless of stored state
+    // Dev override fires immediately so /?onboarding=1 still works pre-auth.
     if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('onboarding') === '1') return true;
-    // Check both legacy key (sd_onboarded) and new key (onboarding_complete)
-    const legacy = localStorage.getItem('sd_onboarded') === 'true';
-    const current = localStorage.getItem('onboarding_complete') === 'true';
-    return !(legacy || current);
+    return false;
   });
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
@@ -275,12 +277,25 @@ function App() {
         setUser(null);
         return;
       }
+      let cloudData = null;
       try {
-        const cloudData = await migrateLocalToCloud(firebaseUser.uid);
+        cloudData = await migrateLocalToCloud(firebaseUser.uid);
         if (cloudData) hydrateFromCloud(cloudData);
       } catch (e) {
         console.warn('[Auth] Cloud hydration failed:', e.message);
       }
+
+      // Now we have the full picture (cloud + local). Decide whether to show
+      // onboarding once — never overrides the ?onboarding=1 dev flag.
+      const devOverride = new URLSearchParams(window.location.search).get('onboarding') === '1';
+      if (!devOverride) {
+        const cloudOnboarded = cloudData?.onboarded === true;
+        const localOnboarded =
+          localStorage.getItem('onboarding_complete') === 'true' ||
+          localStorage.getItem('sd_onboarded') === 'true';
+        setShowOnboarding(!cloudOnboarded && !localOnboarded);
+      }
+
       didSetUser = true;
       clearTimeout(fallbackTimer);
       setUser(firebaseUser);
@@ -366,7 +381,7 @@ function App() {
       if (showTerms)      { setShowTerms(false); return; }
       if (showHistory)    { setShowHistory(false); return; }
       if (ratingPopup)    { handleVote('skip'); return; }
-      if (cinemaMode)     { setCinemaMode(false); return; }
+      if (cinemaMode)     { setCinemaMode(false); setReplayResult(null); return; }
       if (showBallot)     { setShowBallot(false); return; }
     };
     window.addEventListener('keydown', onKey);
@@ -1340,7 +1355,10 @@ function App() {
 
   const clearHistory = () => {
     setWatchHistory([]);
-    localStorage.removeItem('streaming-history');
+    // Use the same removal path everywhere (was directly calling
+    // localStorage.removeItem here, which bypassed the safeSet/consent
+    // discipline used elsewhere — purely a code-hygiene fix).
+    try { localStorage.removeItem('streaming-history'); } catch {}
     // Authoritative overwrite — bypass the additive merge so a concurrent tab
     // can't resurrect the entries we just deleted.
     flushAuthoritativeSync({ watchHistory: [] });
@@ -1424,6 +1442,10 @@ function App() {
 
   return (
     <div className="app">
+      {/* Skip link — visually hidden until focused. Lets keyboard users
+          bypass the account bar + mode tabs and jump to the pick form. */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+
       {/* Account bar — user identity + sign-out */}
       <div className="account-bar">
         <span className="account-email" title={user.email || user.displayName || ''}>
@@ -1479,7 +1501,7 @@ function App() {
         />
       )}
 
-      <div className="mode-tabs" role="group" aria-label="Mode">
+      <div id="main-content" className="mode-tabs" role="group" aria-label="Mode" tabIndex={-1}>
         <button
           className={`mtab ${mode === 'solo' ? 'on' : ''}`}
           onClick={() => { setMode('solo'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}

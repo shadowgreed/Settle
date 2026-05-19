@@ -1,25 +1,51 @@
-import posthog from 'posthog-js';
+// ─────────────────────────────────────────────────────────────────────────────
+// Lazy-loaded analytics. PostHog is ~30 KB gzipped — eagerly importing it
+// bloats the initial bundle and blocks first paint for a feature that isn't
+// needed until the user has done something worth tracking.
+//
+// We dynamic-import posthog-js on first event, await initialisation once,
+// then re-use the singleton. All `track*` calls become async no-ops if the
+// import fails (e.g. blocked by a content blocker) — silent by design.
+// ─────────────────────────────────────────────────────────────────────────────
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
-// Only initialise PostHog in production — dev events must never reach the
-// production project and inflate metrics.
-if (!IS_DEV) {
-  posthog.init(process.env.REACT_APP_POSTHOG_KEY, {
-    api_host:         'https://us.i.posthog.com',
-    autocapture:      false,   // manual events only — keeps data clean
-    capture_pageview: false,   // we fire app_loaded manually
-    persistence:      'localStorage',
-    disable_flags:    true,    // we don't use feature flags — stops /flags/ requests
-  });
+let posthogPromise = null;
+
+// Resolves to the initialised posthog client, or null if init was disabled
+// or the import failed. Cached so subsequent calls don't re-init.
+function loadPosthog() {
+  if (posthogPromise) return posthogPromise;
+  if (IS_DEV) {
+    // Never load PostHog in dev — events would inflate prod metrics.
+    posthogPromise = Promise.resolve(null);
+    return posthogPromise;
+  }
+  posthogPromise = import(/* webpackChunkName: "posthog" */ 'posthog-js')
+    .then(({ default: posthog }) => {
+      posthog.init(process.env.REACT_APP_POSTHOG_KEY, {
+        api_host:         'https://us.i.posthog.com',
+        autocapture:      false,
+        capture_pageview: false,
+        persistence:      'localStorage',
+        disable_flags:    true,
+      });
+      return posthog;
+    })
+    .catch((e) => {
+      console.warn('[Analytics] PostHog failed to load:', e.message);
+      return null;
+    });
+  return posthogPromise;
 }
 
-function track(eventName, properties = {}) {
+async function track(eventName, properties = {}) {
   if (IS_DEV) {
     console.log(`[Analytics] ${eventName}`, properties);
-    return; // never send dev events to PostHog
+    return;
   }
-  posthog.capture(eventName, properties);
+  const posthog = await loadPosthog();
+  if (posthog) posthog.capture(eventName, properties);
 }
 
 // ── Public event API ──────────────────────────────────────────────────────────

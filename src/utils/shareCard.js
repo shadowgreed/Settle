@@ -81,24 +81,41 @@ function starsFrom(rating) {
   return '★'.repeat(full) + '☆'.repeat(5 - full);
 }
 
-// Subtle film grain composited via offscreen canvas so putImageData doesn't overwrite pixels
-function addGrain(ctx, W, H) {
-  const off  = document.createElement('canvas');
-  off.width  = W;
-  off.height = H;
-  const octx = off.getContext('2d');
-  const data = octx.createImageData(W, H);
+// Subtle film grain. We bake a 256×256 grain tile ONCE per page load and
+// tile it across the 1080×1920 share canvas, saving ~2 M iterations of the
+// JS pixel loop per share. Tile is composited via overlay blend so it
+// modulates the underlying pixels rather than replacing them.
+const GRAIN_TILE_SIZE = 256;
+let grainTileCanvas = null;
+
+function buildGrainTile() {
+  if (grainTileCanvas) return grainTileCanvas;
+  const tile = document.createElement('canvas');
+  tile.width  = GRAIN_TILE_SIZE;
+  tile.height = GRAIN_TILE_SIZE;
+  const tctx  = tile.getContext('2d');
+  const data  = tctx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
   for (let i = 0; i < data.data.length; i += 4) {
     const v = (Math.random() * 30) | 0;
     data.data[i] = data.data[i + 1] = data.data[i + 2] = v;
     data.data[i + 3] = 20;
   }
-  octx.putImageData(data, 0, 0);
+  tctx.putImageData(data, 0, 0);
+  grainTileCanvas = tile;
+  return tile;
+}
+
+function addGrain(ctx, W, H) {
+  const tile = buildGrainTile();
+  ctx.save();
   ctx.globalCompositeOperation = 'overlay';
   ctx.globalAlpha = 0.15;
-  ctx.drawImage(off, 0, 0);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
+  for (let y = 0; y < H; y += GRAIN_TILE_SIZE) {
+    for (let x = 0; x < W; x += GRAIN_TILE_SIZE) {
+      ctx.drawImage(tile, x, y);
+    }
+  }
+  ctx.restore();
 }
 
 export async function generateShareCard({ result, mode, playerNames }) {

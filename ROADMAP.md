@@ -3,40 +3,17 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-18 (post-audit + high + medium-priority passes)
+Last updated: 2026-05-18 (post-audit + high + medium + low passes)
 
 ---
 
 ## Low priority / polish
 
-### 7. Onboarding flash on returning users
-On a new device + signed out, the onboarding component flashes for ~500 ms
-before cloud hydration resolves and dismisses it. Fix: gate render of
-onboarding on `user !== undefined && !cloudHydrationPending`.
-
-### 8. Skip-to-content link
-Long account bar + mode tabs precede the actual pick form. Add a visually
-hidden "Skip to main content" link for keyboard users (becomes visible on
-focus).
-
-### 9. Lazy-load PostHog
-PostHog eats ~30 KB gzipped on the initial bundle. Dynamic import on first
-event would defer it.
-
-### 10. Pre-baked grain texture
-`shareCard.js:addGrain` runs a 2M-iteration JS pixel loop on every share. Pre-
-bake a 256×256 grain tile and tile it. Onboarding `<feTurbulence>` SVG filter
-similarly repaints constantly — replace with a static PNG noise texture on
-low-end Android.
-
-### 11. Cinema close cleans `replayResult`
-`replayResult` persists in state when the cinema overlay is dismissed via
-Escape (App.js:259 only sets `cinemaMode=false`). Stale state, not a
-correctness bug — clear it for tidiness.
-
-### 12. `clearHistory` consistency
-`clearHistory` (App.js) writes directly to `localStorage.removeItem`,
-bypassing the `safeSet`/consent discipline used elsewhere. Normalize.
+### Deferred: Onboarding `<feTurbulence>` static texture
+The onboarding background still uses an SVG `<feTurbulence>` filter that
+repaints constantly. On low-end Android this can drag scroll perf. A
+static PNG noise texture would be cheaper. Not done in this pass because
+the share-card grain win was the higher-leverage half of the same item.
 
 ---
 
@@ -79,6 +56,35 @@ consent, delete account, view privacy & terms. Currently scattered.
 ---
 
 ## Done in recent passes
+
+### Low-priority polish pass · 2026-05-18
+
+- ✅ **Onboarding flash on returning users** — `showOnboarding` no longer
+     derives from localStorage at mount. The decision is deferred to the
+     auth listener, which considers cloud `onboarded:true` OR either local
+     flag (`onboarding_complete` / legacy `sd_onboarded`). Returning users
+     on a new device sign in → hydrate → main app renders with onboarding
+     off in one batched render. Dev override `?onboarding=1` still fires
+     immediately at mount.
+- ✅ **Skip-to-content link** — visually-hidden `<a href="#main-content">`
+     becomes a focusable high-contrast pill at the top of the viewport.
+     The mode-tabs row gets `id="main-content"` + `tabIndex={-1}` so the
+     jump target is keyboard-focusable. WCAG 2.4.1.
+- ✅ **Lazy-load PostHog** — `services/analytics.js` rewritten to
+     dynamic-import `posthog-js` on first event. Main bundle dropped from
+     278 KB → 217 KB (~60 KB / ~30 KB gzipped), split into a separate
+     `posthog.[hash].chunk.js` that only loads when the user actually does
+     something worth tracking.
+- ✅ **Pre-baked grain texture (share card)** — `shareCard.js:addGrain`
+     no longer runs a 2M-iteration JS pixel loop per share. The 256×256
+     grain tile is built once per page load and tiled across the 1080×1920
+     canvas via `drawImage`. Massive perf win on share generation, esp.
+     mobile.
+- ✅ **Cinema close clears `replayResult`** — the global Escape handler
+     now resets `replayResult` along with `cinemaMode=false` (was leaving
+     a stale entry in state when the user pressed Escape).
+- ✅ **`clearHistory` consistency** — wrapped the `localStorage.removeItem`
+     call in try/catch like the rest of the codebase for storage discipline.
 
 ### Medium-priority audit pass · 2026-05-18
 
