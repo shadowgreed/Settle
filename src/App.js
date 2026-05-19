@@ -2049,12 +2049,12 @@ function App() {
       )}
 
       <div className="divider" />
-      
-      {matchCount > 0 && (
-        <div className="match-count">
-          {matchCount} title{matchCount === 1 ? '' : 's'} available
-        </div>
-      )}
+
+      {/* Note: we intentionally don't surface a "X titles available" count here.
+          Users shouldn't be primed by the inventory size of their filters —
+          it's both noisy and a poor proxy for whether they'll like the pick.
+          `matchCount` is still tracked in state so the empty-state branch
+          below can fire when the filter combo produces zero results. */}
 
       <div className="btn-row">
         <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>

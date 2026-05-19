@@ -1323,13 +1323,6 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 500;
 }
 
-.match-count {
-  font-size: 11px;
-  color: #999;
-  text-align: right;
-  margin-bottom: 0.5rem;
-}
-
 .footer-row {
   display: flex;
   align-items: center;
