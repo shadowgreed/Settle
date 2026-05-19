@@ -78,3 +78,17 @@ export function trackPickGenerated({ service, type, rating, mode, isHiddenGem })
  */
 export function trackConsentRevoked()  { track('consent_revoked'); }
 export function trackAccountDeleted()  { track('account_deleted'); }
+
+/**
+ * Retention signal — user tapped "Watch trailer" on a pick. Captures
+ * the title's service + type + mode so we can correlate trailer plays
+ * with downstream "We're watching this" conversions.
+ */
+export function trackTrailerPlayed({ service, type, mode, fromSurface }) {
+  track('trailer_played', {
+    service,
+    type,
+    mode,
+    from_surface: fromSurface, // 'result_card' | 'cinema_mode'
+  });
+}

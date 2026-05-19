@@ -3,10 +3,11 @@ import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
-import { trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted } from './services/analytics';
+import { trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted, trackTrailerPlayed } from './services/analytics';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
+import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
 import { onAuthChange, signOut, deleteCurrentUser } from './services/auth';
 import { migrateLocalToCloud, pushUserData, pushUserDataAuthoritative, buildPayload, deleteUserData } from './services/cloudSync';
@@ -145,6 +146,11 @@ function App() {
   // Theater-specific enrichment — cert (G/PG/PG-13/R) + wide vs limited release.
   // Fetched lazily per pick, like collection data. null while loading or not theater.
   const [theaterReleaseInfo, setTheaterReleaseInfo] = useState(null);
+
+  // YouTube trailer for the current pick (pre-fetched when the result lands)
+  // and the overlay-visibility flag. `trailer` is { key, name } or null.
+  const [trailer, setTrailer] = useState(null);
+  const [showTrailer, setShowTrailer] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [noMoodSelected, setNoMoodSelected] = useState(false);
   const [fetchError, setFetchError] = useState(false);
@@ -389,6 +395,9 @@ function App() {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      // Trailer takes priority over everything else — if you opened it from
+      // cinema mode, Escape should bring you back to cinema, not exit it.
+      if (showTrailer)    { setShowTrailer(false); return; }
       if (showSettings)   { setShowSettings(false); return; }
       if (showShareModal) { closeShareModal(); return; }
       if (showPrivacy)    { setShowPrivacy(false); return; }
@@ -401,7 +410,7 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings]);
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer]);
 
   // Lock body scroll while any modal is open — prevents the underlying app from
   // scrolling on iOS when the user drags inside the overlay. Restores the prior
@@ -409,14 +418,15 @@ function App() {
   useEffect(() => {
     const anyOpen =
       showOnboarding || showHistory || showShareModal || showPrivacy ||
-      showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings;
+      showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings ||
+      showTrailer;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = prev; };
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
-      showBallot, cinemaMode, ratingPopup, showSettings]);
+      showBallot, cinemaMode, ratingPopup, showSettings, showTrailer]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -525,6 +535,8 @@ function App() {
     setShowCollection(false);
     setWatchLink(null);
     setTheaterReleaseInfo(null);
+    setTrailer(null);
+    setShowTrailer(false);
     if (!result) return;
     let cancelled = false;
 
@@ -545,6 +557,13 @@ function App() {
         .then(url => { if (!cancelled) setWatchLink(url); })
         .catch(() => {});
     }
+    // Pre-fetch the YouTube trailer so the "Watch trailer" button can appear
+    // as soon as the result card renders. If TMDB has no trailer for this
+    // title, `trailer` stays null and the button is hidden silently.
+    const trailerType = result.type === 'Movie' ? 'movie' : 'tv';
+    tmdbService.getTrailer(result.id, trailerType)
+      .then(t => { if (!cancelled) setTrailer(t); })
+      .catch(() => {});
 
     return () => { cancelled = true; };
   }, [result]);
@@ -775,6 +794,24 @@ function App() {
   // re-appears, then triggers a fresh pick. Does NOT touch tasteProfile
   // because we don't have a signal about whether they liked it or not —
   // they just don't want to see it again.
+  // Opens the YouTube trailer overlay for the currently-active item.
+  // `surface` identifies which UI surface the user tapped from so we can
+  // correlate trailer plays with downstream conversion in analytics
+  // ('result_card' vs 'cinema_mode').
+  const openTrailer = (surface) => {
+    const item = cinemaSource === 'history' ? replayResult : result;
+    if (!trailer?.key || !item) return;
+    setShowTrailer(true);
+    trackTrailerPlayed({
+      service: item.service,
+      type:    item.type,
+      mode,
+      fromSurface: surface,
+    });
+  };
+
+  const closeTrailer = () => setShowTrailer(false);
+
   const handleVetoPick = () => {
     if (!result) return;
     const id = result.id;
@@ -1638,6 +1675,19 @@ function App() {
         />
       )}
 
+      {/* YouTube trailer overlay — full-screen iframe player. Hidden silently
+          when there's no trailer available for the current pick. */}
+      {showTrailer && trailer?.key && (() => {
+        const item = cinemaSource === 'history' ? replayResult : result;
+        return (
+          <TrailerOverlay
+            trailer={trailer}
+            title={item?.title}
+            onClose={closeTrailer}
+          />
+        );
+      })()}
+
       <div id="main-content" className="mode-tabs" role="group" aria-label="Mode" tabIndex={-1}>
         <button
           className={`mtab ${mode === 'solo' ? 'on' : ''}`}
@@ -2284,6 +2334,22 @@ function App() {
                 <div className="pick-reason">{pickReason}</div>
               )}
               <div className="desc">{result.description}</div>
+              {/* Trailer CTA — sits above the action row as a primary
+                  pre-watch action. Hidden silently when TMDB has no
+                  YouTube trailer for this title. */}
+              {trailer?.key && (
+                <button
+                  type="button"
+                  className="trailer-btn trailer-btn-card"
+                  onClick={() => openTrailer('result_card')}
+                  aria-label={`Watch trailer for ${result.title}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                    <polygon points="6 4 20 12 6 20" />
+                  </svg>
+                  Watch trailer
+                </button>
+              )}
               <div className="act-row">
                 <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
                   Try another
@@ -2701,6 +2767,22 @@ function App() {
                 </div>
               ) : null;
             })()}
+            {/* Trailer button in cinema mode — only shown when a YouTube
+                trailer is available for the current pick. Pre-watch sneak
+                peek before the user commits with "Open on Netflix". */}
+            {cinemaSource === 'pick' && trailer?.key && (
+              <button
+                type="button"
+                className="trailer-btn trailer-btn-cinema"
+                onClick={() => openTrailer('cinema_mode')}
+                aria-label={`Watch trailer for ${cinemaItem.title}`}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                  <polygon points="6 4 20 12 6 20" />
+                </svg>
+                Watch trailer
+              </button>
+            )}
             <button className="cinema-share-btn" onClick={() => handleShare(cinemaItem)}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                 <line x1="22" y1="2" x2="11" y2="13" />

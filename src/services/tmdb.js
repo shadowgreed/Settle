@@ -300,6 +300,55 @@ class TMDBService {
     });
   }
 
+  // Fetch the best YouTube trailer for a title.
+  //
+  // Returns a video object { key, name } where `key` is the YouTube video ID,
+  // or null if no trailer is available. Selection priority:
+  //   1. Official YouTube Trailer in English
+  //   2. Any YouTube Trailer
+  //   3. Official YouTube Teaser
+  //   4. Any YouTube Teaser
+  // Anything else (Clip, Featurette, Behind the Scenes) is rejected so we
+  // don't surface a 30-second bloopers reel as a "trailer".
+  //
+  // `type` is 'movie' or 'tv' — TMDB exposes the same shape under both.
+  async getTrailer(id, type = 'movie') {
+    const endpoint = type === 'tv' ? 'tv' : 'movie';
+    const cacheKey = `trailer-${endpoint}-${id}`;
+    return this.getCached(cacheKey, async () => {
+      try {
+        const res = await this.api.get(`/${endpoint}/${id}/videos`);
+        const youtubes = (res.data.results || []).filter(v => v.site === 'YouTube');
+        if (youtubes.length === 0) return null;
+
+        const scoreOf = (v) => {
+          // Higher score = better match. Reject non-trailer/teaser entirely.
+          let s = 0;
+          if (v.type === 'Trailer') s += 100;
+          else if (v.type === 'Teaser') s += 50;
+          else return -1;
+          if (v.official) s += 30;
+          if (v.iso_639_1 === 'en') s += 20;
+          // Tiebreak by published_at — newer wins (often the "Final Trailer").
+          if (v.published_at) s += Math.min(10, Math.floor(new Date(v.published_at).getTime() / 1e12));
+          return s;
+        };
+
+        const ranked = youtubes
+          .map(v => ({ video: v, score: scoreOf(v) }))
+          .filter(r => r.score >= 0)
+          .sort((a, b) => b.score - a.score);
+
+        if (ranked.length === 0) return null;
+        const best = ranked[0].video;
+        return { key: best.key, name: best.name };
+      } catch (e) {
+        console.warn('[TMDB] getTrailer failed:', e.message);
+        return null;
+      }
+    });
+  }
+
   // Get poster URL
   getPosterUrl(path, size = 'w342') {
     if (!path) return null;
