@@ -135,6 +135,24 @@ body {
   border-color: rgba(255, 255, 255, 0.35);
 }
 
+/* Two-stage sign-out confirm — shown after the user taps "Sign out" once.
+   "Yes, sign out" is intentionally amber-toned to draw the eye, and Cancel
+   is the visually-quieter neutral pill so the dangerous action isn't the
+   path of least resistance. Both auto-revert to "Sign out" after 4 s. */
+.account-signout.account-signout-confirm {
+  color: #f0c75a;
+  border-color: #6b4f1c;
+  background: rgba(107, 79, 28, 0.18);
+}
+.account-signout.account-signout-confirm:hover {
+  color: #ffd870;
+  border-color: #8a6826;
+  background: rgba(107, 79, 28, 0.32);
+}
+.account-signout.account-signout-cancel {
+  color: rgba(255, 255, 255, 0.65);
+}
+
 /* ── Empty state — no matches ────────────────────────────────────────────── */
 .nomatch-empty {
   display: flex;
@@ -1985,6 +2003,116 @@ input[type="range"]::-moz-range-thumb {
   font-size: 13px;
   color: #4ade80;
   font-weight: 500;
+}
+
+/* Pinned "Your top genres" row — surfaces the user's most-up-voted genres
+   above the "More genres" toggle so they don't have to expand the full list
+   to re-select what they already like. Only shown when the taste profile
+   has at least one ≥2-score entry. */
+.top-genres-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+.top-genres-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.40);
+}
+.top-genres-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+/* The chips themselves reuse the standard .chip styling so selection
+   states match the More-genres list. The .top-genre-chip modifier exists
+   in case we want to tint them differently in the future. */
+
+/* "At cap" hint inside the History panel — shown when the list is at its
+   silent eviction cap (30 history, 20 saved). Small amber pill above the
+   list so the user understands why an add behaves unexpectedly. */
+.history-cap-hint {
+  background: rgba(240, 199, 90, 0.08);
+  border: 0.5px solid rgba(240, 199, 90, 0.20);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #d9b04a;
+  margin: 0 0 10px;
+  line-height: 1.4;
+}
+
+/* Disabled save button — appears slightly faded with a not-allowed cursor
+   when the saved list is at cap and the current result isn't already saved. */
+.act.save-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* Pre-watch veto link below the result-card action row. Visually quieter
+   than "Try another" because clicking it bans the title from future picks
+   permanently (adds to recentPicks). */
+.veto-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.42);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 10px 4px 4px;
+  margin-top: 4px;
+  cursor: pointer;
+  letter-spacing: 0.01em;
+  transition: color 0.15s;
+  text-align: center;
+  touch-action: manipulation;
+}
+.veto-btn:hover, .veto-btn:focus-visible {
+  color: rgba(255, 255, 255, 0.85);
+  outline: none;
+}
+
+/* Coin-flip preview hint — shown on the p1/p2 steps before fate is unlocked.
+   Quiet pill, sits at the top of the ballot card so users discover the
+   escape hatch upfront instead of being surprised by its appearance. */
+.ballot-coin-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 0.5px solid rgba(255, 255, 255, 0.10);
+  border-radius: 100px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.45);
+  align-self: center;
+  margin-bottom: 4px;
+}
+
+/* Back-to-P1 link on the P2 ballot step — quiet text-button so it doesn't
+   compete with the primary 👍/👎 vote buttons. */
+.ballot-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 8px 4px;
+  cursor: pointer;
+  transition: color 0.15s;
+  touch-action: manipulation;
+  min-height: 36px;
+}
+.ballot-back:hover, .ballot-back:focus-visible {
+  color: rgba(255, 255, 255, 0.85);
+  outline: none;
 }
 
 .ballot-cue {

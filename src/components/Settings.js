@@ -16,9 +16,11 @@ import './Settings.css';
 export default function Settings({
   user,
   consent,
+  playerNames,
   onClose,
   onWithdrawConsent,
   onDeleteAccount,
+  onSavePlayerNames,
 }) {
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
@@ -27,6 +29,23 @@ export default function Settings({
   const [stage, setStage] = useState('idle');
   const [confirmText, setConfirmText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Local draft state for the player-name editor — committed via
+  // onSavePlayerNames on blur (or Enter). Keeps the input snappy without
+  // re-rendering the whole app on every keystroke.
+  const [p1Draft, setP1Draft] = useState(playerNames?.p1 || 'Him');
+  const [p2Draft, setP2Draft] = useState(playerNames?.p2 || 'Her');
+
+  const commitP1 = () => {
+    const trimmed = p1Draft.trim() || 'Him';
+    if (trimmed !== playerNames?.p1) onSavePlayerNames?.('p1', trimmed);
+    setP1Draft(trimmed);
+  };
+  const commitP2 = () => {
+    const trimmed = p2Draft.trim() || 'Her';
+    if (trimmed !== playerNames?.p2) onSavePlayerNames?.('p2', trimmed);
+    setP2Draft(trimmed);
+  };
 
   const handleConfirmRevoke = async () => {
     setStage('working');
@@ -91,6 +110,42 @@ export default function Settings({
               <strong>{user.displayName || user.email?.split('@')[0] || 'Account'}</strong>
               {user.email ? <span className="settings-account-email"> · {user.email}</span> : null}
             </p>
+          </section>
+
+          {/* ── Preferences (player names) ─────────────────────────────── */}
+          <section className="settings-section">
+            <h3 className="settings-section-title">Couples player names</h3>
+            <p className="settings-section-desc">
+              Used by Couples mode and shareable pick cards. Edit here any time.
+            </p>
+            <div className="settings-names-grid">
+              <label className="settings-name-field">
+                <span className="settings-name-label">Player 1</span>
+                <input
+                  type="text"
+                  className="settings-name-input"
+                  value={p1Draft}
+                  onChange={(e) => setP1Draft(e.target.value)}
+                  onBlur={commitP1}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  maxLength={20}
+                  aria-label="Player 1 name"
+                />
+              </label>
+              <label className="settings-name-field">
+                <span className="settings-name-label">Player 2</span>
+                <input
+                  type="text"
+                  className="settings-name-input"
+                  value={p2Draft}
+                  onChange={(e) => setP2Draft(e.target.value)}
+                  onBlur={commitP2}
+                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                  maxLength={20}
+                  aria-label="Player 2 name"
+                />
+              </label>
+            </div>
           </section>
 
           {/* ── Cloud sync toggle ──────────────────────────────────────── */}

@@ -3,59 +3,52 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-18 (post-audit + high + medium + low passes)
+Last updated: 2026-05-18 (post-audit + HIGH + MEDIUM + LOW + UX-wins passes)
+
+All audit items are now closed. This file is currently empty of pending
+work — add new items here as they come up.
 
 ---
 
-## Low priority / polish
+## Deferred / parked
 
-### Deferred: Onboarding `<feTurbulence>` static texture
-The onboarding background still uses an SVG `<feTurbulence>` filter that
-repaints constantly. On low-end Android this can drag scroll perf. A
-static PNG noise texture would be cheaper. Not done in this pass because
-the share-card grain win was the higher-leverage half of the same item.
-
----
-
-## UX wins (from audit)
-
-### 13. Sign-out confirmation dialog
-Currently a single tap on "Sign out" forces re-auth and a hydration race.
-Add a confirmation step ("Are you sure? You'll need to sign in again.").
-
-### 14. Couples ballot "undo" between P1 and P2
-If P1 mis-taps their vote, the only escape is Cancel → restart the whole
-ballot. Add a "← Back to {P1 name}" affordance once the P2 view shows.
-
-### 15. Coin-flip preview from start
-The 🎲 coin-flip unlocks after 2 consecutive ballot failures (App.js:2391),
-but this is invisible to users until the second failure. Surface it upfront:
-"🎲 unlocks after 2 misses".
-
-### 16. Genres dropdown — discoverability
-Niche genres (Documentary, Western) are hidden behind the "More genres" toggle.
-First-time users only see 8 moods. Consider a "Popular" subset always visible,
-or surface 2–3 recent picks.
-
-### 17. Saved-for-later cap surfacing
-Save-for-later silently caps at 20. Either bump to 50/100 or surface the cap
-with an upsell.
-
-### 18. Watch history cap surfacing
-History caps at 30 silently — when the 31st pick lands, the oldest vanishes
-with no warning. Either bump to 100 or surface "30/30 — oldest replaced".
-
-### 19. Inline veto on the result card
-A user has to thumbs-down via the rating popup *after* watching, but there's
-no "veto" / "I've seen this" button pre-watch.
-
-### 20. Settings panel
-Single home for: edit player names, edit selected services, withdraw
-consent, delete account, view privacy & terms. Currently scattered.
+### Onboarding `<feTurbulence>` → static texture
+The onboarding background uses an SVG `<feTurbulence>` filter that repaints
+constantly. On low-end Android this can drag scroll perf. A static PNG
+noise texture would be cheaper. The share-card grain win (commit 43972fa)
+was the higher-leverage half of the same audit item; this one parked as
+LOW-impact.
 
 ---
 
 ## Done in recent passes
+
+### UX-wins pass · 2026-05-18
+
+- ✅ **Sign-out confirmation** — two-stage inline confirm: tap "Sign out" →
+     becomes "Yes, sign out" + "Cancel". Auto-reverts after 4 s if forgotten.
+     Prevents mis-tap → re-auth + hydration race.
+- ✅ **Couples ballot "Back" between P1 and P2** — small "← Back to {P1}"
+     link on the P2 step. Resets `p1Vote` so the first partner can re-vote.
+- ✅ **Coin-flip preview hint** — small pill at the top of the ballot card
+     on P1/P2 steps showing "Two misses unlocks the coin flip" (or "One more
+     miss..." after the first failure). Surfaces the escape hatch upfront
+     instead of letting it appear by surprise.
+- ✅ **Inline veto on result card** — new "I've seen this — don't pick it
+     again" link below the action row. Adds the title to `recentPicks`
+     (engine filter list) without touching the taste profile, then triggers
+     a fresh pick. Pre-watch veto that doesn't require waiting for the
+     rating popup.
+- ✅ **Cap surfacing** — history at 30/30 and saved at 20/20 now show an
+     amber "at the limit" hint above the list. The ☆ star button on the
+     result card disables when saved is full + the pick isn't already saved.
+- ✅ **Pinned "Your top genres"** — for users with a built taste profile
+     (≥2 score on at least one genre), the top 3 voted genres appear above
+     the "More genres" toggle. Per-player in couples mode ("{P1}'s top
+     genres"). Brand-new users see nothing extra.
+- ✅ **Settings panel expanded** — new Preferences section with couples
+     player-name editing (was inline-only in couples mode; now also
+     editable from solo mode via Settings). Commits on blur/Enter.
 
 ### Low-priority polish pass · 2026-05-18
 

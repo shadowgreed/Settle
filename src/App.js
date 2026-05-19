@@ -124,6 +124,8 @@ function App() {
   });
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const signOutResetRef = useRef(null);
   const [showToast, setShowToast] = useState(false);
   const [playerNames, setPlayerNames] = useState(() => {
     try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'Him', p2: 'Her' }; }
@@ -305,6 +307,12 @@ function App() {
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Cancel the auto-revert timer for the sign-out confirm if the component
+  // unmounts before the user resolves it.
+  useEffect(() => () => {
+    if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
   }, []);
 
   // Clears every per-account localStorage key and resets in-memory state to
@@ -711,6 +719,25 @@ function App() {
     return m;
   }, []);
 
+  // Pinned "your top genres" per player slot — the top 3 IDs from the taste
+  // profile (descending by score). Only includes genres the user has actively
+  // up-voted (score ≥ 2) so we don't suggest a genre they merely watched
+  // once. Returns empty arrays for slots with no signal yet, so brand-new
+  // users see no extra clutter.
+  const topGenresByPlayer = useMemo(() => {
+    const out = { solo: [], p1: [], p2: [] };
+    for (const slot of ['solo', 'p1', 'p2']) {
+      const profile = tasteProfile[slot] || {};
+      out[slot] = Object.entries(profile)
+        .filter(([id, score]) => score >= 2 && genreById.has(Number(id)))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([id]) => genreById.get(Number(id)))
+        .filter(Boolean);
+    }
+    return out;
+  }, [tasteProfile, genreById]);
+
   const savePlayerName = (player, value) => {
     const name = value.trim() || (player === 'p1' ? 'Him' : 'Her');
     const updated = { ...playerNames, [player]: name };
@@ -737,6 +764,23 @@ function App() {
   }, [mode, compatScore, overlapGenres, playerNames]);
 
   // ── Save for later ────────────────────────────────────────────────────────
+  // "I've seen this" pre-watch veto — adds the current pick's id to
+  // recentPicks (which pickContent already filters against) so it never
+  // re-appears, then triggers a fresh pick. Does NOT touch tasteProfile
+  // because we don't have a signal about whether they liked it or not —
+  // they just don't want to see it again.
+  const handleVetoPick = () => {
+    if (!result) return;
+    const id = result.id;
+    setRecentPicks(prev => {
+      const updated = [...prev.filter(p => p !== id), id].slice(-100);
+      if (consent) safeSet('streaming-seen', JSON.stringify(updated));
+      return updated;
+    });
+    setTryAnotherCount(c => c + 1);
+    pickContent(false);
+  };
+
   const toggleSaveForLater = (item) => {
     const exists = savedForLater.some(s => s.id === item.id);
     const updated = exists
@@ -1484,20 +1528,58 @@ function App() {
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
-          <button className="account-signout" onClick={handleSignOut} aria-label="Sign out">
-            Sign out
-          </button>
+          {confirmingSignOut ? (
+            <>
+              <button
+                className="account-signout account-signout-confirm"
+                onClick={() => {
+                  if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
+                  setConfirmingSignOut(false);
+                  handleSignOut();
+                }}
+                aria-label="Confirm sign out"
+              >
+                Yes, sign out
+              </button>
+              <button
+                className="account-signout account-signout-cancel"
+                onClick={() => {
+                  if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
+                  setConfirmingSignOut(false);
+                }}
+                aria-label="Cancel sign out"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              className="account-signout"
+              onClick={() => {
+                setConfirmingSignOut(true);
+                if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
+                // Auto-revert after 4 s so a forgotten confirm doesn't sit
+                // there exposed if the user wanders off.
+                signOutResetRef.current = setTimeout(() => setConfirmingSignOut(false), 4000);
+              }}
+              aria-label="Sign out"
+            >
+              Sign out
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Settings modal — Privacy & Data controls */}
+      {/* Settings modal — Privacy & Data + Preferences */}
       {showSettings && (
         <Settings
           user={user}
           consent={consent}
+          playerNames={playerNames}
           onClose={() => setShowSettings(false)}
           onWithdrawConsent={handleWithdrawConsent}
           onDeleteAccount={handleDeleteAccount}
+          onSavePlayerNames={savePlayerName}
         />
       )}
 
@@ -1554,6 +1636,35 @@ function App() {
                 </button>
               ))}
             </div>
+            {/* Pinned "your top genres" — only shown when the user has built
+                a taste profile (>=2 score on at least one genre). Surfaces
+                their gravitational center above the More-genres toggle. */}
+            {(() => {
+              const slot = moodPlayer === 'theater' ? 'solo' : moodPlayer;
+              const top = topGenresByPlayer[slot];
+              if (!top || top.length === 0) return null;
+              return (
+                <div className="top-genres-row" role="group" aria-label="Your top genres">
+                  <span className="top-genres-label">Your top genres</span>
+                  <div className="top-genres-chips">
+                    {top.map(genre => {
+                      const active = activeSlot.includes(genre.id);
+                      return (
+                        <button
+                          type="button"
+                          key={genre.id}
+                          className={`chip top-genre-chip ${getGenreClass(genre.id, moodPlayer)}`}
+                          onClick={() => handleGenreClick(genre.id, moodPlayer)}
+                          aria-pressed={active}
+                        >
+                          {genre.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <button
               className="show-genres-toggle"
               onClick={() => setShowAllGenres(prev => !prev)}
@@ -1718,6 +1829,33 @@ function App() {
                 </button>
               ))}
             </div>
+            {/* Pinned "your top genres" — per-player in couples mode so each
+                partner sees their own taste signal. */}
+            {(() => {
+              const top = topGenresByPlayer[activePlayer];
+              if (!top || top.length === 0) return null;
+              return (
+                <div className="top-genres-row" role="group" aria-label={`${playerNames[activePlayer]}'s top genres`}>
+                  <span className="top-genres-label">{playerNames[activePlayer]}'s top genres</span>
+                  <div className="top-genres-chips">
+                    {top.map(genre => {
+                      const active = selectedGenres[activePlayer]?.includes(genre.id);
+                      return (
+                        <button
+                          type="button"
+                          key={genre.id}
+                          className={`chip top-genre-chip ${getGenreClass(genre.id, activePlayer)}`}
+                          onClick={() => handleGenreClick(genre.id, activePlayer)}
+                          aria-pressed={active}
+                        >
+                          {genre.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
             <button
               className="show-genres-toggle"
               onClick={() => setShowAllGenres(prev => !prev)}
@@ -2107,8 +2245,20 @@ function App() {
                 <button
                   className={`act save-btn ${isSaved(result) ? 'saved' : ''}`}
                   onClick={() => toggleSaveForLater(result)}
-                  aria-label={isSaved(result) ? 'Remove from saved' : 'Save for later'}
+                  disabled={!isSaved(result) && savedForLater.length >= 20}
+                  aria-label={
+                    isSaved(result)
+                      ? 'Remove from saved'
+                      : savedForLater.length >= 20
+                        ? 'Saved list is full — remove a pick to save another'
+                        : 'Save for later'
+                  }
                   aria-pressed={isSaved(result)}
+                  title={
+                    !isSaved(result) && savedForLater.length >= 20
+                      ? 'Saved list is full (20 max)'
+                      : undefined
+                  }
                 >
                   {isSaved(result) ? '★' : '☆'}
                 </button>
@@ -2123,6 +2273,16 @@ function App() {
                   </svg>
                 </button>
               </div>
+              {/* Pre-watch veto — quieter than "Try another" because it
+                  permanently bans the title from future picks. */}
+              <button
+                type="button"
+                className="veto-btn"
+                onClick={handleVetoPick}
+                aria-label={`I've already seen ${result.title} — don't pick it again`}
+              >
+                <span aria-hidden="true">✗</span> I've seen this — don't pick it again
+              </button>
               {tryAnotherCount >= 3 && (
                 <div className="mood-nudge" role="status">
                   <span aria-hidden="true">🎯</span> Not feeling these?
@@ -2176,7 +2336,7 @@ function App() {
           >
             <div className="history-header">
               <h2 id="history-title-heading" className="history-title">
-                {historyTab === 'watched' ? <>Watch History <span className="history-count">({watchHistory.length}/30)</span></> : <>Saved <span className="history-count">({savedForLater.length})</span></>}
+                {historyTab === 'watched' ? <>Watch History <span className="history-count">({watchHistory.length}/30)</span></> : <>Saved <span className="history-count">({savedForLater.length}/20)</span></>}
               </h2>
               <button
                 className="history-close"
@@ -2225,6 +2385,11 @@ function App() {
                   </div>
                 ) : (
                   <>
+                    {watchHistory.length >= 30 && (
+                      <div className="history-cap-hint" role="status">
+                        At the 30-entry limit — adding a new pick replaces the oldest.
+                      </div>
+                    )}
                     <div className="history-list">
                       {watchHistory.map(entry => (
                         <button
@@ -2287,6 +2452,11 @@ function App() {
                 </div>
               ) : (
                 <>
+                  {savedForLater.length >= 20 && (
+                    <div className="history-cap-hint" role="status">
+                      Saved list is full (20 max) — remove a pick to add another.
+                    </div>
+                  )}
                   <div className="history-list">
                     {savedForLater.map(entry => (
                       <button
@@ -2493,6 +2663,21 @@ function App() {
         <div className="ballot-overlay" role="dialog" aria-modal="true" aria-label="Secret vote">
           <div ref={ballotCardRef} className="ballot-card" tabIndex={-1}>
 
+            {/* Coin-flip preview hint — surfaces the escape hatch BEFORE
+                users have failed twice, so they know it's coming. Replaced
+                by the live "Let fate decide" button on the reveal screen
+                once ballotFailCount >= 2. */}
+            {ballotStep !== 'reveal' && ballotFailCount < 2 && (
+              <div className="ballot-coin-hint" aria-hidden="true">
+                <span aria-hidden="true">🎲</span>
+                <span>
+                  {ballotFailCount === 0
+                    ? 'Two misses unlocks the coin flip'
+                    : 'One more miss unlocks the coin flip'}
+                </span>
+              </div>
+            )}
+
             {/* Step — P1 votes */}
             {ballotStep === 'p1' && (
               <div className="ballot-step">
@@ -2526,6 +2711,14 @@ function App() {
             {/* Step — P2 votes */}
             {ballotStep === 'p2' && (
               <div className="ballot-step">
+                <button
+                  type="button"
+                  className="ballot-back"
+                  onClick={() => { setBallotStep('p1'); setP1Vote(null); }}
+                  aria-label={`Back to ${playerNames.p1}'s vote`}
+                >
+                  ← Back to {playerNames.p1}
+                </button>
                 <div className="ballot-locked"><span aria-hidden="true">🔒</span> {playerNames.p1}'s vote is locked</div>
                 <div className="ballot-cue">{playerNames.p2}, your turn</div>
                 <div className="ballot-preview">
