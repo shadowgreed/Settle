@@ -12,6 +12,31 @@ work — add new items here as they come up.
 
 ## Deferred / parked
 
+### iOS share sheet doesn't auto-dismiss after share (verified iOS limitation)
+After a user shares a pick to Instagram Story / WhatsApp / etc. and returns
+to Safari, the iOS native share sheet stays visible. They have to swipe it
+down manually to see the app again.
+
+We attempted two fixes (commits `47e119c`, `633ce4c`): pre-baking the share
+file to preserve the user-gesture context, then switching to a fire-and-
+forget pattern so iOS doesn't think the gesture is still in flight. Both
+landed and helped — the share sheet renders properly now — but the
+auto-dismiss is still not consistent on iOS 18 + Safari.
+
+The Web Share API spec gives the page no way to programmatically dismiss
+the share sheet — it's iOS-owned UI. The fire-and-forget pattern is the
+documented best practice; iOS 18 just appears to keep the sheet around
+longer than older versions for "follow-up actions" (share to another
+target, save image, copy, etc.).
+
+Possible future angles:
+  - A non-Web-Share fallback flow (download + manual paste-into-app) for
+    iOS specifically. Worse UX, but full control over dismissal.
+  - Wait for an iOS / WebKit fix. Several open bugs in WebKit Bugzilla
+    track this.
+
+Parked as: known iOS limitation, low-impact (user can swipe away).
+
 ### Onboarding `<feTurbulence>` → static texture
 The onboarding background uses an SVG `<feTurbulence>` filter that repaints
 constantly. On low-end Android this can drag scroll perf. A static PNG
