@@ -1065,13 +1065,21 @@ function App() {
 
   // Share via native share sheet (Instagram, WhatsApp, etc.)
   //
-  // CRITICAL iOS Safari constraint: this handler must NOT await anything
-  // before calling navigator.share(). If it does, the user-gesture context
-  // is lost and iOS opens a blank/empty share sheet (dark rounded overlay
-  // with no app icons). That's why we pre-bake `shareFileRef` in
-  // handleShare() above — by the time the user taps Share, the File is
-  // already in memory and we can dispatch synchronously.
-  const shareImageCard = async () => {
+  // Two iOS Safari constraints to satisfy:
+  //
+  // 1. navigator.share() MUST be called synchronously from the user-gesture
+  //    handler. Any await between the tap and the call severs the gesture
+  //    context and iOS opens a blank share sheet. We satisfy this by
+  //    pre-baking shareFileRef in handleShare() — by the time the user taps
+  //    Share, the File is already in memory and dispatch is synchronous.
+  //
+  // 2. The click handler must RETURN immediately, without awaiting the share
+  //    promise. If we await, iOS thinks the gesture is still in flight and
+  //    keeps the share sheet visible after the user returns from Instagram /
+  //    WhatsApp / etc — they have to manually swipe it away. Fire-and-forget
+  //    with .then/.catch/.finally lets iOS auto-dismiss the sheet as soon as
+  //    the target app reports completion.
+  const shareImageCard = () => {
     const file = shareFileRef.current;
     const item = shareItemRef.current;
     if (!file) {
@@ -1085,19 +1093,24 @@ function App() {
       return;
     }
 
-    // 1. Mark share in progress in sessionStorage — survives bfcache freeze
-    //    and live-background alike, cleared by whichever return signal fires.
+    // Mark share in progress so the visibilitychange/pageshow/focus listeners
+    // know to fully reset our state when the user returns. Survives bfcache.
     sessionStorage.setItem('settle_sharing', '1');
-    // 2. flushSync commits the modal-close to the DOM synchronously so the
-    //    bfcache snapshot (taken when iOS switches to Instagram) is clean.
+    // flushSync commits the modal-close to the DOM synchronously so the
+    // bfcache snapshot (taken when iOS switches to Instagram) is clean.
     try { flushSync(() => closeShareModal()); } catch { closeShareModal(); }
-    // 3. Hand off to the OS share sheet. The promise returned by
-    //    navigator.share() can be awaited later — what matters for iOS
-    //    is that the CALL itself happens synchronously from the user gesture.
-    const sharePromise = navigator.share({ files: [file], title: item?.title });
-    try { await sharePromise; } catch {}
-    // 4. If we're still in-app (Android / cancelled), clear the flag now.
-    sessionStorage.removeItem('settle_sharing');
+
+    // Hand off to the OS share sheet — fire-and-forget. Title is intentionally
+    // omitted: it was confusing iOS into displaying a "Sharing 'Title'…"
+    // status that delayed sheet dismissal in some flows.
+    navigator.share({ files: [file] })
+      .catch(() => { /* AbortError (user cancelled) or extension error */ })
+      .finally(() => {
+        sessionStorage.removeItem('settle_sharing');
+        // Release the file reference so iOS doesn't hold the 340 KB blob
+        // longer than necessary — also makes the share state unambiguous.
+        shareFileRef.current = null;
+      });
   };
 
   const pickContent = async (hiddenGems = false, coinFlip = false) => {
