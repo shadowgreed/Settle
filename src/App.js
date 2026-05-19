@@ -161,6 +161,12 @@ function App() {
   const [shareCardReady, setShareCardReady] = useState(false);
   const shareItemRef = useRef(null);
   const shareCanvasRef = useRef(null);
+  // Pre-baked share-blob File ref. Generated proactively when the canvas is
+  // ready so the Share button's click handler can call navigator.share()
+  // with zero awaits between the user gesture and the API call — iOS Safari
+  // requires this strictly, otherwise the share sheet opens but renders as
+  // a blank dark rectangle with no app icons.
+  const shareFileRef = useRef(null);
   const sharePreviewRef = useRef(null);
   const importFileRef = useRef(null);
   const [importSuccess, setImportSuccess] = useState(false);
@@ -982,14 +988,21 @@ function App() {
     setShareCardUrl(null);
     setShareCardReady(false);
     shareCanvasRef.current = null;
+    shareFileRef.current = null;
   };
 
-  // Opens the share modal and generates the card
+  // Opens the share modal and generates the card.
+  // Critically: we also pre-bake the share File here so the Share button's
+  // click handler doesn't have to await anything before navigator.share().
+  // iOS Safari enforces user-gesture context strictly — any async work
+  // between the tap and navigator.share() makes the share sheet render
+  // as an empty dark overlay with no app icons.
   const handleShare = async (item) => {
     shareItemRef.current = item;
     setShareCardUrl(null);
     setShareCardReady(false);
     shareCanvasRef.current = null;
+    shareFileRef.current = null;
     setShareCardLoading(true);
     setShowShareModal(true);
     try {
@@ -999,8 +1012,25 @@ function App() {
         .slice(0, 4);
       const canvas = await generateShareCard({ result: { ...item, genres: resolvedGenres }, mode, playerNames });
       shareCanvasRef.current = canvas;
+
+      // Pre-bake the share File. JPEG @ 0.92 quality halves the file size vs
+      // PNG (1080×1920 PNG can hit 2–3 MB, which the iOS share sheet
+      // sometimes chokes on). Visual fidelity is indistinguishable at this
+      // quality for poster art + flat dark gradients.
       try {
-        setShareCardUrl(canvas.toDataURL('image/png'));
+        const blob = await new Promise(resolve =>
+          canvas.toBlob(resolve, 'image/jpeg', 0.92)
+        );
+        if (blob) {
+          shareFileRef.current = new File([blob], 'settle-pick.jpg', { type: 'image/jpeg' });
+        }
+      } catch (e) {
+        // Tainted canvas — toBlob will throw. Falls through to text share.
+        console.warn('[ShareCard] toBlob failed:', e?.message);
+      }
+
+      try {
+        setShareCardUrl(canvas.toDataURL('image/jpeg', 0.92));
       } catch {
         // Canvas is tainted (poster loaded without CORS) — card still renders,
         // we'll mount the canvas element directly for preview
@@ -1034,28 +1064,40 @@ function App() {
   };
 
   // Share via native share sheet (Instagram, WhatsApp, etc.)
-  // Only available on mobile browsers that support the Web Share API with files.
+  //
+  // CRITICAL iOS Safari constraint: this handler must NOT await anything
+  // before calling navigator.share(). If it does, the user-gesture context
+  // is lost and iOS opens a blank/empty share sheet (dark rounded overlay
+  // with no app icons). That's why we pre-bake `shareFileRef` in
+  // handleShare() above — by the time the user taps Share, the File is
+  // already in memory and we can dispatch synchronously.
   const shareImageCard = async () => {
-    const canvas = shareCanvasRef.current;
-    if (!canvas) return;
+    const file = shareFileRef.current;
     const item = shareItemRef.current;
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    const file = new File([blob], 'settle-pick.png', { type: 'image/png' });
-
-    if (navigator.canShare?.({ files: [file] })) {
-      // 1. Mark share in progress in sessionStorage — survives bfcache freeze
-      //    and live-background alike, cleared by whichever return signal fires.
-      sessionStorage.setItem('settle_sharing', '1');
-      // 2. flushSync commits the modal-close to the DOM synchronously so the
-      //    bfcache snapshot (taken when iOS switches to Instagram) is clean.
-      try { flushSync(() => closeShareModal()); } catch { closeShareModal(); }
-      // 3. Hand off to the OS share sheet.
-      try {
-        await navigator.share({ files: [file], title: item?.title });
-      } catch {}
-      // 4. If we're still in-app (Android / cancelled), clear the flag now.
-      sessionStorage.removeItem('settle_sharing');
+    if (!file) {
+      // Pre-bake failed (tainted canvas, low-memory abort) — fall back to
+      // text-only share so the user isn't stuck.
+      shareAsText(item || {});
+      return;
     }
+    if (!navigator.canShare?.({ files: [file] })) {
+      shareAsText(item || {});
+      return;
+    }
+
+    // 1. Mark share in progress in sessionStorage — survives bfcache freeze
+    //    and live-background alike, cleared by whichever return signal fires.
+    sessionStorage.setItem('settle_sharing', '1');
+    // 2. flushSync commits the modal-close to the DOM synchronously so the
+    //    bfcache snapshot (taken when iOS switches to Instagram) is clean.
+    try { flushSync(() => closeShareModal()); } catch { closeShareModal(); }
+    // 3. Hand off to the OS share sheet. The promise returned by
+    //    navigator.share() can be awaited later — what matters for iOS
+    //    is that the CALL itself happens synchronously from the user gesture.
+    const sharePromise = navigator.share({ files: [file], title: item?.title });
+    try { await sharePromise; } catch {}
+    // 4. If we're still in-app (Android / cancelled), clear the flag now.
+    sessionStorage.removeItem('settle_sharing');
   };
 
   const pickContent = async (hiddenGems = false, coinFlip = false) => {
