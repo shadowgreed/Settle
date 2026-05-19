@@ -14,6 +14,13 @@
   justify-content: center;
   padding: 20px;
   animation: settings-fade-in 180ms ease-out;
+  /* iOS Safari hardening:
+     - `touch-action: none` on the overlay backdrop prevents touch gestures
+       from triggering rubber-band scroll on the underlying page.
+     - `overscroll-behavior: contain` keeps any scroll chain from bubbling
+       past this layer. */
+  touch-action: none;
+  overscroll-behavior: contain;
 }
 
 @keyframes settings-fade-in {
@@ -24,14 +31,21 @@
 .settings-modal {
   width: 100%;
   max-width: 480px;
-  max-height: 88vh;
+  /* `dvh` accounts for iOS Safari's collapsing URL bar — vh would let the
+     modal exceed the visible viewport. min() falls back to vh on browsers
+     that don't support dvh. */
+  max-height: min(88vh, 88dvh);
   background: #0a0a0a;
   border: 0.5px solid #222;
   border-radius: 14px;
   overflow: hidden;
+  overflow-x: hidden; /* belt-and-suspenders for iOS Safari */
   display: flex;
   flex-direction: column;
   animation: settings-slide-up 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Allow only vertical pan inside the modal — no horizontal sliding,
+     no rotate, no pinch-zoom of the modal itself. */
+  touch-action: pan-y;
 }
 
 @keyframes settings-slide-up {
@@ -61,6 +75,29 @@
   flex-direction: column;
   gap: 22px;
   overflow-y: auto;
+  /* iOS Safari fixes:
+     - `overflow-x: hidden` prevents long emails/URLs from creating a
+       horizontal scroll area inside the modal.
+     - `overscroll-behavior: contain` stops the rubber-band bounce from
+       chaining out to the underlying page when the user drags past the
+       top or bottom of the scrollable content.
+     - `-webkit-overflow-scrolling: touch` enables momentum scroll. */
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Long emails, descriptions, and player names must wrap, not push the
+   layout wider than the modal. Without this, a single email like
+   "verylongusername@somecompanydomain.com" creates a horizontal scroll. */
+.settings-account-line,
+.settings-account-email,
+.settings-section-desc,
+.settings-confirm-text,
+.settings-error,
+.settings-footer-note {
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .settings-section {
@@ -246,8 +283,11 @@
 
 .settings-confirm-actions .settings-btn {
   align-self: stretch;
-  flex: 1 1 auto;
-  min-width: 130px;
+  flex: 1 1 0;
+  /* On very narrow viewports the wrap kicks in and each button takes a
+     full row. min-width: 0 prevents the button content from blowing out
+     the flex container before wrapping. */
+  min-width: 0;
 }
 
 /* ── Danger section emphasis ──────────────────────────────────────────────── */
@@ -306,7 +346,7 @@
 /* Narrow viewports — full-width modal with snug margins */
 @media (max-width: 480px) {
   .settings-overlay { padding: 10px; }
-  .settings-modal   { max-height: 92vh; }
+  .settings-modal   { max-height: min(92vh, 92dvh); }
   .settings-body    { padding: 14px; gap: 18px; }
   .settings-confirm-actions .settings-btn {
     min-width: 0;
