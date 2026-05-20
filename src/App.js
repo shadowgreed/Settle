@@ -1929,17 +1929,23 @@ function App() {
               {mode === 'theater' ? 'What are you in the mood for?' : getMoodGreeting()}
             </div>
             <div className="mood-grid" role="group" aria-labelledby="mood-greeting-label">
-              {MOODS.map(mood => (
-                <button
-                  key={mood.label}
-                  className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
-                  onClick={() => handleMoodClick(mood.ids, moodPlayer)}
-                  aria-pressed={isMoodActive(mood.ids, moodPlayer)}
-                >
-                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
-                  <span className="mood-label">{mood.label}</span>
-                </button>
-              ))}
+              {/* Decade moods ('80s / '90s / '00s) are hidden in theater
+                  mode — they query back catalog by release year, which
+                  doesn't make sense for what's currently playing in
+                  cinemas. */}
+              {MOODS
+                .filter(m => mode !== 'theater' || !m.ids.some(id => DECADE_YEARS[id]))
+                .map(mood => (
+                  <button
+                    key={mood.label}
+                    className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
+                    onClick={() => handleMoodClick(mood.ids, moodPlayer)}
+                    aria-pressed={isMoodActive(mood.ids, moodPlayer)}
+                  >
+                    <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                    <span className="mood-label">{mood.label}</span>
+                  </button>
+                ))}
             </div>
             {/* Pinned "your top genres" — only shown when the user has built
                 a taste profile (>=2 score on at least one genre). Surfaces
