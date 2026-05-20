@@ -1,12 +1,15 @@
-// Settle service worker — v4
+// Settle service worker — v5
+//
+// Also handles Web Push (PM roadmap 3.1) — see push + notificationclick
+// listeners at the bottom.
 // Cache strategy by request type:
 //   /static/js|css|media  → cache-first  (content-hashed, never change)
 //   /api/                 → network-only (app-level caching handles these)
 //   cross-origin          → pass-through (TMDB images, analytics, etc.)
 //   navigation (HTML)     → network-first, cache fallback → /index.html
 
-const SHELL_CACHE  = 'settle-shell-v4';
-const STATIC_CACHE = 'settle-static-v4';
+const SHELL_CACHE  = 'settle-shell-v5';
+const STATIC_CACHE = 'settle-static-v5';
 const ALL_CACHES   = [SHELL_CACHE, STATIC_CACHE];
 
 // App shell — pre-cached on install so the app loads offline immediately
@@ -77,5 +80,53 @@ self.addEventListener('fetch', event => {
           // SPA fallback — any offline navigation serves index.html
           .then(cached => cached || caches.match('/index.html'))
       )
+  );
+});
+
+// ── Web Push (PM roadmap 3.1) ────────────────────────────────────────────────
+// Re-engagement notifications for users idle 3+ days. Payload shape:
+//   { title: string, body: string, url?: string, tag?: string }
+// The server (api/cron/push-notifications.js) builds the payload from each
+// user's top genres + new releases for the week.
+self.addEventListener('push', event => {
+  let data = {};
+  try { data = event.data ? event.data.json() : {}; } catch {}
+  const title   = data.title || 'Settle';
+  const body    = data.body  || 'New picks in your genres dropped this week.';
+  const url     = data.url   || '/';
+  const tag     = data.tag   || 'settle-newrel';
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon:   '/icon-192.png',
+      badge:  '/icon-192.png',
+      tag,             // collapses repeat notifications into one
+      data:   { url }, // read by notificationclick
+      // Re-engagement requires the user to tap to dismiss — keeps the
+      // notification visible until acknowledged (avoids missed re-entry).
+      requireInteraction: false,
+    })
+  );
+});
+
+// Tap a notification → focus an existing Settle tab if one is open,
+// otherwise open a new one at the notification's URL.
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const targetUrl = event.notification?.data?.url || '/';
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+      const existing = list.find(c => c.url.includes(self.location.origin));
+      if (existing) {
+        existing.focus();
+        // Navigate the existing tab to the target URL if it differs
+        if (existing.url !== targetUrl && 'navigate' in existing) {
+          return existing.navigate(targetUrl);
+        }
+        return existing;
+      }
+      return self.clients.openWindow(targetUrl);
+    })
   );
 });

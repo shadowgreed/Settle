@@ -6,9 +6,13 @@ import { generateShareCard } from './utils/shareCard';
 import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
+  trackPushPromptShown, trackPushAccepted, trackPushDenied, trackPushUnsubscribed,
 } from './services/analytics';
+import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice } from './services/push';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
+import NewReleasesCard from './components/NewReleasesCard';
+import PushOptIn from './components/PushOptIn';
 import Settings from './components/Settings';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
@@ -178,6 +182,29 @@ function App() {
   // and the overlay-visibility flag. `trailer` is { key, name } or null.
   const [trailer, setTrailer] = useState(null);
   const [showTrailer, setShowTrailer] = useState(false);
+  // "New in your genres" home-screen card (PM roadmap 3.2). Count is the
+  // headline number from TMDB; dismissed flag is per-day in localStorage.
+  const [newReleasesCount, setNewReleasesCount] = useState(0);
+  const [newReleasesDismissed, setNewReleasesDismissed] = useState(() => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      return localStorage.getItem('settle_newrel_dismissed') === today;
+    } catch { return false; }
+  });
+
+  // Push opt-in state (PM roadmap 3.1).
+  // pickCount persists across sessions; the opt-in banner appears once
+  // pickCount >= 3 AND the user hasn't seen the prompt before AND push is
+  // supported on this device.
+  const [pickCount, setPickCount] = useState(() => {
+    const n = parseInt(localStorage.getItem('settle_pick_count') || '0', 10);
+    return Number.isFinite(n) ? n : 0;
+  });
+  const [pushPrompted, setPushPrompted] = useState(() =>
+    localStorage.getItem('settle_push_prompted') === 'true'
+  );
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
   // Runtime metadata for the result card (P2.2):
   //   movie  → { runtimeMin: 102 }
   //   series → { episodes: 8, avgEpisodeMin: 45 }
@@ -805,6 +832,133 @@ function App() {
     }
     return out;
   }, [tasteProfile, genreById]);
+
+  // ── "New in your genres" home-screen card (PM roadmap 3.2) ──────────────
+  // Fetches a headline count of new releases (last 7 days) matching the
+  // user's top voted genres + selected services. Only solo mode, only for
+  // users with a built taste profile, only when not dismissed today.
+  useEffect(() => {
+    if (mode !== 'solo')             { setNewReleasesCount(0); return; }
+    if (newReleasesDismissed)        { setNewReleasesCount(0); return; }
+    const topIds = (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean);
+    if (topIds.length === 0)         { setNewReleasesCount(0); return; }
+    if (selectedServices.length === 0) { setNewReleasesCount(0); return; }
+
+    let cancelled = false;
+    tmdbService.getNewReleasesCount({
+      services: selectedServices,
+      genreIds: topIds,
+      days: 7,
+    })
+      .then(c => { if (!cancelled) setNewReleasesCount(c); })
+      .catch(() => { if (!cancelled) setNewReleasesCount(0); });
+    return () => { cancelled = true; };
+  }, [mode, topGenresByPlayer.solo, selectedServices, newReleasesDismissed]);
+
+  // Handler — tap the "New in your genres" card. Seeds solo mode with the
+  // top genres and immediately fires a pick so the user lands on a fresh
+  // result without an extra tap.
+  const handleNewReleasesTap = () => {
+    const topIds = (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean);
+    if (topIds.length === 0) return;
+    setSelectedGenres(prev => ({ ...prev, solo: topIds }));
+    setTryAnotherCount(0);
+    // Defer the pick by a tick so the selectedGenres state commits before
+    // pickContent reads it via the memoized `activeGenres`.
+    queueMicrotask(() => pickContent(false));
+  };
+
+  const handleNewReleasesDismiss = () => {
+    setNewReleasesDismissed(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      safeSet('settle_newrel_dismissed', today);
+    } catch {}
+  };
+
+  // ── Push notifications opt-in (PM roadmap 3.1) ──────────────────────────
+  // On mount + when the user changes, check whether this device is already
+  // subscribed so the Settings toggle reflects reality.
+  useEffect(() => {
+    if (!user) { setPushSubscribed(false); return; }
+    let cancelled = false;
+    isSubscribedOnThisDevice().then(sub => {
+      if (!cancelled) setPushSubscribed(sub);
+    });
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Fire the analytics "prompt shown" event the first time the banner
+  // becomes visible. Tracked separately from "accepted/denied" so the funnel
+  // can measure prompt-to-acceptance conversion.
+  const shouldShowOptIn =
+    !!user &&
+    pickCount >= 3 &&
+    !pushPrompted &&
+    isPushSupported() &&
+    typeof Notification !== 'undefined' &&
+    Notification.permission === 'default' &&
+    consent; // respect storage consent — no opt-in for users who declined sync
+  useEffect(() => {
+    if (shouldShowOptIn) trackPushPromptShown();
+  }, [shouldShowOptIn]);
+
+  const handlePushAccept = async () => {
+    if (!user) return;
+    setPushBusy(true);
+    try {
+      await subscribeToPush(user.uid);
+      setPushSubscribed(true);
+      setPushPrompted(true);
+      safeSet('settle_push_prompted', 'true');
+      trackPushAccepted();
+    } catch (e) {
+      const code = (e?.message || '').toLowerCase();
+      const reason = code.includes('denied')   ? 'permission_denied'
+                   : code.includes('vapid')    ? 'no_vapid_key'
+                   : code.includes('supported') ? 'not_supported'
+                   : 'subscribe_failed';
+      trackPushDenied(reason);
+      // Hide the banner either way — the user took action. They can still
+      // re-enable from Settings later if it was just an env-config issue.
+      setPushPrompted(true);
+      safeSet('settle_push_prompted', 'true');
+      console.warn('[Push] Subscribe failed:', e?.message);
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handlePushDismiss = () => {
+    setPushPrompted(true);
+    safeSet('settle_push_prompted', 'true');
+    trackPushDenied('dismissed');
+  };
+
+  // Toggle wired from Settings panel. Returns true if state changed
+  // successfully — the Settings component uses the return to display
+  // success/error states.
+  const handlePushToggle = async (wantOn) => {
+    if (!user) return false;
+    setPushBusy(true);
+    try {
+      if (wantOn) {
+        await subscribeToPush(user.uid);
+        setPushSubscribed(true);
+        trackPushAccepted();
+      } else {
+        await unsubscribeFromPush(user.uid);
+        setPushSubscribed(false);
+        trackPushUnsubscribed();
+      }
+      return true;
+    } catch (e) {
+      console.warn('[Push] Toggle failed:', e?.message);
+      return false;
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   const savePlayerName = (player, value) => {
     const name = value.trim() || (player === 'p1' ? 'Him' : 'Her');
@@ -1495,6 +1649,15 @@ function App() {
         mode,
         isHiddenGem: hiddenGems,
       });
+      // Pick counter drives the push opt-in banner (PM roadmap 3.1). Counts
+      // every successful pick across all modes. Persists in localStorage so
+      // it survives reloads — the 3rd pick triggers the prompt whether it
+      // happens in session 1 or session 4.
+      setPickCount(prev => {
+        const next = prev + 1;
+        try { localStorage.setItem('settle_pick_count', String(next)); } catch {}
+        return next;
+      });
       setRecentPicks(prev => {
         const updated = [...prev.filter(id => id !== picked.id), picked.id].slice(-100);
         if (consent) safeSet('streaming-seen', JSON.stringify(updated));
@@ -1859,10 +2022,14 @@ function App() {
           user={user}
           consent={consent}
           playerNames={playerNames}
+          pushSupported={isPushSupported()}
+          pushSubscribed={pushSubscribed}
+          pushBusy={pushBusy}
           onClose={() => setShowSettings(false)}
           onWithdrawConsent={handleWithdrawConsent}
           onDeleteAccount={handleDeleteAccount}
           onSavePlayerNames={savePlayerName}
+          onTogglePush={handlePushToggle}
         />
       )}
 
@@ -1885,6 +2052,30 @@ function App() {
           watchHistory={watchHistory}
           streak={streakInfo}
           onClose={() => setShowStreakHistory(false)}
+        />
+      )}
+
+      {/* Push notifications opt-in (PM roadmap 3.1). Appears after the user
+          has generated 3 successful picks, only on push-supported devices,
+          only if they granted storage consent. One-shot — dismissing or
+          accepting both hide it permanently (user can re-enable in Settings). */}
+      {shouldShowOptIn && (
+        <PushOptIn
+          onAccept={handlePushAccept}
+          onDismiss={handlePushDismiss}
+          busy={pushBusy}
+        />
+      )}
+
+      {/* "New in your genres" home card (PM roadmap 3.2). Solo mode only;
+          hidden silently when there's nothing new or the user dismissed it
+          today. Tap → seed top genres + fire a fresh pick. */}
+      {mode === 'solo' && newReleasesCount > 0 && !newReleasesDismissed && (
+        <NewReleasesCard
+          count={newReleasesCount}
+          genreNames={(topGenresByPlayer.solo || []).map(g => g.name)}
+          onTap={handleNewReleasesTap}
+          onDismiss={handleNewReleasesDismiss}
         />
       )}
 
@@ -2478,11 +2669,28 @@ function App() {
                       alongside the trailer + collection). Rating piece falls
                       off if missing. Votes count stays accessible to AT users
                       via the aria-label without cluttering the visual line. */}
-                  <div
-                    className="result-meta-line"
-                    aria-label={`Released ${result.year}, ${result.type}, rated ${result.rating} out of 10, ${result.votes} ratings`}
-                  >
-                    {formatMetaLine(result, runtimeInfo)}
+                  <div className="result-meta-row">
+                    <div
+                      className="result-meta-line"
+                      aria-label={`Released ${result.year}, ${result.type}, rated ${result.rating} out of 10, ${result.votes} ratings`}
+                    >
+                      {formatMetaLine(result, runtimeInfo)}
+                    </div>
+                    {/* Trailer button — small dark inline chip per PD spec 3.3.
+                        Sits next to the metadata, not as a full-width CTA. */}
+                    {trailer?.key && (
+                      <button
+                        type="button"
+                        className="trailer-btn trailer-btn-card"
+                        onClick={() => openTrailer('result_card')}
+                        aria-label={`Watch trailer for ${result.title}`}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                          <polygon points="6 4 20 12 6 20" />
+                        </svg>
+                        Trailer
+                      </button>
+                    )}
                   </div>
                 </div>
                 {result.service === 'In Theaters' ? (
@@ -2522,22 +2730,6 @@ function App() {
                 <div className="pick-reason">{pickReason}</div>
               )}
               <div className="desc">{result.description}</div>
-              {/* Trailer CTA — sits above the action row as a primary
-                  pre-watch action. Hidden silently when TMDB has no
-                  YouTube trailer for this title. */}
-              {trailer?.key && (
-                <button
-                  type="button"
-                  className="trailer-btn trailer-btn-card"
-                  onClick={() => openTrailer('result_card')}
-                  aria-label={`Watch trailer for ${result.title}`}
-                >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-                    <polygon points="6 4 20 12 6 20" />
-                  </svg>
-                  Watch trailer
-                </button>
-              )}
               <div className="act-row">
                 <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
                   Try another
@@ -2971,10 +3163,10 @@ function App() {
                 onClick={() => openTrailer('cinema_mode')}
                 aria-label={`Watch trailer for ${cinemaItem.title}`}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
                   <polygon points="6 4 20 12 6 20" />
                 </svg>
-                Watch trailer
+                Trailer
               </button>
             )}
             <button className="cinema-share-btn" onClick={() => handleShare(cinemaItem)}>

@@ -80,6 +80,18 @@ export function trackConsentRevoked()  { track('consent_revoked'); }
 export function trackAccountDeleted()  { track('account_deleted'); }
 
 /**
+ * Push-notification opt-in funnel events. No PII.
+ *   prompt_shown  → opt-in banner appeared (after 3rd successful pick)
+ *   accepted      → user tapped accept + browser granted permission
+ *   denied        → user dismissed banner OR browser denied permission
+ *   unsubscribed  → user later turned off notifications via Settings
+ */
+export function trackPushPromptShown()   { track('push_prompt_shown'); }
+export function trackPushAccepted()      { track('push_accepted'); }
+export function trackPushDenied(reason)  { track('push_denied', { reason }); }
+export function trackPushUnsubscribed()  { track('push_unsubscribed'); }
+
+/**
  * Retention signal — user tapped "Watch trailer" on a pick. Captures
  * the title's service + type + mode so we can correlate trailer plays
  * with downstream "We're watching this" conversions.

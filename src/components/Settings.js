@@ -17,10 +17,14 @@ export default function Settings({
   user,
   consent,
   playerNames,
+  pushSupported,
+  pushSubscribed,
+  pushBusy,
   onClose,
   onWithdrawConsent,
   onDeleteAccount,
   onSavePlayerNames,
+  onTogglePush,
 }) {
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
@@ -147,6 +151,28 @@ export default function Settings({
               </label>
             </div>
           </section>
+
+          {/* ── Notifications toggle ────────────────────────────────────── */}
+          {pushSupported && (
+            <section className="settings-section">
+              <h3 className="settings-section-title">Notifications</h3>
+              <p className="settings-section-desc">
+                {pushSubscribed
+                  ? "You'll get a weekly heads-up when new titles in your top genres drop."
+                  : "Get a weekly heads-up when new titles in your top genres drop. No spam."}
+              </p>
+              <button
+                type="button"
+                className={`settings-btn ${pushSubscribed ? 'settings-btn-ghost' : 'settings-btn-warn'}`}
+                onClick={() => onTogglePush?.(!pushSubscribed)}
+                disabled={pushBusy}
+              >
+                {pushBusy
+                  ? 'Working…'
+                  : pushSubscribed ? 'Turn off notifications' : 'Turn on notifications'}
+              </button>
+            </section>
+          )}
 
           {/* ── Cloud sync toggle ──────────────────────────────────────── */}
           <section className="settings-section">

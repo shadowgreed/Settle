@@ -347,6 +347,60 @@ class TMDBService {
     });
   }
 
+  // Count new releases ("dropped this week") matching the user's top genres
+  // and currently-selected services. Used by the "New in your genres" home
+  // screen card (PM roadmap 3.2). Returns just the count via `total_results`
+  // — we don't need the actual items, only the headline number for the card.
+  // The card's tap behavior re-runs the normal pickContent flow.
+  async getNewReleasesCount({ services = [], genreIds = [], days = 7 } = {}) {
+    if (!Array.isArray(genreIds) || genreIds.length === 0) return 0;
+    if (!Array.isArray(services) || services.length === 0) return 0;
+
+    const providerIds = services
+      .map(s => PROVIDER_IDS[s])
+      .filter(Boolean)
+      .join('|'); // TMDB OR query — title needs to be on ANY of these services
+    if (!providerIds) return 0;
+
+    // Date floor — last N days. UTC midnight to keep the cache stable
+    // through the day instead of inching forward minute-by-minute.
+    const floor = new Date();
+    floor.setUTCHours(0, 0, 0, 0);
+    floor.setUTCDate(floor.getUTCDate() - days);
+    const floorStr = floor.toISOString().slice(0, 10);
+
+    const cacheKey = `newrel-${providerIds}-${genreIds.join(',')}-${floorStr}`;
+    return this.getCached(cacheKey, async () => {
+      try {
+        // Count movies + tv separately; sum total_results for the headline.
+        const [m, tv] = await Promise.all([
+          this.api.get('/discover/movie', { params: {
+            with_watch_providers: providerIds,
+            watch_region: 'US',
+            sort_by: 'primary_release_date.desc',
+            'primary_release_date.gte': floorStr,
+            with_genres: genreIds.join('|'),
+            'vote_count.gte': 5, // light floor — very new titles have few votes
+            page: 1,
+          }}),
+          this.api.get('/discover/tv', { params: {
+            with_watch_providers: providerIds,
+            watch_region: 'US',
+            sort_by: 'first_air_date.desc',
+            'first_air_date.gte': floorStr,
+            with_genres: genreIds.join('|'),
+            'vote_count.gte': 5,
+            page: 1,
+          }}),
+        ]);
+        return (m.data?.total_results || 0) + (tv.data?.total_results || 0);
+      } catch (e) {
+        console.warn('[TMDB] getNewReleasesCount failed:', e.message);
+        return 0;
+      }
+    });
+  }
+
   // Fetch the best YouTube trailer for a title.
   //
   // Returns a video object { key, name } where `key` is the YouTube video ID,

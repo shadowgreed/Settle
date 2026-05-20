@@ -2077,63 +2077,68 @@ input[type="range"]::-moz-range-thumb {
   cursor: not-allowed;
 }
 
-/* Trailer CTAs (result card + cinema mode).
-   Primary visual treatment because trailer-views are the strongest
-   pre-commitment retention signal we have. Subtle red play-icon
-   nod to YouTube without screaming "YouTube embed". */
+/* Trailer button — small dark inline chip per PD spec 3.3.
+   Refined from the original full-width red treatment; sits next to the
+   metadata line so it doesn't compete with the primary CTA or duplicate
+   YouTube's brand red against Netflix's service badge. */
 .trailer-btn {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 8px;
-  background: linear-gradient(135deg, #1f1f1f 0%, #161616 100%);
-  border: 0.5px solid rgba(229, 9, 20, 0.45);
-  color: #f5f5f5;
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  gap: 6px;
+  background: #1a1a1a;
+  border: 0.5px solid #2a2a2a;
+  color: #f0f0f0;
+  /* PD spec calls out Outfit 12px specifically. Falls back to system fonts
+     until Outfit (already loaded for onboarding) is available. */
+  font-family: 'Outfit', system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: pointer;
-  border-radius: 10px;
-  transition: border-color 0.15s, background 0.15s, transform 0.12s;
+  border-radius: 100px;
+  padding: 6px 12px;
+  transition: background 150ms, border-color 150ms;
   touch-action: manipulation;
-  min-height: 44px;
+  /* Min-height 32 px keeps the inline chip visually small (PD intent)
+     while exceeding WCAG 2.5.8 (24×24) for a tap target. Vertical padding
+     above contributes to the effective hit area. */
+  min-height: 32px;
+  flex-shrink: 0;
 }
 .trailer-btn svg {
-  color: #e50914;
+  /* White triangle, no YouTube red — PD note. */
+  color: #f0f0f0;
   flex-shrink: 0;
 }
 .trailer-btn:hover,
 .trailer-btn:focus-visible {
-  border-color: rgba(229, 9, 20, 0.85);
-  background: linear-gradient(135deg, #262626 0%, #1c1c1c 100%);
+  background: #242424;
+  border-color: #3a3a3a;
   outline: none;
 }
-.trailer-btn:active { transform: scale(0.98); }
+.trailer-btn:active { background: #2a2a2a; }
 
-/* Result card placement — full-width pill above the action row. */
-.trailer-btn-card {
-  width: 100%;
-  padding: 12px 16px;
-  margin: 4px 0 12px;
+/* Wrapper so the trailer chip can sit inline next to the meta line and
+   wrap to a new row only when the meta text is long. */
+.result-meta-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 3px;
+}
+.result-meta-row .result-meta-line {
+  margin-top: 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* Cinema-mode placement — secondary action sitting below the primary
-   "Open on Netflix" CTA. Same overall look as the cinema-share-btn so the
-   two secondary actions feel like a pair. */
+/* Cinema-mode placement — quieter secondary chip alongside the share
+   button. Same dark treatment as the card version, just slightly more
+   padding so it reads as an action there. */
 .trailer-btn-cinema {
-  padding: 11px 18px;
   margin-top: 10px;
-  font-size: 12px;
-  font-weight: 500;
-  background: transparent;
-  border-color: rgba(229, 9, 20, 0.35);
-  color: #ddd;
-}
-.trailer-btn-cinema:hover,
-.trailer-btn-cinema:focus-visible {
-  background: rgba(229, 9, 20, 0.06);
-  border-color: rgba(229, 9, 20, 0.65);
+  padding: 8px 14px;
 }
 
 /* Pre-watch veto link below the result-card action row. Visually quieter
