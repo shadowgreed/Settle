@@ -66,8 +66,30 @@ const MOODS = [
   { emoji: '🧠', label: 'Thoughtful', ids: [99, 9648] },
   { emoji: '🍿', label: 'Easy Watch', ids: [10751, 35, 'anime'] },
   { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
+  // Decade moods — added per PM roadmap 2.1. All three passed the catalog
+  // audit (345 / 510 / 1050 combined pickable titles). Each decade ID is a
+  // virtual genre that pickContent translates into a TMDB date-range query
+  // parameter instead of a with_genres filter.
+  { emoji: '📼', label: "'80s vibes", ids: ['decade-80s'] },
+  { emoji: '📺', label: "'90s vibes", ids: ['decade-90s'] },
+  { emoji: '💿', label: "'00s vibes", ids: ['decade-00s'] },
 ];
 const ANIME_KEYWORD = '210024';
+
+// Maps decade-mood IDs to TMDB date-range query parameters. Multiple decade
+// IDs combine by spanning the min `gte` and max `lte` (e.g. '80s + '90s
+// becomes 1980-01-01 → 1999-12-31).
+const DECADE_YEARS = {
+  'decade-80s': { gte: '1980-01-01', lte: '1989-12-31' },
+  'decade-90s': { gte: '1990-01-01', lte: '1999-12-31' },
+  'decade-00s': { gte: '2000-01-01', lte: '2009-12-31' },
+};
+
+// Virtual genre IDs — IDs that aren't real TMDB genre IDs but instead drive
+// special query behavior (keywords, date ranges, etc). The pickContent code
+// uses this to decide whether an ID should appear in the with_genres param
+// or be translated into a different filter.
+const VIRTUAL_GENRES = new Set(['steamy', 'anime', 'decade-80s', 'decade-90s', 'decade-00s']);
 
 const SERVICES = [
   { name: 'Netflix',      color: '#E50914' },
@@ -156,6 +178,11 @@ function App() {
   // and the overlay-visibility flag. `trailer` is { key, name } or null.
   const [trailer, setTrailer] = useState(null);
   const [showTrailer, setShowTrailer] = useState(false);
+  // Runtime metadata for the result card (P2.2):
+  //   movie  → { runtimeMin: 102 }
+  //   series → { episodes: 8, avgEpisodeMin: 45 }
+  //   null   → fetch failed or not yet loaded; card renders without runtime row
+  const [runtimeInfo, setRuntimeInfo] = useState(null);
   // Session-scoped set of title IDs that have already received a trailer
   // taste-signal credit. Prevents the user from compounding +0.5 by
   // re-opening the trailer in the same session. Resets on app reload.
@@ -547,6 +574,7 @@ function App() {
     setTheaterReleaseInfo(null);
     setTrailer(null);
     setShowTrailer(false);
+    setRuntimeInfo(null);
     if (!result) return;
     let cancelled = false;
 
@@ -570,9 +598,14 @@ function App() {
     // Pre-fetch the YouTube trailer so the "Watch trailer" button can appear
     // as soon as the result card renders. If TMDB has no trailer for this
     // title, `trailer` stays null and the button is hidden silently.
-    const trailerType = result.type === 'Movie' ? 'movie' : 'tv';
-    tmdbService.getTrailer(result.id, trailerType)
+    const tmdbType = result.type === 'Movie' ? 'movie' : 'tv';
+    tmdbService.getTrailer(result.id, tmdbType)
       .then(t => { if (!cancelled) setTrailer(t); })
+      .catch(() => {});
+    // Pre-fetch runtime info for the metadata row (P2.2). Movies need a
+    // runtime; series need episode count + average episode length.
+    tmdbService.getRuntimeInfo(result.id, tmdbType)
+      .then(info => { if (!cancelled) setRuntimeInfo(info); })
       .catch(() => {});
 
     return () => { cancelled = true; };
@@ -1279,11 +1312,31 @@ function App() {
         // how many fire at once and avoid cold-start pile-ups.
         const fetchFns = [];
 
+        // Split activeGenres into three buckets:
+        //   regularIds  → real TMDB genre IDs (combined into one OR query)
+        //   specialIds  → keyword-based virtual genres (steamy, anime)
+        //   decadeIds   → date-range virtual genres ('80s, '90s, '00s)
+        // The three buckets are independent layers; decade range applies to
+        // ALL queries (regular + special) so '80s + Steamy = '80s steamy.
+        const regularIds = activeGenresForFetch.filter(id => !VIRTUAL_GENRES.has(id));
+        const specialIds = activeGenresForFetch.filter(id => id === 'steamy' || id === 'anime');
+        const decadeIds  = activeGenresForFetch.filter(id => DECADE_YEARS[id]);
+
+        // Combine multiple decades by spanning the union (min gte, max lte).
+        const dateGte = decadeIds.length
+          ? decadeIds.map(d => DECADE_YEARS[d].gte).sort()[0]
+          : null;
+        const dateLte = decadeIds.length
+          ? decadeIds.map(d => DECADE_YEARS[d].lte).sort().slice(-1)[0]
+          : null;
+
         for (const service of selectedServices) {
           for (const format of activeFormats) {
             const type = format === 'Movie' ? 'movie' : 'tv';
 
-            if (activeGenresForFetch.length === 0) {
+            // No genre filter case — fires when nothing is selected OR when
+            // only decade moods are selected. The date range still applies.
+            if (regularIds.length === 0 && specialIds.length === 0) {
               fetchFns.push(() =>
                 tmdbService.discoverContent({
                   service,
@@ -1291,17 +1344,14 @@ function App() {
                   minRating: hiddenGems ? 0 : minRating,
                   hiddenGems,
                   maxCertification: hiddenGems ? null : maxCertification,
-                  maxRuntime: (hiddenGems || type !== 'movie') ? null : maxRuntime
+                  // maxRuntime removed in P2.2 — surfaced on the result card instead.
+                  dateGte, dateLte,
                 })
               );
             } else {
-              // Split keyword-based special genres (steamy, anime) from regular
-              // TMDB genre IDs. Regular IDs are combined into one OR query
-              // (e.g. "35|16") so we fire 1 request per service+format instead
+              // Regular TMDB genres are combined into one OR query (e.g.
+              // "35|16") so we fire 1 request per service+format instead
               // of N requests — reduces peak burst from ~20 to ~10.
-              const regularIds = activeGenresForFetch.filter(id => id !== 'steamy' && id !== 'anime');
-              const specialIds = activeGenresForFetch.filter(id => id === 'steamy' || id === 'anime');
-
               if (regularIds.length > 0) {
                 const combinedGenre = regularIds.join('|'); // TMDB OR query
                 fetchFns.push(() =>
@@ -1312,7 +1362,7 @@ function App() {
                     minRating,
                     hiddenGems: false,
                     maxCertification,
-                    maxRuntime: type !== 'movie' ? null : maxRuntime
+                    dateGte, dateLte,
                   })
                 );
               }
@@ -1328,7 +1378,7 @@ function App() {
                     minRating,
                     hiddenGems: false,
                     maxCertification,
-                    maxRuntime: type !== 'movie' ? null : maxRuntime
+                    dateGte, dateLte,
                   })
                 );
               }
@@ -1360,9 +1410,11 @@ function App() {
           ? unique.filter(item => item.rating >= 4.0)
           : unique.filter(item => item.rating >= minRating);
 
-      // Genre filter
-      const virtualGenres = ['steamy', 'anime'];
-      const realGenres = activeGenresForFetch.filter(id => !virtualGenres.includes(id));
+      // Genre filter — only "real" TMDB genre IDs make it into this check.
+      // Virtual IDs (keywords / decade date ranges) are handled at the query
+      // layer and would never match item.genres, so filtering by them here
+      // would zero out the pool.
+      const realGenres = activeGenresForFetch.filter(id => !VIRTUAL_GENRES.has(id));
       if (realGenres.length > 0 && !hiddenGems) {
         filtered = filtered.filter(item =>
           item.genres.some(genreId => realGenres.includes(genreId))
@@ -1617,6 +1669,47 @@ function App() {
   const starsFromRating = (rating) => {
     const full = Math.min(5, Math.max(0, Math.round((parseFloat(rating) || 0) / 2)));
     return '★'.repeat(full) + '☆'.repeat(5 - full);
+  };
+
+  // Format runtime for the pick-card metadata row (P2.2):
+  //   movies → "1h 42min"  /  "45min"  /  "2h"
+  //   series → "8 episodes · ~45min each"  /  "8 episodes"  /  "~45min each"
+  // Returns null if neither dataset is available — the meta line skips it.
+  const formatRuntimePiece = (type, info) => {
+    if (!info) return null;
+    if (type === 'Movie') {
+      const r = info.runtimeMin;
+      if (!Number.isFinite(r) || r <= 0) return null;
+      const h = Math.floor(r / 60);
+      const m = r % 60;
+      if (h === 0) return `${m}min`;
+      if (m === 0) return `${h}h`;
+      return `${h}h ${m}min`;
+    }
+    const bits = [];
+    if (Number.isFinite(info.episodes) && info.episodes > 0) {
+      bits.push(`${info.episodes} episode${info.episodes === 1 ? '' : 's'}`);
+    }
+    if (Number.isFinite(info.avgEpisodeMin) && info.avgEpisodeMin > 0) {
+      bits.push(`~${info.avgEpisodeMin}min each`);
+    }
+    return bits.length > 0 ? bits.join(' · ') : null;
+  };
+
+  // Builds the unified meta line per PM spec 2.2:
+  //   "2023 · Movie · 1h 42min · ★ 8.2"
+  //   "2023 · Series · 8 episodes · ~45min each · ★ 8.2"
+  // Pieces fall off gracefully if their data isn't loaded yet.
+  const formatMetaLine = (item, info) => {
+    const parts = [];
+    if (item.year)  parts.push(item.year);
+    if (item.type)  parts.push(item.type);
+    const runtimePiece = formatRuntimePiece(item.type, info);
+    if (runtimePiece) parts.push(runtimePiece);
+    if (Number.isFinite(parseFloat(item.rating)) && item.rating > 0) {
+      parts.push(`★ ${item.rating}`);
+    }
+    return parts.join(' · ');
   };
 
   const getServiceColor = (serviceName) => {
@@ -2209,33 +2302,8 @@ function App() {
         </div>
       )}
 
-      {mode !== 'theater' && selectedFormats.includes('Movie') && (
-        <div className="section">
-          <div className="label" id="runtime-label">Movie Length</div>
-          <div className="cert-row" role="radiogroup" aria-labelledby="runtime-label">
-            {[
-              { label: 'Any length', value: null, aria: 'Any length' },
-              { label: '⏱ Under 90 min', value: 90, aria: 'Under 90 minutes' },
-              { label: '⏱ Under 2 hrs', value: 120, aria: 'Under 2 hours' },
-            ].map(opt => {
-              const active = maxRuntime === opt.value;
-              return (
-                <button
-                  type="button"
-                  key={opt.label}
-                  className={`cert-chip ${active ? 'cert-on' : ''}`}
-                  onClick={() => setMaxRuntime(opt.value)}
-                  role="radio"
-                  aria-checked={active}
-                  aria-label={opt.aria}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* Runtime filter removed in P2.2 — users now see runtime on the pick
+          card metadata row and decide in context, not pre-filter. */}
 
       {mode !== 'theater' && (
         <div className="section">
@@ -2397,7 +2465,19 @@ function App() {
               <div className="result-top">
                 <div>
                   <div className="result-title">{result.title}</div>
-                  <div className="result-year">{result.year} · {result.type}</div>
+                  {/* Unified meta line per PM spec 2.2:
+                        "2023 · Movie · 1h 42min · ★ 8.2"
+                        "2023 · Series · 8 episodes · ~45min each · ★ 8.2"
+                      Runtime piece appears once runtimeInfo loads (pre-fetched
+                      alongside the trailer + collection). Rating piece falls
+                      off if missing. Votes count stays accessible to AT users
+                      via the aria-label without cluttering the visual line. */}
+                  <div
+                    className="result-meta-line"
+                    aria-label={`Released ${result.year}, ${result.type}, rated ${result.rating} out of 10, ${result.votes} ratings`}
+                  >
+                    {formatMetaLine(result, runtimeInfo)}
+                  </div>
                 </div>
                 {result.service === 'In Theaters' ? (
                   <div className="svc-badge theater-badge">🎟️ In Theaters</div>
@@ -2432,11 +2512,6 @@ function App() {
                   </span>
                 </div>
               )}
-              <div className="rating-row" aria-label={`Rated ${result.rating} out of 10, ${result.votes} ratings`}>
-                <span className="stars" aria-hidden="true">{starsFromRating(result.rating)}</span>
-                <span className="rating-num" aria-hidden="true">{result.rating}/10</span>
-                <span className="rating-sub" aria-hidden="true">· {result.votes} ratings</span>
-              </div>
               {pickReason && (
                 <div className="pick-reason">{pickReason}</div>
               )}

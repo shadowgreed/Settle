@@ -665,6 +665,19 @@ input[type="range"]::-moz-range-thumb {
   margin-top: 2px;
 }
 
+/* Unified pick-card meta line per PM spec 2.2 — replaces the old standalone
+   "rating-row" (★★★★☆ 8.2/10 · 4,200 ratings). Year · Type · Runtime · ★ Rating
+   all on one row. Slightly larger than the old result-year to carry the
+   merged content without feeling cramped. */
+.result-meta-line {
+  font-size: 12px;
+  font-weight: 500;
+  color: #c8c8c8;
+  margin-top: 3px;
+  letter-spacing: 0.01em;
+  line-height: 1.4;
+}
+
 .svc-badge {
   font-size: 10px;
   font-weight: 500;

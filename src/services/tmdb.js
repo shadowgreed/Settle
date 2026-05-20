@@ -45,8 +45,8 @@ class TMDBService {
   }
 
   // Discover content by streaming service and filters
-  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxRuntime = null, maxPages = null }) {
-    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${maxRuntime}`;
+  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxRuntime = null, maxPages = null, dateGte = null, dateLte = null }) {
+    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${maxRuntime}-${dateGte}-${dateLte}`;
 
     return this.getCached(cacheKey, async () => {
       const providerId = PROVIDER_IDS[service];
@@ -79,6 +79,13 @@ class TMDBService {
       // Runtime filter applies to movies only
       if (maxRuntime && type === 'movie') {
         params['with_runtime.lte'] = maxRuntime;
+      }
+      // Decade-mood date range. Movies use primary_release_date, TV uses
+      // first_air_date — same logical year filter, different field name.
+      if (dateGte || dateLte) {
+        const dateField = type === 'tv' ? 'first_air_date' : 'primary_release_date';
+        if (dateGte) params[`${dateField}.gte`] = dateGte;
+        if (dateLte) params[`${dateField}.lte`] = dateLte;
       }
 
       const endpoint = type === 'movie' ? '/discover/movie' : '/discover/tv';
@@ -297,6 +304,46 @@ class TMDBService {
         certification: certification || null,
         isWideRelease: !!wide,
       };
+    });
+  }
+
+  // Fetch runtime data for the pick card metadata row (P2.2).
+  //
+  // Movies return `{ runtimeMin: 102 }` — total runtime in minutes.
+  // Series return `{ episodes: 8, avgEpisodeMin: 45 }` — episode count and
+  // average episode length. TMDB's episode_run_time is an array (some shows
+  // vary widely); we use the median so a single 90-min finale doesn't skew.
+  //
+  // Returns null if the fetch fails — the card just renders without runtime
+  // (graceful degradation, no broken layout).
+  async getRuntimeInfo(id, type = 'movie') {
+    const endpoint = type === 'tv' ? 'tv' : 'movie';
+    const cacheKey = `runtime-${endpoint}-${id}`;
+    return this.getCached(cacheKey, async () => {
+      try {
+        const res = await this.api.get(`/${endpoint}/${id}`);
+        if (type === 'movie') {
+          const r = parseInt(res.data?.runtime, 10);
+          return Number.isFinite(r) && r > 0 ? { runtimeMin: r } : null;
+        }
+        const episodes = parseInt(res.data?.number_of_episodes, 10);
+        const runtimes = Array.isArray(res.data?.episode_run_time)
+          ? res.data.episode_run_time.filter(n => Number.isFinite(n) && n > 0)
+          : [];
+        // Median runtime — robust against outlier episode lengths.
+        let avgEpisodeMin = null;
+        if (runtimes.length > 0) {
+          const sorted = [...runtimes].sort((a, b) => a - b);
+          avgEpisodeMin = sorted[Math.floor(sorted.length / 2)];
+        }
+        return {
+          episodes:       Number.isFinite(episodes) && episodes > 0 ? episodes : null,
+          avgEpisodeMin,
+        };
+      } catch (e) {
+        console.warn('[TMDB] getRuntimeInfo failed:', e.message);
+        return null;
+      }
     });
   }
 
