@@ -92,3 +92,33 @@ export function trackTrailerPlayed({ service, type, mode, fromSurface }) {
     from_surface: fromSurface, // 'result_card' | 'cinema_mode'
   });
 }
+
+/**
+ * Conversion event — user tapped "Open on [Service]" to leave Settle for
+ * the streaming platform. The funnel's terminal step: pick_generated →
+ * trailer_played (optional) → deep_link_opened. Without this we can't
+ * answer "are users actually opening Netflix when we tell them to?"
+ */
+export function trackDeepLinkOpened({ service, titleId, mode, surface }) {
+  track('deep_link_opened', {
+    service,
+    title_id: titleId,
+    mode,
+    surface, // 'result_card' | 'cinema_mode'
+  });
+}
+
+/**
+ * Feedback event — user rated a pick up or down (or skipped) via the
+ * rating popup. `timeSincePick` is the gap between when the pick was
+ * surfaced and when the user voted, in seconds. Useful for distinguishing
+ * "watched then loved it" (long gap) from "rejected on sight" (short gap).
+ */
+export function trackVoteSubmitted({ titleId, vote, service, timeSincePick }) {
+  track('vote_submitted', {
+    title_id: titleId,
+    vote,              // 'up' | 'down' | 'skip'
+    service,
+    time_since_pick: timeSincePick, // seconds, or null if unavailable
+  });
+}

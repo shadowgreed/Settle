@@ -3,10 +3,14 @@ import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
-import { trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted, trackTrailerPlayed } from './services/analytics';
+import {
+  trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
+  trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
+} from './services/analytics';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
 import Settings from './components/Settings';
+import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
 import { onAuthChange, signOut, deleteCurrentUser } from './services/auth';
@@ -125,6 +129,7 @@ function App() {
   });
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showStreakHistory, setShowStreakHistory] = useState(false);
   const [confirmingSignOut, setConfirmingSignOut] = useState(false);
   const signOutResetRef = useRef(null);
   const [showToast, setShowToast] = useState(false);
@@ -151,6 +156,10 @@ function App() {
   // and the overlay-visibility flag. `trailer` is { key, name } or null.
   const [trailer, setTrailer] = useState(null);
   const [showTrailer, setShowTrailer] = useState(false);
+  // Session-scoped set of title IDs that have already received a trailer
+  // taste-signal credit. Prevents the user from compounding +0.5 by
+  // re-opening the trailer in the same session. Resets on app reload.
+  const trailerCreditedRef = useRef(new Set());
   const [hasSearched, setHasSearched] = useState(false);
   const [noMoodSelected, setNoMoodSelected] = useState(false);
   const [fetchError, setFetchError] = useState(false);
@@ -397,8 +406,9 @@ function App() {
       if (e.key !== 'Escape') return;
       // Trailer takes priority over everything else — if you opened it from
       // cinema mode, Escape should bring you back to cinema, not exit it.
-      if (showTrailer)    { setShowTrailer(false); return; }
-      if (showSettings)   { setShowSettings(false); return; }
+      if (showTrailer)        { setShowTrailer(false); return; }
+      if (showStreakHistory)  { setShowStreakHistory(false); return; }
+      if (showSettings)       { setShowSettings(false); return; }
       if (showShareModal) { closeShareModal(); return; }
       if (showPrivacy)    { setShowPrivacy(false); return; }
       if (showTerms)      { setShowTerms(false); return; }
@@ -410,7 +420,7 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer]);
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer, showStreakHistory]);
 
   // Lock body scroll while any modal is open — prevents the underlying app from
   // scrolling on iOS when the user drags inside the overlay. Restores the prior
@@ -419,14 +429,14 @@ function App() {
     const anyOpen =
       showOnboarding || showHistory || showShareModal || showPrivacy ||
       showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings ||
-      showTrailer;
+      showTrailer || showStreakHistory;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = prev; };
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
-      showBallot, cinemaMode, ratingPopup, showSettings, showTrailer]);
+      showBallot, cinemaMode, ratingPopup, showSettings, showTrailer, showStreakHistory]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -807,6 +817,57 @@ function App() {
       type:    item.type,
       mode,
       fromSurface: surface,
+    });
+    // Apply soft taste signal — trailer view counts as a 25% upvote (+0.5 vs
+    // an explicit upvote's +2). Capped at one credit per title per session
+    // so the user can't compound by re-opening the trailer.
+    applyTrailerSignal(item);
+  };
+
+  // ── Trailer-as-soft-taste-signal (PM roadmap 1.2) ────────────────────────
+  // A user who watches a trailer didn't skip — that's a real signal. We add
+  // +0.5 per genre, capped at one credit per title per session. If the user
+  // later explicitly votes on the same title, handleVote/saveToHistory mark
+  // the entry as `trailerCredited: true` so the explicit vote can reverse
+  // the +0.5 first, preventing double-counting.
+  const applyTrailerSignal = (item) => {
+    if (!item || !item.id) return;
+    if (trailerCreditedRef.current.has(item.id)) return; // already credited this session
+    trailerCreditedRef.current.add(item.id);
+
+    const entryMode = mode === 'theater' ? 'solo' : mode;
+    const genreIds = item.genres || [];
+    if (genreIds.length === 0) return;
+
+    setTasteProfile(prev => {
+      const updated = JSON.parse(JSON.stringify(prev));
+      const players = entryMode === 'couple' ? ['p1', 'p2'] : [entryMode];
+      players.forEach(player => {
+        if (!updated[player]) updated[player] = {};
+        genreIds.forEach(id => {
+          updated[player][id] = (updated[player][id] || 0) + 0.5;
+        });
+      });
+      if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  // Reverses a trailer signal — used by handleVote so an explicit vote doesn't
+  // compound on top of the +0.5 the trailer view already applied.
+  const reverseTrailerSignal = (genreIds, entryMode) => {
+    if (!genreIds || genreIds.length === 0) return;
+    setTasteProfile(prev => {
+      const updated = JSON.parse(JSON.stringify(prev));
+      const players = entryMode === 'couple' ? ['p1', 'p2'] : [entryMode];
+      players.forEach(player => {
+        if (!updated[player]) return;
+        genreIds.forEach(id => {
+          updated[player][id] = Math.max(0, (updated[player][id] || 0) - 0.5);
+        });
+      });
+      if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
+      return updated;
     });
   };
 
@@ -1415,6 +1476,10 @@ function App() {
   };
 
   const saveToHistory = (item, { coupleAgreed = false } = {}) => {
+    // Capture whether the trailer signal was applied — handleVote uses this
+    // when the user later rates the title to reverse the +0.5 before applying
+    // the explicit vote. Persists across sessions with the history entry.
+    const trailerCredited = trailerCreditedRef.current.has(item.id);
     const entry = {
       id: item.id,
       title: item.title,
@@ -1427,7 +1492,8 @@ function App() {
       watchedAt: new Date().toISOString(),
       mode,
       coupleAgreed,
-      rated: null
+      rated: null,
+      trailerCredited,
     };
     setWatchHistory(prev => {
       const filtered = prev.filter(h => h.id !== item.id);
@@ -1484,8 +1550,29 @@ function App() {
       return updated;
     });
     if (vote !== 'skip') {
+      // If the trailer applied a soft signal earlier, reverse it FIRST so the
+      // explicit vote replaces (rather than compounds with) the +0.5 credit.
+      // The flag lives on the history entry, so this works across sessions.
+      const entryMode =
+        ratingPopup.mode === 'theater' ? 'solo' : (ratingPopup.mode || 'solo');
+      if (ratingPopup.trailerCredited) {
+        reverseTrailerSignal(ratingPopup.genres || [], entryMode);
+      }
       updateTasteProfile(ratingPopup.genres || [], vote, ratingPopup.mode);
     }
+    // Feedback funnel event. time_since_pick measures how long after the
+    // pick was first surfaced the user came back to vote — long gaps
+    // typically indicate "actually watched the thing", short gaps indicate
+    // a snap reject. PM uses this to distinguish quality from rejection.
+    const timeSincePick = ratingPopup.watchedAt
+      ? Math.round((Date.now() - new Date(ratingPopup.watchedAt).getTime()) / 1000)
+      : null;
+    trackVoteSubmitted({
+      titleId:        popupId,
+      vote,
+      service:        ratingPopup.service,
+      timeSincePick,
+    });
     setRatingPopup(null);
   };
 
@@ -1604,10 +1691,21 @@ function App() {
               <span aria-hidden="true">★</span> {savedForLater.length}
             </button>
           )}
-          {mode === 'couple' && streakInfo ? (
-            <span className="account-stat account-streak" title={`${streakInfo}-night streak`} aria-label={`${streakInfo}-night streak`}>
+          {/* Couples streak — shown whenever the user has a >=2-night streak,
+              regardless of current mode (PM roadmap 1.3). Tapping opens a
+              7-day history modal so the streak feels like an investment, not
+              just a stat. Hidden silently for users with no couples activity
+              (streakInfo === null). */}
+          {streakInfo ? (
+            <button
+              type="button"
+              className="account-stat account-streak"
+              onClick={() => setShowStreakHistory(true)}
+              title={`${streakInfo}-night streak — tap for details`}
+              aria-label={`${streakInfo}-night streak. Open streak history.`}
+            >
               <span aria-hidden="true">🔥</span> {streakInfo}
-            </span>
+            </button>
           ) : null}
           <button
             className="account-settings-btn"
@@ -1687,6 +1785,15 @@ function App() {
           />
         );
       })()}
+
+      {/* Streak history — last 7 nights with hit/miss markers (PM roadmap 1.3). */}
+      {showStreakHistory && streakInfo && (
+        <StreakHistory
+          watchHistory={watchHistory}
+          streak={streakInfo}
+          onClose={() => setShowStreakHistory(false)}
+        />
+      )}
 
       <div id="main-content" className="mode-tabs" role="group" aria-label="Mode" tabIndex={-1}>
         <button
@@ -2761,6 +2868,12 @@ function App() {
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ background: getServiceColor(cinemaItem.service) }}
+                    onClick={() => trackDeepLinkOpened({
+                      service: cinemaItem.service,
+                      titleId: cinemaItem.id,
+                      mode,
+                      surface: 'cinema_mode',
+                    })}
                   >
                     ▶ Open on {cinemaItem.service === 'In Theaters' ? 'Google' : cinemaItem.service}
                   </a>

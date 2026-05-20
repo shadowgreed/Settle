@@ -1,0 +1,149 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   StreakHistory — last-7-nights couples streak modal.
+   Reuses .privacy-close + .privacy-modal scaffolding patterns (App.css).
+───────────────────────────────────────────────────────────────────────────── */
+
+.streak-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 1700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: streak-fade-in 180ms ease-out;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+@keyframes streak-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.streak-modal {
+  width: 100%;
+  max-width: 440px;
+  max-height: min(80vh, 80dvh);
+  background: #0c0c0c;
+  border: 0.5px solid #222;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: streak-slide-up 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  touch-action: pan-y;
+}
+
+@keyframes streak-slide-up {
+  from { transform: translateY(14px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.streak-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 0.5px solid #1a1a1a;
+  background: linear-gradient(135deg, #1a0a08 0%, #0c0c0c 70%);
+}
+
+.streak-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #ff8a6a;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.streak-body {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.streak-tagline {
+  font-size: 13px;
+  font-weight: 500;
+  color: #d9b04a;
+  margin: 0;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
+/* 7-day strip. Equal-width cells with the iconography centered. */
+.streak-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.streak-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 12px 4px;
+  border-radius: 8px;
+  border: 0.5px solid #1f1f1f;
+  background: #131313;
+  min-height: 64px;
+}
+
+.streak-day-icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.streak-day-label {
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #777;
+  text-align: center;
+}
+
+/* Hit — agreed couples ballot that night. Warm amber glow. */
+.streak-day.streak-hit {
+  border-color: rgba(255, 130, 60, 0.35);
+  background: linear-gradient(180deg, rgba(255, 130, 60, 0.16) 0%, rgba(255, 130, 60, 0.04) 100%);
+}
+.streak-day.streak-hit .streak-day-label {
+  color: #ff8a6a;
+}
+
+/* Miss — couples session that night, ballot didn't agree. Muted red. */
+.streak-day.streak-miss {
+  border-color: rgba(192, 7, 15, 0.35);
+  background: rgba(192, 7, 15, 0.06);
+}
+.streak-day.streak-miss .streak-day-icon {
+  color: #c66;
+  font-weight: 600;
+}
+
+/* No data — no couples session that night. Faded. */
+.streak-day.streak-none {
+  opacity: 0.55;
+}
+.streak-day.streak-none .streak-day-icon {
+  color: #555;
+}
+
+.streak-footer-note {
+  font-size: 11px;
+  line-height: 1.55;
+  color: #777;
+  margin: 0;
+  padding-top: 4px;
+  border-top: 0.5px solid #161616;
+}
