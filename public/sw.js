@@ -1,12 +1,12 @@
-// Settle service worker — v3
+// Settle service worker — v4
 // Cache strategy by request type:
 //   /static/js|css|media  → cache-first  (content-hashed, never change)
 //   /api/                 → network-only (app-level caching handles these)
 //   cross-origin          → pass-through (TMDB images, analytics, etc.)
 //   navigation (HTML)     → network-first, cache fallback → /index.html
 
-const SHELL_CACHE  = 'settle-shell-v3';
-const STATIC_CACHE = 'settle-static-v3';
+const SHELL_CACHE  = 'settle-shell-v4';
+const STATIC_CACHE = 'settle-static-v4';
 const ALL_CACHES   = [SHELL_CACHE, STATIC_CACHE];
 
 // App shell — pre-cached on install so the app loads offline immediately
