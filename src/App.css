@@ -56,34 +56,17 @@ body {
   margin-bottom: 16px;
 }
 
-.account-email {
+/* User identity (avatar + name) lives in Settings now — the main page
+   account bar is just for the saved-star count + streak + settings/sign-out
+   actions. */
+
+.account-bar-left {
   display: flex;
   align-items: center;
   gap: 8px;
-  max-width: calc(100% - 80px);
-  overflow: hidden;
-}
-
-.account-avatar {
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  object-fit: cover;
-}
-
-.account-avatar-fallback {
-  font-size: 18px;
-  line-height: 1;
-  flex-shrink: 0;
-}
-
-.account-name {
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.45);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Empty when the user has no saved picks — collapses naturally because
+     children are conditionally rendered. */
+  min-height: 28px;
 }
 
 .account-bar-right {

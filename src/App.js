@@ -1865,18 +1865,11 @@ function App() {
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
-      {/* Account bar — user identity + sign-out */}
+      {/* Account bar — left: saved-picks star count · right: streak + settings + sign-out.
+          User identity itself lives in Settings; the main page stays focused on the
+          pick flow. */}
       <div className="account-bar">
-        <span className="account-email" title={user.email || user.displayName || ''}>
-          {user.photoURL
-            ? <img className="account-avatar" src={user.photoURL} alt="" aria-hidden="true" referrerPolicy="no-referrer" />
-            : <span className="account-avatar-fallback" aria-hidden="true">👤</span>
-          }
-          <span className="account-name">
-            {user.displayName || user.email?.split('@')[0] || 'Account'}
-          </span>
-        </span>
-        <div className="account-bar-right">
+        <div className="account-bar-left">
           {savedForLater.length > 0 && (
             <button
               className="account-stat"
@@ -1887,6 +1880,8 @@ function App() {
               <span aria-hidden="true">★</span> {savedForLater.length}
             </button>
           )}
+        </div>
+        <div className="account-bar-right">
           {/* Couples streak — shown whenever the user has a >=2-night streak,
               regardless of current mode (PM roadmap 1.3). Tapping opens a
               7-day history modal so the streak feels like an investment, not
