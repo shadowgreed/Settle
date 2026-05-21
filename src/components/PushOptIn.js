@@ -12,7 +12,10 @@ import './PushOptIn.css';
 
 export default function PushOptIn({ onAccept, onDismiss, busy }) {
   return (
-    <div className="push-optin" role="region" aria-label="Notifications opt-in">
+    // role="status" + aria-live="polite" so screen readers announce the
+    // banner when it appears (it surfaces dynamically after the 3rd pick).
+    // The buttons inside carry their own actionable labels.
+    <div className="push-optin" role="status" aria-live="polite">
       <span className="push-optin-icon" aria-hidden="true">🔔</span>
       <div className="push-optin-body">
         <div className="push-optin-title">Heads-up on new picks?</div>

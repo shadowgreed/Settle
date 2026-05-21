@@ -99,6 +99,12 @@ function mergeIdSet(cloudArr, localArr, cap) {
 
 // ── Payload builder ───────────────────────────────────────────────────────────
 // Shapes current app state into the Firestore document structure.
+//
+// Note: `pushSubscriptions` is intentionally NOT written by buildPayload.
+// Push subscriptions are managed by src/services/push.js via arrayUnion /
+// arrayRemove on the user doc, and a regular merge:true write here would
+// preserve them. Don't ever add them to this payload — would race with
+// per-device subscribe/unsubscribe operations.
 export const buildPayload = (state) => ({
   tasteProfile:  state.tasteProfile,
   recentPicks:   state.recentPicks,
@@ -114,7 +120,8 @@ export const buildPayload = (state) => ({
     formats:          state.selectedFormats,
     minRating:        state.minRating,
     maxCertification: state.maxCertification ?? null,
-    maxRuntime:       state.maxRuntime ?? null,
+    // maxRuntime removed — runtime filter retired in P2.2 (runtime now
+    // surfaced on the result card metadata row instead).
   },
 });
 
@@ -178,7 +185,7 @@ const readLocalData = () => {
       formats:          prefs.formats          ?? ['Movie', 'Series'],
       minRating:        prefs.minRating        ?? 0,
       maxCertification: prefs.maxCertification ?? null,
-      maxRuntime:       prefs.maxRuntime       ?? null,
+      // maxRuntime intentionally dropped — runtime filter retired in P2.2.
     },
   };
 };

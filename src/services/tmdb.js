@@ -45,8 +45,8 @@ class TMDBService {
   }
 
   // Discover content by streaming service and filters
-  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxRuntime = null, maxPages = null, dateGte = null, dateLte = null }) {
-    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${maxRuntime}-${dateGte}-${dateLte}`;
+  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxPages = null, dateGte = null, dateLte = null }) {
+    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${dateGte}-${dateLte}`;
 
     return this.getCached(cacheKey, async () => {
       const providerId = PROVIDER_IDS[service];
@@ -76,10 +76,8 @@ class TMDBService {
         params.certification_country = 'US';
         params['certification.lte'] = maxCertification;
       }
-      // Runtime filter applies to movies only
-      if (maxRuntime && type === 'movie') {
-        params['with_runtime.lte'] = maxRuntime;
-      }
+      // Runtime filter retired in P2.2 — runtime now displayed on the
+      // result card metadata row, not pre-filtered server-side.
       // Decade-mood date range. Movies use primary_release_date, TV uses
       // first_air_date — same logical year filter, different field name.
       if (dateGte || dateLte) {

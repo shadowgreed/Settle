@@ -3133,50 +3133,6 @@ input[type="range"]::-moz-range-thumb {
   white-space: nowrap;
 }
 
-/* ─────────────────────────────────────────────────────────────
-   History panel — data export / import row
-   ──────────────────────────────────────────────────────────── */
-.history-data-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 18px 14px;
-  border-top: 1px solid #1a1a1a;
-  margin-top: 4px;
-  flex-shrink: 0;
-}
-.data-action-btn {
-  flex: 1;
-  padding: 9px 0;
-  border-radius: 8px;
-  border: 0.5px solid #2e2e2e;
-  background: transparent;
-  color: #888;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.15s;
-  display: inline-block;
-}
-.data-action-btn:hover {
-  border-color: #555;
-  color: #ccc;
-}
-.data-action-import { cursor: pointer; }
-.import-success {
-  font-size: 12px;
-  color: #4ac678;
-  white-space: nowrap;
-  animation: fadeInUp 0.2s ease;
-}
-.import-error {
-  font-size: 12px;
-  color: #f87171;
-  white-space: nowrap;
-  animation: fadeInUp 0.2s ease;
-}
-
 /* Genre error inline — shown when genre list fails to load */
 .genre-error {
   display: flex;

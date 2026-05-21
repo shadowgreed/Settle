@@ -25,7 +25,10 @@ export default function NewReleasesCard({ count, genreNames, onTap, onDismiss })
     : '';
 
   return (
-    <div className="newrel-card" role="region" aria-label={`New releases${ariaGenres}`}>
+    // role="group" is quieter than "region" for screen readers and removes
+    // the duplicate announcement caused by both region and inner button
+    // carrying their own aria-label. Only the button label is announced now.
+    <div className="newrel-card" role="group">
       <button
         type="button"
         className="newrel-body"

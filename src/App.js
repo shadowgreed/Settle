@@ -95,6 +95,13 @@ const DECADE_YEARS = {
 // or be translated into a different filter.
 const VIRTUAL_GENRES = new Set(['steamy', 'anime', 'decade-80s', 'decade-90s', 'decade-00s']);
 
+// Taste-profile weighting constants. Promoted from inline literals so the
+// relationship between explicit votes and the soft trailer signal is
+// documented in one place — TRAILER_BOOST is exactly 25% of an upvote.
+const VOTE_UP_WEIGHT     = 2;     // explicit thumbs-up
+const VOTE_DOWN_WEIGHT   = 1;     // explicit thumbs-down (subtracted)
+const TRAILER_BOOST      = 0.5;   // soft signal from a trailer view (25% of upvote)
+
 const SERVICES = [
   { name: 'Netflix',      color: '#E50914' },
   { name: 'Prime Video',  color: '#00A8E1' },
@@ -219,9 +226,9 @@ function App() {
   const [fetchError, setFetchError] = useState(false);
   const [fetchErrorType, setFetchErrorType] = useState(null); // 'timeout' | 'network'
   const [genreError, setGenreError] = useState(false);
-  const [importError, setImportError] = useState(false);
   const [maxCertification, setMaxCertification] = useState(() => loadPrefs().maxCertification || null);
-  const [maxRuntime, setMaxRuntime] = useState(() => loadPrefs().maxRuntime || null);
+  // Note: `maxRuntime` was removed in P2.2 (runtime relocated to result card
+  // metadata). State / sync / hydrate paths cleared in the post-audit pass.
   const [shareCopied, setShareCopied] = useState(false);
 
   const [showShareModal, setShowShareModal] = useState(false);
@@ -237,8 +244,6 @@ function App() {
   // a blank dark rectangle with no app icons.
   const shareFileRef = useRef(null);
   const sharePreviewRef = useRef(null);
-  const importFileRef = useRef(null);
-  const [importSuccess, setImportSuccess] = useState(false);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
   const [showConsent, setShowConsent] = useState(() => localStorage.getItem('sd_consent') === null);
   // Onboarding is NOT shown at mount — we defer the decision until after
@@ -329,7 +334,7 @@ function App() {
       if (Array.isArray(p.formats))          setSelectedFormats(p.formats);
       if (p.minRating != null)               setMinRating(p.minRating);
       if ('maxCertification' in p)           setMaxCertification(p.maxCertification);
-      if ('maxRuntime' in p)                 setMaxRuntime(p.maxRuntime);
+      // p.maxRuntime intentionally ignored — filter removed in P2.2.
     }
   };
 
@@ -445,14 +450,14 @@ function App() {
       pushUserData(user.uid, buildPayload({
         tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
         mode, selectedServices, selectedGenres, selectedFormats, minRating,
-        maxCertification, maxRuntime,
+        maxCertification,
       }));
     }, 2000);
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, consent, tasteProfile, recentPicks, savedForLater, watchHistory,
       playerNames, mode, selectedServices, selectedGenres, selectedFormats,
-      minRating, maxCertification, maxRuntime]);
+      minRating, maxCertification]);
 
   // Global Escape-to-close for any open overlay/modal (a11y: 2.1.2 No Keyboard Trap)
   useEffect(() => {
@@ -552,9 +557,8 @@ function App() {
       formats: selectedFormats,
       minRating,
       maxCertification,
-      maxRuntime
     }));
-  }, [mode, selectedServices, selectedGenres, selectedFormats, minRating, maxCertification, maxRuntime, consent]);
+  }, [mode, selectedServices, selectedGenres, selectedFormats, minRating, maxCertification, consent]);
 
   // Reset ballot state when a new result comes in
   useEffect(() => {
@@ -837,35 +841,39 @@ function App() {
   // Fetches a headline count of new releases (last 7 days) matching the
   // user's top voted genres + selected services. Only solo mode, only for
   // users with a built taste profile, only when not dismissed today.
+  //
+  // Stringified deps prevent re-fetching every time tasteProfile mutates —
+  // topGenresByPlayer.solo returns a new array reference on each render even
+  // when the underlying IDs are byte-identical, so without stringifying we'd
+  // hit TMDB on every vote.
+  const topSoloIdsKey  = (topGenresByPlayer.solo || []).map(g => g.id).join(',');
+  const servicesKey    = selectedServices.join(',');
   useEffect(() => {
-    if (mode !== 'solo')             { setNewReleasesCount(0); return; }
-    if (newReleasesDismissed)        { setNewReleasesCount(0); return; }
-    const topIds = (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean);
-    if (topIds.length === 0)         { setNewReleasesCount(0); return; }
-    if (selectedServices.length === 0) { setNewReleasesCount(0); return; }
+    if (mode !== 'solo')        { setNewReleasesCount(0); return; }
+    if (newReleasesDismissed)   { setNewReleasesCount(0); return; }
+    if (!topSoloIdsKey)         { setNewReleasesCount(0); return; }
+    if (!servicesKey)           { setNewReleasesCount(0); return; }
+
+    const topIds   = topSoloIdsKey.split(',').map(s => isNaN(s) ? s : Number(s));
+    const services = servicesKey.split(',');
 
     let cancelled = false;
-    tmdbService.getNewReleasesCount({
-      services: selectedServices,
-      genreIds: topIds,
-      days: 7,
-    })
+    tmdbService.getNewReleasesCount({ services, genreIds: topIds, days: 7 })
       .then(c => { if (!cancelled) setNewReleasesCount(c); })
       .catch(() => { if (!cancelled) setNewReleasesCount(0); });
     return () => { cancelled = true; };
-  }, [mode, topGenresByPlayer.solo, selectedServices, newReleasesDismissed]);
+  }, [mode, topSoloIdsKey, servicesKey, newReleasesDismissed]);
 
   // Handler — tap the "New in your genres" card. Seeds solo mode with the
-  // top genres and immediately fires a pick so the user lands on a fresh
-  // result without an extra tap.
+  // top genres (for visible mood-grid state) AND passes the IDs directly to
+  // pickContent so the immediate pick fires against the right set without
+  // waiting for React to commit the setSelectedGenres call.
   const handleNewReleasesTap = () => {
     const topIds = (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean);
     if (topIds.length === 0) return;
     setSelectedGenres(prev => ({ ...prev, solo: topIds }));
     setTryAnotherCount(0);
-    // Defer the pick by a tick so the selectedGenres state commits before
-    // pickContent reads it via the memoized `activeGenres`.
-    queueMicrotask(() => pickContent(false));
+    pickContent(false, false, topIds);
   };
 
   const handleNewReleasesDismiss = () => {
@@ -877,16 +885,19 @@ function App() {
   };
 
   // ── Push notifications opt-in (PM roadmap 3.1) ──────────────────────────
-  // On mount + when the user changes, check whether this device is already
-  // subscribed so the Settings toggle reflects reality.
+  // On mount + when the signed-in account changes, check whether this device
+  // is already subscribed so the Settings toggle reflects reality. Key on
+  // user.uid (not the user object) — Firebase emits multiple identity-stable
+  // setUser calls during hydration; keying on the uid skips the redundant
+  // service-worker round-trips.
   useEffect(() => {
-    if (!user) { setPushSubscribed(false); return; }
+    if (!user?.uid) { setPushSubscribed(false); return; }
     let cancelled = false;
     isSubscribedOnThisDevice().then(sub => {
       if (!cancelled) setPushSubscribed(sub);
     });
     return () => { cancelled = true; };
-  }, [user]);
+  }, [user?.uid]);
 
   // Fire the analytics "prompt shown" event the first time the banner
   // becomes visible. Tracked separately from "accepted/denied" so the funnel
@@ -1032,7 +1043,7 @@ function App() {
       players.forEach(player => {
         if (!updated[player]) updated[player] = {};
         genreIds.forEach(id => {
-          updated[player][id] = (updated[player][id] || 0) + 0.5;
+          updated[player][id] = (updated[player][id] || 0) + TRAILER_BOOST;
         });
       });
       if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
@@ -1041,7 +1052,7 @@ function App() {
   };
 
   // Reverses a trailer signal — used by handleVote so an explicit vote doesn't
-  // compound on top of the +0.5 the trailer view already applied.
+  // compound on top of the trailer-view boost already applied.
   const reverseTrailerSignal = (genreIds, entryMode) => {
     if (!genreIds || genreIds.length === 0) return;
     setTasteProfile(prev => {
@@ -1050,7 +1061,7 @@ function App() {
       players.forEach(player => {
         if (!updated[player]) return;
         genreIds.forEach(id => {
-          updated[player][id] = Math.max(0, (updated[player][id] || 0) - 0.5);
+          updated[player][id] = Math.max(0, (updated[player][id] || 0) - TRAILER_BOOST);
         });
       });
       if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
@@ -1094,95 +1105,10 @@ function App() {
   const isSaved = (item) => item && savedForLater.some(s => s.id === item.id);
 
   // ── Profile export / import ────────────────────────────────────────────────
-  // Packages all meaningful user data into a dated JSON file the user can save
-  // locally. Import reads it back and restores every piece of state + localStorage.
-  // This is a stop-gap against localStorage wipe until cloud sync ships.
-  const handleExportData = () => {
-    const exportData = {
-      version: 1,
-      exportedAt: new Date().toISOString(),
-      tasteProfile,
-      watchHistory,
-      savedForLater,
-      recentPicks,
-      playerNames,
-      prefs: {
-        mode,
-        services: selectedServices,
-        genres: selectedGenres,
-        formats: selectedFormats,
-        minRating,
-        maxCertification,
-      },
-    };
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `settle-profile-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportData = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      try {
-        const data = JSON.parse(ev.target.result);
-        if (!data.version || !data.tasteProfile) throw new Error('Invalid format');
-
-        if (data.tasteProfile) {
-          setTasteProfile(data.tasteProfile);
-          safeSet('streaming-taste-profile', JSON.stringify(data.tasteProfile));
-        }
-        if (data.watchHistory) {
-          setWatchHistory(data.watchHistory);
-          safeSet('streaming-history', JSON.stringify(data.watchHistory));
-        }
-        if (data.savedForLater) {
-          setSavedForLater(data.savedForLater);
-          safeSet('settle-saved', JSON.stringify(data.savedForLater));
-        }
-        if (data.recentPicks) {
-          setRecentPicks(data.recentPicks);
-          safeSet('streaming-seen', JSON.stringify(data.recentPicks));
-        }
-        if (data.playerNames) {
-          setPlayerNames(data.playerNames);
-          safeSet('streaming-player-names', JSON.stringify(data.playerNames));
-        }
-        if (data.prefs) {
-          const p = data.prefs;
-          if (p.services) setSelectedServices(p.services);
-          if (p.genres)   setSelectedGenres({ solo: [], p1: [], p2: [], theater: [], ...p.genres });
-          if (p.formats)  setSelectedFormats(p.formats);
-          if (p.minRating !== undefined) setMinRating(p.minRating);
-        }
-
-        setImportSuccess(true);
-        setTimeout(() => setImportSuccess(false), 3000);
-
-        // Import is canonical — push the imported arrays authoritatively so
-        // the cloud copy is replaced rather than additively merged with the
-        // pre-import state.
-        flushAuthoritativeSync({
-          ...(data.watchHistory  != null && { watchHistory:  data.watchHistory  }),
-          ...(data.savedForLater != null && { savedForLater: data.savedForLater }),
-          ...(data.recentPicks   != null && { recentPicks:   data.recentPicks   }),
-        });
-      } catch {
-        setImportError(true);
-        setTimeout(() => setImportError(false), 4000);
-      }
-      // Reset so the same file can be re-imported if needed
-      e.target.value = '';
-    };
-    reader.readAsText(file);
-  };
+  // Manual export/import flow removed in this commit. Was a stop-gap
+  // against localStorage wipe before cloud sync existed; now Firestore is
+  // the canonical persistence layer and the cross-device portability
+  // story is "sign in on the other device".
 
   // ── Couples streak ─────────────────────────────────────────────────────────
   // Length of the current "agreed" streak (consecutive couple-mode history
@@ -1398,7 +1324,12 @@ function App() {
       });
   };
 
-  const pickContent = async (hiddenGems = false, coinFlip = false) => {
+  // `forceGenres` (optional) — caller-supplied genre IDs that bypass the
+  // memoized `activeGenres` lookup. Used by handleNewReleasesTap so the
+  // immediate pick fires against the seeded top genres without waiting
+  // for React to commit the setSelectedGenres call (queueMicrotask /
+  // setTimeout both run before commit and would read stale state).
+  const pickContent = async (hiddenGems = false, coinFlip = false, forceGenres = null) => {
     if (mode !== 'theater' && selectedServices.length === 0) {
       setHasSearched(true);
       setMatchCount(0);
@@ -1409,8 +1340,9 @@ function App() {
     // Hidden gems intentionally bypass genre filtering, but we still
     // want users to confirm intent — skip the guard for that path.
     if (!hiddenGems) {
-      const hasMood =
-        mode === 'couple'
+      const hasMood = forceGenres
+        ? forceGenres.length > 0
+        : mode === 'couple'
           ? (selectedGenres.p1.length > 0 || selectedGenres.p2.length > 0)
           : (selectedGenres[mode === 'theater' ? 'theater' : 'solo'] || []).length > 0;
 
@@ -1452,7 +1384,13 @@ function App() {
       // Hidden gems bypass genre filtering entirely (wide net by design).
       // The `activeGenres` memo already handles solo/couple/theater branches,
       // so we only need to special-case the hidden-gems "no filter" path here.
-      const activeGenresForFetch = hiddenGems ? [] : activeGenres;
+      // `forceGenres` (from handleNewReleasesTap) wins over the memo so we
+      // can fire a pick against just-seeded genres before React commits.
+      const activeGenresForFetch = hiddenGems
+        ? []
+        : (forceGenres && forceGenres.length > 0)
+          ? forceGenres
+          : activeGenres;
 
       if (mode === 'theater') {
         allResults = familyFriendly
@@ -1741,8 +1679,8 @@ function App() {
         genreIds.forEach(id => {
           const current = updated[player][id] || 0;
           updated[player][id] = vote === 'up'
-            ? current + 2
-            : Math.max(0, current - 1);
+            ? current + VOTE_UP_WEIGHT
+            : Math.max(0, current - VOTE_DOWN_WEIGHT);
         });
       });
       if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
@@ -1758,7 +1696,9 @@ function App() {
     setWatchHistory(prev => {
       const updated = prev.map(entry =>
         entry.id === popupId && entry.watchedAt === popupWatchedAt
-          ? { ...entry, rated: vote }
+          // Also clear `trailerCredited` so a future re-rate on the same
+          // entry doesn't reverse the trailer credit a second time.
+          ? { ...entry, rated: vote, trailerCredited: false }
           : entry
       );
       if (consent) safeSet('streaming-history', JSON.stringify(updated));
@@ -1812,7 +1752,7 @@ function App() {
     pushUserDataAuthoritative(user.uid, buildPayload({
       tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
       mode, selectedServices, selectedGenres, selectedFormats, minRating,
-      maxCertification, maxRuntime,
+      maxCertification,
       ...overrides,
     }));
   };
@@ -3013,28 +2953,9 @@ function App() {
               )
             )}
 
-            {/* Data management — always visible at panel bottom */}
-            <div className="history-data-actions">
-              <button className="data-action-btn" onClick={handleExportData}>
-                ↓ Export data
-              </button>
-              <label className="data-action-btn data-action-import">
-                ↑ Import
-                <input
-                  ref={importFileRef}
-                  type="file"
-                  accept=".json"
-                  style={{ display: 'none' }}
-                  onChange={handleImportData}
-                />
-              </label>
-              {importSuccess && (
-                <span className="import-success" role="status">✓ Profile restored</span>
-              )}
-              {importError && (
-                <span className="import-error" role="alert">⚠️ Invalid file — please use a Settle export</span>
-              )}
-            </div>
+            {/* Manual import/export removed — cloud sync (Firestore) is now
+                the canonical persistence layer. Users wanting cross-device
+                portability sign in; the data follows automatically. */}
           </div>
         </div>
       )}
