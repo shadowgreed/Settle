@@ -2133,14 +2133,6 @@ input[type="range"]::-moz-range-thumb {
   min-width: 0;
 }
 
-/* Cinema-mode placement — quieter secondary chip alongside the share
-   button. Same dark treatment as the card version, just slightly more
-   padding so it reads as an action there. */
-.trailer-btn-cinema {
-  margin-top: 10px;
-  padding: 8px 14px;
-}
-
 /* Pre-watch veto link below the result-card action row. Visually quieter
    than "Try another" because clicking it bans the title from future picks
    permanently (adds to recentPicks). */

@@ -3074,22 +3074,10 @@ function App() {
                 </div>
               ) : null;
             })()}
-            {/* Trailer button in cinema mode — only shown when a YouTube
-                trailer is available for the current pick. Pre-watch sneak
-                peek before the user commits with "Open on Netflix". */}
-            {cinemaSource === 'pick' && trailer?.key && (
-              <button
-                type="button"
-                className="trailer-btn trailer-btn-cinema"
-                onClick={() => openTrailer('cinema_mode')}
-                aria-label={`Watch trailer for ${cinemaItem.title}`}
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
-                  <polygon points="6 4 20 12 6 20" />
-                </svg>
-                Trailer
-              </button>
-            )}
+            {/* Trailer button intentionally absent from cinema mode — by the
+                time the user has tapped "We're watching this" they've
+                already committed; surfacing a trailer here is friction.
+                The trailer chip on the result card covers pre-commit. */}
             <button className="cinema-share-btn" onClick={() => handleShare(cinemaItem)}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                 <line x1="22" y1="2" x2="11" y2="13" />
