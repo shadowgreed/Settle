@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
+import { pickLabel, pickVerb, moodGreeting } from './utils/timeOfDay';
 import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
@@ -110,16 +111,9 @@ const SERVICES = [
   { name: 'Max',          color: '#6A1BD0' },
 ];
 
-// Returns a time-aware mood greeting so the label feels natural at any hour.
-// 5 am–11 am  → morning   |  12 pm–5 pm → afternoon
-// 6 pm–8 pm   → evening   |  9 pm–4 am  → tonight
-const getMoodGreeting = () => {
-  const hour = new Date().getHours();
-  if (hour >= 5  && hour < 12) return 'How are you feeling this morning?';
-  if (hour >= 12 && hour < 18) return 'How are you feeling this afternoon?';
-  if (hour >= 18 && hour < 21) return 'How are you feeling this evening?';
-  return 'How are you feeling tonight?';
-};
+// Time-of-day helpers consolidated in src/utils/timeOfDay.js so the share
+// card, cinema stamp, share text fallback, and mood greeting all read the
+// same buckets.
 
 const loadPrefs = () => {
   try { return JSON.parse(localStorage.getItem('streaming-prefs')) || {}; }
@@ -1259,8 +1253,7 @@ function App() {
 
   // Fallback: share/copy as plain text
   const shareAsText = async (item) => {
-    const isCouple = mode === 'couple';
-    const verb = isCouple ? "We're watching" : "Tonight's pick:";
+    const verb = pickVerb(mode);
     const text = `🎬 ${verb} "${item.title}" (${item.year}) on ${item.service}. Found it in seconds with Settle.`;
     const url  = 'https://trysettle.app';
     if (navigator.share) {
@@ -2065,7 +2058,7 @@ function App() {
         return (
           <div className="section">
             <div className="label" id="mood-greeting-label">
-              {mode === 'theater' ? 'What are you in the mood for?' : getMoodGreeting()}
+              {mode === 'theater' ? 'What are you in the mood for?' : moodGreeting()}
             </div>
             <div className="mood-grid" role="group" aria-labelledby="mood-greeting-label">
               {/* Decade moods ('80s / '90s / '00s) are hidden in theater
@@ -3042,7 +3035,7 @@ function App() {
                   {cinemaItem.service}
                 </div>
               )}
-              {cinemaSource === 'pick' && <div className="cinema-stamp" aria-hidden="true">Tonight's Pick 🎬</div>}
+              {cinemaSource === 'pick' && <div className="cinema-stamp" aria-hidden="true">{pickLabel(mode)} 🎬</div>}
             </div>
             <h2 id="cinema-title" className="cinema-title">{cinemaItem.title}</h2>
             <div className="cinema-meta">
@@ -3224,7 +3217,7 @@ function App() {
                   {outcome === 'split' && (
                     <>
                       <div className="ballot-outcome-icon">🤔</div>
-                      <div className="ballot-outcome-title">Not tonight...</div>
+                      <div className="ballot-outcome-title">Not this one…</div>
                       <div className="ballot-outcome-sub">
                         {p1Vote === 'up' ? playerNames.p1 : playerNames.p2} wanted it,{' '}
                         {p1Vote === 'down' ? playerNames.p1 : playerNames.p2} didn't.
@@ -3249,7 +3242,7 @@ function App() {
                   {/* Coin flip unlocks after 2 consecutive failed ballots */}
                   {ballotFailCount >= 2 && outcome !== 'match' && (
                     <button className="ballot-action coin-flip" onClick={handleCoinFlip}>
-                      🎲 Let fate decide tonight
+                      🎲 Let fate decide
                     </button>
                   )}
 

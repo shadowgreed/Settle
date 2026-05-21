@@ -1,3 +1,5 @@
+import { pickLabel } from './timeOfDay';
+
 const SERVICE_COLORS = {
   'Netflix':      '#E50914',
   'Max':          '#6A1BD0',
@@ -229,10 +231,13 @@ export async function generateShareCard({ result, mode, playerNames }) {
   const PILL_Y    = TITLE_TOP - 62;               // mode pill top        = 1430
 
   // ── Mode pill ─────────────────────────────────────────────────────────
+  // Time-of-day-aware so a share generated at 9am doesn't say
+  // "Tonight's Pick". Theater stays fixed since it labels the surface,
+  // not the time.
   const modeText =
-    mode === 'couple'  ? '💑  Our Pick Tonight'
-    : mode === 'theater' ? '🎟️  In Theaters'
-    : "🎬  Tonight's Pick";
+    mode === 'theater' ? '🎟️  In Theaters'
+    : mode === 'couple' ? `💑  ${pickLabel('couple')}`
+    : `🎬  ${pickLabel('solo')}`;
 
   ctx.font = '600 22px system-ui, -apple-system, sans-serif';
   const pillW = ctx.measureText(modeText).width + 48;
