@@ -20,13 +20,19 @@ import { db } from './firebase';
 
 const VAPID_PUBLIC_KEY = process.env.REACT_APP_VAPID_PUBLIC_KEY || '';
 
-// True if the browser supports Web Push (Service Worker + Push API).
+// True if the browser supports Web Push (Service Worker + Push API) AND the
+// server-side VAPID key is configured. The VAPID check effectively gates the
+// entire feature behind environment configuration — without it set, the
+// opt-in banner and Settings toggle stay hidden, so users never opt in to a
+// feature that can't actually deliver notifications.
+//
 // On iOS specifically, also requires the PWA to be home-screen-installed.
 export function isPushSupported() {
   if (typeof window === 'undefined') return false;
   if (!('serviceWorker' in navigator)) return false;
   if (!('PushManager' in window)) return false;
   if (!('Notification' in window)) return false;
+  if (!VAPID_PUBLIC_KEY) return false; // server-side delivery not configured yet
   return true;
 }
 

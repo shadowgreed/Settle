@@ -3,14 +3,54 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-18 (post-audit + HIGH + MEDIUM + LOW + UX-wins passes)
-
-All audit items are now closed. This file is currently empty of pending
-work — add new items here as they come up.
+Last updated: 2026-05-19 (PM Phases 1–3 shipped, push delivery deferred)
 
 ---
 
 ## Deferred / parked
+
+### Push notification delivery (server side) — blocked on Firebase service account key
+The client side is fully shipped (`28f0f15`): service worker push handlers,
+subscribe/unsubscribe service, opt-in banner after 3rd successful pick,
+Settings toggle, analytics events. The whole client-side opt-in flow is
+ready. **Currently dormant** because `isPushSupported()` checks for
+`REACT_APP_VAPID_PUBLIC_KEY` env var — without it set, the opt-in banner
+and Settings toggle stay hidden so no user can opt in to a feature that
+won't deliver.
+
+**What's blocking delivery:** the Vercel cron at
+`api/cron/push-notifications.js` needs Firebase Admin SDK to read user
+docs from Firestore. Firebase Admin needs a service account JSON key.
+
+Attempted on 2026-05-19:
+  1. Generate VAPID keys — ✅ trivial
+  2. Generate Firebase service account JSON — ❌ blocked
+     - Initial block: org policy `iam.disableServiceAccountKeyCreation`
+       enforced. Resolved by granting Org Policy Admin role + overriding
+       the policy to "Off" for the project.
+     - Also overrode `iam.disableServiceAccountKeyUpload` for good measure.
+     - Both policies showed Inactive + Override parent's policy in the UI.
+     - **Key creation still failed** with "Key creation is not allowed on
+       this service account" — likely a third policy or a Google Cloud
+       restriction we didn't surface.
+
+**Resume paths (when we revisit):**
+  - **Path A: deeper org policy hunt.** Search all enforced org policies
+    for the project (not just the two we found). Candidates: any policy
+    starting with `iam.` or `iam.managed.` that's status "Enforced".
+  - **Path B: Workload Identity Federation.** Vercel supports OIDC token
+    issuance. Configure WIF on the Google side to trust Vercel — no
+    long-lived service account key needed. Multi-step setup but
+    eliminates the key-creation battle entirely.
+  - **Path C: skip Firebase Admin SDK in the cron.** Store push
+    subscriptions in Vercel KV instead of Firestore (refactor `push.js`
+    to POST to `/api/push/subscribe`, write to KV). Cron reads from KV,
+    no Firebase Admin auth needed. Cleaner architecturally; ~30 min of
+    code changes. Recommended path when we revisit.
+
+For now the client code is dormant but harmless — opt-in flow stays
+hidden because VAPID env var isn't set. When server delivery is sorted,
+flip the env var + the feature wakes up.
 
 ### iOS share sheet doesn't auto-dismiss after share (verified iOS limitation)
 After a user shares a pick to Instagram Story / WhatsApp / etc. and returns
