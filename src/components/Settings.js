@@ -3,15 +3,25 @@ import useFocusTrap from '../hooks/useFocusTrap';
 import './Settings.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Settings modal — single home for Privacy & Data controls the user can
-// exercise themselves (GDPR posture).
+// Settings modal — single home for everything users self-serve about their
+// account. Organised into three groups:
 //
-// Surfaces:
-//   • Cloud sync toggle (consent revoke / re-grant)
-//   • Account deletion (with a typed confirmation gate)
+//   Account         — identity (display name + email)
+//   Preferences     — notifications, couples player names
+//   Privacy & Data  — cloud sync toggle, account deletion (danger zone)
 //
 // Wired from the account bar's gear button in App.js.
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Independent stage state per destructive flow so an errored revoke doesn't
+// pollute the delete UI (the previous shared `stage` was leaking errorMsg
+// across the two flows when the user cancelled one and started the other).
+const STAGE = {
+  IDLE:    'idle',
+  CONFIRM: 'confirm',
+  WORKING: 'working',
+  ERROR:   'error',
+};
 
 export default function Settings({
   user,
@@ -29,10 +39,12 @@ export default function Settings({
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
 
-  // 'idle' | 'revoke-confirm' | 'delete-confirm' | 'working' | 'error'
-  const [stage, setStage] = useState('idle');
+  // Per-flow stage so revoke errors don't leak into the delete UI.
+  const [revokeStage, setRevokeStage] = useState(STAGE.IDLE);
+  const [revokeError, setRevokeError] = useState('');
+  const [deleteStage, setDeleteStage] = useState(STAGE.IDLE);
+  const [deleteError, setDeleteError] = useState('');
   const [confirmText, setConfirmText] = useState('');
-  const [errorMsg, setErrorMsg] = useState('');
 
   // Local draft state for the player-name editor — committed via
   // onSavePlayerNames on blur (or Enter). Keeps the input snappy without
@@ -52,23 +64,21 @@ export default function Settings({
   };
 
   const handleConfirmRevoke = async () => {
-    setStage('working');
-    setErrorMsg('');
+    setRevokeStage(STAGE.WORKING);
+    setRevokeError('');
     try {
       await onWithdrawConsent();
-      // onWithdrawConsent will normally close this modal; if it doesn't,
-      // fall back to a clean idle state.
-      setStage('idle');
+      setRevokeStage(STAGE.IDLE);
     } catch (e) {
-      setErrorMsg(e?.message || 'Could not withdraw consent. Please try again.');
-      setStage('error');
+      setRevokeError(e?.message || 'Could not withdraw consent. Please try again.');
+      setRevokeStage(STAGE.ERROR);
     }
   };
 
   const handleConfirmDelete = async () => {
     if (confirmText.trim().toUpperCase() !== 'DELETE') return;
-    setStage('working');
-    setErrorMsg('');
+    setDeleteStage(STAGE.WORKING);
+    setDeleteError('');
     try {
       await onDeleteAccount();
       // onDeleteAccount triggers sign-out which unmounts this component.
@@ -76,13 +86,25 @@ export default function Settings({
       // requires-recent-login is the most common path — user signed in days
       // ago and Firebase wants a fresh credential before deleting.
       if (e?.code === 'auth/requires-recent-login') {
-        setErrorMsg('For your security, please sign out and sign back in, then try again.');
+        setDeleteError('For your security, please sign out and sign back in, then try again.');
       } else {
-        setErrorMsg(e?.message || 'Could not delete your account. Please try again or email hello@trysettle.app.');
+        setDeleteError(e?.message || 'Could not delete your account. Please try again or email hello@trysettle.app.');
       }
-      setStage('error');
+      setDeleteStage(STAGE.ERROR);
     }
   };
+
+  // What sign-in provider did they use? The id is buried in user.providerData;
+  // we surface a friendly label so the Account section reads as informative
+  // rather than just a display-name dump.
+  const providerLabel = (() => {
+    const id = user?.providerData?.[0]?.providerId;
+    if (id === 'google.com') return 'Google';
+    if (id === 'password' || id === 'apple.com') return id === 'apple.com' ? 'Apple' : 'Email';
+    // Firebase tags email-link sign-ins as 'password' too — Settle only
+    // supports magic-link email, so "Email" is accurate.
+    return null;
+  })();
 
   return (
     <div className="settings-overlay" onClick={onClose}>
@@ -96,7 +118,7 @@ export default function Settings({
         tabIndex={-1}
       >
         <div className="settings-header">
-          <h2 id="settings-title" className="settings-title">Privacy & Data</h2>
+          <h2 id="settings-title" className="settings-title">Settings</h2>
           <button
             className="privacy-close"
             onClick={onClose}
@@ -107,180 +129,240 @@ export default function Settings({
         </div>
 
         <div className="settings-body">
-          {/* ── Account info ───────────────────────────────────────────── */}
-          <section className="settings-section">
-            <h3 className="settings-section-title">Account</h3>
-            <p className="settings-account-line">
-              <strong>{user.displayName || user.email?.split('@')[0] || 'Account'}</strong>
-              {user.email ? <span className="settings-account-email"> · {user.email}</span> : null}
-            </p>
-          </section>
 
-          {/* ── Preferences (player names) ─────────────────────────────── */}
-          <section className="settings-section">
-            <h3 className="settings-section-title">Couples player names</h3>
-            <p className="settings-section-desc">
-              Used by Couples mode and shareable pick cards. Edit here any time.
-            </p>
-            <div className="settings-names-grid">
-              <label className="settings-name-field">
-                <span className="settings-name-label">Player 1</span>
-                <input
-                  type="text"
-                  className="settings-name-input"
-                  value={p1Draft}
-                  onChange={(e) => setP1Draft(e.target.value)}
-                  onBlur={commitP1}
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                  maxLength={20}
-                  aria-label="Player 1 name"
+          {/* ══ GROUP: ACCOUNT ════════════════════════════════════════════ */}
+          <div className="settings-group">
+            <h3 className="settings-group-title">Account</h3>
+            <div className="settings-account-card">
+              {user?.photoURL ? (
+                <img
+                  className="settings-account-avatar"
+                  src={user.photoURL}
+                  alt=""
+                  aria-hidden="true"
+                  referrerPolicy="no-referrer"
                 />
-              </label>
-              <label className="settings-name-field">
-                <span className="settings-name-label">Player 2</span>
-                <input
-                  type="text"
-                  className="settings-name-input"
-                  value={p2Draft}
-                  onChange={(e) => setP2Draft(e.target.value)}
-                  onBlur={commitP2}
-                  onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-                  maxLength={20}
-                  aria-label="Player 2 name"
-                />
-              </label>
+              ) : (
+                <span className="settings-account-avatar settings-account-avatar-fallback" aria-hidden="true">👤</span>
+              )}
+              <div className="settings-account-info">
+                <div className="settings-account-name">
+                  {user?.displayName || user?.email?.split('@')[0] || 'Account'}
+                </div>
+                {user?.email && (
+                  <div className="settings-account-email">{user.email}</div>
+                )}
+                {providerLabel && (
+                  <div className="settings-account-provider">
+                    Signed in with {providerLabel}
+                  </div>
+                )}
+              </div>
             </div>
-          </section>
+          </div>
 
-          {/* ── Notifications toggle ────────────────────────────────────── */}
-          {pushSupported && (
-            <section className="settings-section">
-              <h3 className="settings-section-title">Notifications</h3>
-              <p className="settings-section-desc">
-                {pushSubscribed
-                  ? "You'll get a weekly heads-up when new titles in your top genres drop."
-                  : "Get a weekly heads-up when new titles in your top genres drop. No spam."}
-              </p>
-              <button
-                type="button"
-                className={`settings-btn ${pushSubscribed ? 'settings-btn-ghost' : 'settings-btn-warn'}`}
-                onClick={() => onTogglePush?.(!pushSubscribed)}
-                disabled={pushBusy}
-              >
-                {pushBusy
-                  ? 'Working…'
-                  : pushSubscribed ? 'Turn off notifications' : 'Turn on notifications'}
-              </button>
-            </section>
+          {/* ══ GROUP: PREFERENCES ═══════════════════════════════════════ */}
+          {(pushSupported || true) && (
+            <div className="settings-group">
+              <h3 className="settings-group-title">Preferences</h3>
+
+              {/* Notifications — hidden when push isn't supported on this
+                  platform or VAPID isn't configured server-side. */}
+              {pushSupported && (
+                <section className="settings-section">
+                  <div className="settings-section-head">
+                    <h4 className="settings-section-title">Notifications</h4>
+                  </div>
+                  <p className="settings-section-desc">
+                    {pushSubscribed
+                      ? "You'll get a weekly heads-up when new titles in your top genres drop."
+                      : 'Get a weekly heads-up when new titles in your top genres drop. No spam.'}
+                  </p>
+                  <button
+                    type="button"
+                    className={`settings-btn ${pushSubscribed ? 'settings-btn-ghost' : 'settings-btn-warn'}`}
+                    onClick={() => onTogglePush?.(!pushSubscribed)}
+                    disabled={pushBusy}
+                  >
+                    {pushBusy
+                      ? 'Working…'
+                      : pushSubscribed ? 'Turn off notifications' : 'Turn on notifications'}
+                  </button>
+                </section>
+              )}
+
+              {/* Couples player names — visible to all users (even solo, in
+                  case they want to set names up before opening Couples mode). */}
+              <section className="settings-section">
+                <div className="settings-section-head">
+                  <h4 className="settings-section-title">Couples player names</h4>
+                </div>
+                <p className="settings-section-desc">
+                  Used by Couples mode and shareable pick cards.
+                </p>
+                <div className="settings-names-grid">
+                  <label className="settings-name-field">
+                    <span className="settings-name-label">Player 1</span>
+                    <input
+                      type="text"
+                      className="settings-name-input"
+                      value={p1Draft}
+                      onChange={(e) => setP1Draft(e.target.value)}
+                      onBlur={commitP1}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                      maxLength={20}
+                      aria-label="Player 1 name"
+                    />
+                  </label>
+                  <label className="settings-name-field">
+                    <span className="settings-name-label">Player 2</span>
+                    <input
+                      type="text"
+                      className="settings-name-input"
+                      value={p2Draft}
+                      onChange={(e) => setP2Draft(e.target.value)}
+                      onBlur={commitP2}
+                      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+                      maxLength={20}
+                      aria-label="Player 2 name"
+                    />
+                  </label>
+                </div>
+              </section>
+            </div>
           )}
 
-          {/* ── Cloud sync toggle ──────────────────────────────────────── */}
-          <section className="settings-section">
-            <h3 className="settings-section-title">Cloud sync</h3>
-            <p className="settings-section-desc">
-              {consent
-                ? "Your preferences, history, and taste profile are syncing to your account across devices."
-                : "Cloud sync is off. Your data only lives on this device."}
-            </p>
+          {/* ══ GROUP: PRIVACY & DATA ════════════════════════════════════ */}
+          <div className="settings-group">
+            <h3 className="settings-group-title">Privacy &amp; Data</h3>
 
-            {consent ? (
-              stage === 'revoke-confirm' ? (
+            {/* Cloud sync toggle */}
+            <section className="settings-section">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">Cloud sync</h4>
+                <span className={`settings-status-chip ${consent ? 'on' : 'off'}`}>
+                  {consent ? 'On' : 'Off'}
+                </span>
+              </div>
+              <p className="settings-section-desc">
+                {consent
+                  ? 'Your preferences, history, and taste profile are syncing to your account across devices.'
+                  : 'Cloud sync is off. Your data only lives on this device.'}
+              </p>
+
+              {consent ? (
+                revokeStage === STAGE.CONFIRM || revokeStage === STAGE.ERROR ? (
+                  <div className="settings-confirm">
+                    <p className="settings-confirm-text">
+                      Stop syncing this account to the cloud? Your existing cloud data stays put — we'll just stop sending new updates from this device.
+                    </p>
+                    {revokeStage === STAGE.ERROR && revokeError && (
+                      <p className="settings-error" role="alert">{revokeError}</p>
+                    )}
+                    <div className="settings-confirm-actions">
+                      <button
+                        type="button"
+                        className="settings-btn settings-btn-ghost"
+                        onClick={() => { setRevokeStage(STAGE.IDLE); setRevokeError(''); }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-btn settings-btn-warn"
+                        onClick={handleConfirmRevoke}
+                        disabled={revokeStage === STAGE.WORKING}
+                      >
+                        {revokeStage === STAGE.WORKING ? 'Working…' : 'Yes, stop syncing'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-ghost"
+                    onClick={() => setRevokeStage(STAGE.CONFIRM)}
+                  >
+                    Stop cloud sync
+                  </button>
+                )
+              ) : (
+                <p className="settings-hint">
+                  To re-enable sync, sign out and sign back in — you'll see the consent prompt again.
+                </p>
+              )}
+            </section>
+
+            {/* Account deletion — visually demarcated as the danger zone. */}
+            <section className="settings-section settings-section-danger">
+              <div className="settings-section-head">
+                <h4 className="settings-section-title">Delete account</h4>
+              </div>
+              <p className="settings-section-desc">
+                Permanently delete your account and all associated cloud data. This can't be undone.
+              </p>
+
+              {deleteStage === STAGE.CONFIRM || deleteStage === STAGE.ERROR || deleteStage === STAGE.WORKING ? (
                 <div className="settings-confirm">
                   <p className="settings-confirm-text">
-                    Stop syncing this account to the cloud? Your existing cloud data stays put — we'll just stop sending new updates from this device.
+                    This will immediately delete your Settle account, your cloud data, and your sign-in credential. Type <strong>DELETE</strong> to confirm.
                   </p>
+                  <input
+                    type="text"
+                    className="settings-confirm-input"
+                    placeholder="Type DELETE"
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    aria-label="Type DELETE to confirm"
+                    disabled={deleteStage === STAGE.WORKING}
+                  />
+                  {deleteStage === STAGE.ERROR && deleteError && (
+                    <p className="settings-error" role="alert">{deleteError}</p>
+                  )}
                   <div className="settings-confirm-actions">
                     <button
                       type="button"
                       className="settings-btn settings-btn-ghost"
-                      onClick={() => setStage('idle')}
+                      onClick={() => {
+                        setDeleteStage(STAGE.IDLE);
+                        setConfirmText('');
+                        setDeleteError('');
+                      }}
+                      disabled={deleteStage === STAGE.WORKING}
                     >
                       Cancel
                     </button>
                     <button
                       type="button"
-                      className="settings-btn settings-btn-warn"
-                      onClick={handleConfirmRevoke}
-                      disabled={stage === 'working'}
+                      className="settings-btn settings-btn-danger"
+                      onClick={handleConfirmDelete}
+                      disabled={
+                        deleteStage === STAGE.WORKING ||
+                        confirmText.trim().toUpperCase() !== 'DELETE'
+                      }
                     >
-                      {stage === 'working' ? 'Working…' : 'Yes, stop syncing'}
+                      {deleteStage === STAGE.WORKING ? 'Deleting…' : 'Delete forever'}
                     </button>
                   </div>
                 </div>
               ) : (
                 <button
                   type="button"
-                  className="settings-btn settings-btn-ghost"
-                  onClick={() => { setStage('revoke-confirm'); setErrorMsg(''); }}
+                  className="settings-btn settings-btn-danger-outline"
+                  onClick={() => {
+                    setDeleteStage(STAGE.CONFIRM);
+                    setConfirmText('');
+                    setDeleteError('');
+                  }}
                 >
-                  Stop cloud sync
+                  Delete my account
                 </button>
-              )
-            ) : (
-              <p className="settings-hint">
-                To re-enable sync, sign out and sign back in — you'll see the consent prompt again.
-              </p>
-            )}
-          </section>
-
-          {/* ── Account deletion ───────────────────────────────────────── */}
-          <section className="settings-section settings-section-danger">
-            <h3 className="settings-section-title">Delete account</h3>
-            <p className="settings-section-desc">
-              Permanently delete your account and all associated cloud data. This can't be undone.
-            </p>
-
-            {stage === 'delete-confirm' ? (
-              <div className="settings-confirm">
-                <p className="settings-confirm-text">
-                  This will immediately delete your Settle account, your cloud data, and your sign-in credential. Type <strong>DELETE</strong> to confirm.
-                </p>
-                <input
-                  type="text"
-                  className="settings-confirm-input"
-                  placeholder="Type DELETE"
-                  value={confirmText}
-                  onChange={(e) => setConfirmText(e.target.value)}
-                  autoCapitalize="characters"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  aria-label="Type DELETE to confirm"
-                />
-                <div className="settings-confirm-actions">
-                  <button
-                    type="button"
-                    className="settings-btn settings-btn-ghost"
-                    onClick={() => { setStage('idle'); setConfirmText(''); setErrorMsg(''); }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-btn settings-btn-danger"
-                    onClick={handleConfirmDelete}
-                    disabled={
-                      stage === 'working' ||
-                      confirmText.trim().toUpperCase() !== 'DELETE'
-                    }
-                  >
-                    {stage === 'working' ? 'Deleting…' : 'Delete forever'}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="settings-btn settings-btn-danger-outline"
-                onClick={() => { setStage('delete-confirm'); setConfirmText(''); setErrorMsg(''); }}
-              >
-                Delete my account
-              </button>
-            )}
-          </section>
-
-          {errorMsg && (
-            <p className="settings-error" role="alert">{errorMsg}</p>
-          )}
+              )}
+            </section>
+          </div>
 
           <p className="settings-footer-note">
             Questions? Email <strong>hello@trysettle.app</strong>
