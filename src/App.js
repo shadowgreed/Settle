@@ -1865,11 +1865,24 @@ function App() {
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
-      {/* Account bar — left: saved-picks star count · right: streak + settings + sign-out.
-          User identity itself lives in Settings; the main page stays focused on the
-          pick flow. */}
+      {/* Account bar — left: history actions (watch + saved) · right: streak +
+          settings + sign-out. User identity lives in Settings; the main page
+          stays focused on the pick flow. */}
       <div className="account-bar">
         <div className="account-bar-left">
+          <button
+            className="account-stat"
+            onClick={() => { setShowHistory(true); setHistoryTab('watched'); }}
+            title="Watch history"
+            aria-label={
+              watchHistory.length > 0
+                ? `Watch history — ${watchHistory.length} watched`
+                : 'Watch history'
+            }
+          >
+            <span aria-hidden="true">🕐</span>
+            {watchHistory.length > 0 ? ` ${watchHistory.length}` : ''}
+          </button>
           {savedForLater.length > 0 && (
             <button
               className="account-stat"
@@ -2744,13 +2757,7 @@ function App() {
             <button className="privacy-link" onClick={() => setShowTerms(true)}>Terms of Service</button>
           </div>
         </div>
-        <button
-          className="history-btn"
-          onClick={() => setShowHistory(true)}
-          aria-label={watchHistory.length > 0 ? `Watch history — ${watchHistory.length} watched` : 'Watch history'}
-        >
-          <span aria-hidden="true">🕐</span> {watchHistory.length > 0 ? `${watchHistory.length} watched` : 'History'}
-        </button>
+        {/* Watch History button moved to the account bar (top-left). */}
       </div>
 
       {/* Toast */}
