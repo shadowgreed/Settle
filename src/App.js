@@ -2681,7 +2681,7 @@ function App() {
                   </button>
                 ) : (
                   <button className="act primary" onClick={() => { setTryAnotherCount(0); setCinemaSource('pick'); setCinemaMode(true); saveToHistory(result); }}>
-                    We're watching this <span aria-hidden="true">✓</span>
+                    Watching this <span aria-hidden="true">✓</span>
                   </button>
                 )}
                 <button
@@ -2817,7 +2817,7 @@ function App() {
                   <div className="history-empty">
                     <div className="history-empty-icon" aria-hidden="true">🎬</div>
                     <div className="history-empty-text">Nothing watched yet</div>
-                    <div className="history-empty-sub">Make your first pick and tap "We're watching this"</div>
+                    <div className="history-empty-sub">Make your first pick — watched titles show up here.</div>
                   </div>
                 ) : (
                   <>
@@ -3070,9 +3070,10 @@ function App() {
               ) : null;
             })()}
             {/* Trailer button intentionally absent from cinema mode — by the
-                time the user has tapped "We're watching this" they've
-                already committed; surfacing a trailer here is friction.
-                The trailer chip on the result card covers pre-commit. */}
+                time the user has tapped "Watching this" (or won the couples
+                ballot) they've already committed; surfacing a trailer here
+                is friction. The trailer chip on the result card covers
+                pre-commit. */}
             <button className="cinema-share-btn" onClick={() => handleShare(cinemaItem)}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
                 <line x1="22" y1="2" x2="11" y2="13" />
