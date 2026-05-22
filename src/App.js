@@ -8,13 +8,20 @@ import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
   trackPushPromptShown, trackPushAccepted, trackPushDenied, trackPushUnsubscribed,
+  trackLocationPermissionResult, trackZipEntered,
 } from './services/analytics';
+import {
+  getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
+  zipToCoords, recordPermissionDecision, shouldRepromptAfterDecline,
+} from './services/location';
 import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice } from './services/push';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
+import LocationPermission from './components/LocationPermission';
 import NewReleasesCard from './components/NewReleasesCard';
 import PushOptIn from './components/PushOptIn';
 import Settings from './components/Settings';
+import ShowtimesSheet from './components/ShowtimesSheet';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -183,6 +190,16 @@ function App() {
   // and the overlay-visibility flag. `trailer` is { key, name } or null.
   const [trailer, setTrailer] = useState(null);
   const [showTrailer, setShowTrailer] = useState(false);
+  // Theater Mode 2.0 — showtimes sheet (M2+M3).
+  // `showShowtimes` opens the sheet for the current theater pick.
+  // `locationPrompt` is the permission modal — null when hidden, or
+  // 'first' / 'retry' when shown (controls copy + opt-out availability).
+  // `userLocation` is { lat, lng, source: 'gps'|'zip', accuracy? } — in
+  // memory only, never persisted.
+  const [showShowtimes, setShowShowtimes]   = useState(false);
+  const [locationPrompt, setLocationPrompt] = useState(null);
+  const [userLocation, setUserLocation]     = useState(null);
+
   // "New in your genres" home-screen card (PM roadmap 3.2). Count is the
   // headline number from TMDB; dismissed flag is per-day in localStorage.
   const [newReleasesCount, setNewReleasesCount] = useState(0);
@@ -460,6 +477,8 @@ function App() {
       // Trailer takes priority over everything else — if you opened it from
       // cinema mode, Escape should bring you back to cinema, not exit it.
       if (showTrailer)        { setShowTrailer(false); return; }
+      if (locationPrompt)     { setLocationPrompt(null); return; }
+      if (showShowtimes)      { setShowShowtimes(false); return; }
       if (showStreakHistory)  { setShowStreakHistory(false); return; }
       if (showSettings)       { setShowSettings(false); return; }
       if (showShareModal) { closeShareModal(); return; }
@@ -473,7 +492,7 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer, showStreakHistory]);
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer, showStreakHistory, showShowtimes, locationPrompt]);
 
   // Lock body scroll while any modal is open — prevents the underlying app from
   // scrolling on iOS when the user drags inside the overlay. Restores the prior
@@ -482,14 +501,15 @@ function App() {
     const anyOpen =
       showOnboarding || showHistory || showShareModal || showPrivacy ||
       showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings ||
-      showTrailer || showStreakHistory;
+      showTrailer || showStreakHistory || showShowtimes || !!locationPrompt;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       return () => { document.body.style.overflow = prev; };
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
-      showBallot, cinemaMode, ratingPopup, showSettings, showTrailer, showStreakHistory]);
+      showBallot, cinemaMode, ratingPopup, showSettings, showTrailer, showStreakHistory,
+      showShowtimes, locationPrompt]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -868,6 +888,86 @@ function App() {
     setSelectedGenres(prev => ({ ...prev, solo: topIds }));
     setTryAnotherCount(0);
     pickContent(false, false, topIds);
+  };
+
+  // ── Theater Mode 2.0 — location + showtimes handlers ───────────────────
+  // Gates the Showtimes sheet behind a location decision. If the user
+  // previously granted, we silently get coords and open the sheet. If
+  // they declined, fall back to the stored ZIP if any. Otherwise the
+  // permission modal surfaces with the right copy ('first' / 'retry').
+  const openShowtimesFlow = async () => {
+    const permission = getStoredPermissionState();
+    const zip        = getStoredZip();
+
+    // Path A — previously granted permission
+    if (permission === 'granted') {
+      const coords = await getCurrentCoords();
+      if (coords) {
+        setUserLocation({ ...coords, source: 'gps' });
+        setShowShowtimes(true);
+        return;
+      }
+      // Granted but device returned nothing (e.g. user revoked OS-level)
+      // — fall through to prompt.
+    }
+
+    // Path B — previously declined; use ZIP if we have it, otherwise re-prompt
+    if (permission === 'denied') {
+      if (zip) {
+        const coords = await zipToCoords(zip);
+        if (coords) {
+          setUserLocation({ ...coords, source: 'zip', zip });
+          setShowShowtimes(true);
+          return;
+        }
+      }
+      // 7-day re-prompt timer elapsed? Show as retry. Otherwise straight
+      // to ZIP-only view (skip the permission ask).
+      setLocationPrompt(shouldRepromptAfterDecline() ? 'retry' : 'retry');
+      return;
+    }
+
+    // Path C — first time
+    setLocationPrompt('first');
+  };
+
+  const handleLocationAllow = async () => {
+    const coords = await getCurrentCoords({ forceRefresh: true });
+    if (!coords) {
+      // Browser denied or returned junk. Treat as denial — but tell the
+      // user via the modal's error state by throwing back.
+      recordPermissionDecision('denied');
+      trackLocationPermissionResult({ result: 'denied', promptType: locationPrompt || 'first' });
+      throw new Error('Location unavailable. Try ZIP instead.');
+    }
+    recordPermissionDecision('granted');
+    trackLocationPermissionResult({ result: 'granted', promptType: locationPrompt || 'first' });
+    setUserLocation({ ...coords, source: 'gps' });
+    setLocationPrompt(null);
+    setShowShowtimes(true);
+  };
+
+  const handleLocationZip = async (zip) => {
+    const coords = await zipToCoords(zip);
+    if (!coords) {
+      throw new Error('Could not find that ZIP. Try again.');
+    }
+    const isFirstTime = !getStoredZip();
+    setStoredZip(zip);
+    // ZIP entry implies the user declined GPS (or chose not to use it).
+    if (getStoredPermissionState() !== 'granted') {
+      recordPermissionDecision('denied');
+    }
+    trackZipEntered({ firstTime: isFirstTime });
+    setUserLocation({ ...coords, source: 'zip', zip });
+    setLocationPrompt(null);
+    setShowShowtimes(true);
+  };
+
+  const handleLocationDismiss = () => {
+    // User backed out without making a decision. Don't record anything —
+    // they'll be re-prompted next time they tap "Get tickets".
+    setLocationPrompt(null);
   };
 
   const handleNewReleasesDismiss = () => {
@@ -1996,6 +2096,28 @@ function App() {
         />
       )}
 
+      {/* Theater Mode 2.0 — location permission modal (M2). */}
+      {locationPrompt && (
+        <LocationPermission
+          promptType={locationPrompt}
+          initialZip={getStoredZip()}
+          onAllow={handleLocationAllow}
+          onZip={handleLocationZip}
+          onDismiss={handleLocationDismiss}
+        />
+      )}
+
+      {/* Theater Mode 2.0 — showtimes sheet (M2+M3). Opens when the user
+          taps "Get tickets" on a theater pick. Shows nearest AMC theaters
+          + today's showtimes for the picked movie. */}
+      {showShowtimes && result && (
+        <ShowtimesSheet
+          result={result}
+          userLocation={userLocation}
+          onClose={() => setShowShowtimes(false)}
+        />
+      )}
+
       {/* Push notifications opt-in (PM roadmap 3.1). Appears after the user
           has generated 3 successful picks, only on push-supported devices,
           only if they granted storage consent. One-shot — dismissing or
@@ -3047,6 +3169,33 @@ function App() {
               <span className="cinema-rating-num" aria-hidden="true">{cinemaItem.rating}/10</span>
             </div>
             {(() => {
+              // Theater picks now open the in-app ShowtimesSheet (Theater
+              // Mode 2.0) instead of routing out to Google search. The
+              // sheet handles location permission + nearby AMC theaters +
+              // showtimes. Streaming picks still get the existing deep
+              // link to their service.
+              if (cinemaSource === 'pick' && cinemaItem.service === 'In Theaters') {
+                return (
+                  <div className="cinema-actions">
+                    <button
+                      type="button"
+                      className="cinema-watch-btn"
+                      onClick={() => {
+                        trackDeepLinkOpened({
+                          service: cinemaItem.service,
+                          titleId: cinemaItem.id,
+                          mode,
+                          surface: 'cinema_mode',
+                        });
+                        openShowtimesFlow();
+                      }}
+                      style={{ background: getServiceColor(cinemaItem.service) }}
+                    >
+                      🎟️ Get tickets
+                    </button>
+                  </div>
+                );
+              }
               const useWatchmode = cinemaSource === 'pick' && (cinemaItem.service === 'Disney+' || cinemaItem.service === 'Apple TV');
               const href = useWatchmode ? watchLink : getPlatformLink(cinemaItem.service, cinemaItem.title);
               return href ? (
@@ -3064,7 +3213,7 @@ function App() {
                       surface: 'cinema_mode',
                     })}
                   >
-                    ▶ Open on {cinemaItem.service === 'In Theaters' ? 'Google' : cinemaItem.service}
+                    ▶ Open on {cinemaItem.service}
                   </a>
                 </div>
               ) : null;

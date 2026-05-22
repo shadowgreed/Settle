@@ -30,30 +30,42 @@ export function PrivacyBody() {
       </ul>
       <p>If you decline consent, all data stays on-device only (localStorage + IndexedDB). When you sign out, this device's locally-cached data is cleared automatically. You can revoke consent at any time from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar) — your cloud document will no longer receive updates from this device.</p>
 
-      <h3>3. Local &amp; Offline Storage</h3>
+      <h3>3. Location &amp; Theater Mode</h3>
+      <p>Theater Mode (US-only) shows you cinemas near you ranked by distance. We get your location two ways, depending on what you allow:</p>
+      <ul>
+        <li><strong>Browser location (preferred):</strong> If you grant permission, your device shares its approximate coordinates with your browser. These coordinates are <strong>never sent to or stored on our servers</strong> — they stay in your browser's memory for the session and are discarded when you close the tab.</li>
+        <li><strong>ZIP code fallback:</strong> If you decline location, you can type a ZIP. The ZIP is stored with your account (it's lower-resolution than precise coordinates and you explicitly typed it).</li>
+      </ul>
+      <p><strong>Geocoding:</strong> theater addresses are sent to Google's Geocoding API to convert them to coordinates — but your location is never sent to Google. Theater coordinates are cached in our database for 30 days.</p>
+      <p><strong>Analytics:</strong> when you tap on a showtime, we log a coarse distance bucket ("under 5 miles", "5–10 miles", etc.) — never your raw coordinates.</p>
+      <p>You can change your location decision any time by clearing your browser's site data, or by typing a different ZIP in Theater Mode.</p>
+
+      <h3>4. Local &amp; Offline Storage</h3>
       <p>Settle uses your browser's <strong>localStorage</strong> and <strong>IndexedDB</strong> to cache preferences and enable offline use as a Progressive Web App (PWA). This data never leaves your device unless you are signed in and have granted cloud sync consent.</p>
 
-      <h3>4. Analytics</h3>
+      <h3>5. Analytics</h3>
       <p>We use <strong>PostHog</strong> to collect anonymous, aggregated usage data — for example, which modes are used and how often picks are generated. No personally identifiable information is included. Analytics are only activated after you accept the storage consent prompt. You can also opt out by enabling your browser's "Do Not Track" setting or using a content blocker.</p>
 
-      <h3>5. Share Cards</h3>
+      <h3>6. Share Cards</h3>
       <p>The "Share Pick" feature generates an image entirely within your browser using the HTML Canvas API. No image data is transmitted to our servers or any third party. The poster artwork is fetched from TMDB's CDN directly by your device.</p>
 
-      <h3>6. Third-Party Services</h3>
+      <h3>7. Third-Party Services</h3>
       <ul>
         <li><strong>TMDB API</strong> — movie and series data (titles, posters, ratings). Subject to the <a href="https://www.themoviedb.org/privacy-policy" target="_blank" rel="noopener noreferrer">TMDB Privacy Policy</a>.</li>
         <li><strong>Watchmode API</strong> — direct streaming links for Disney+ and Apple TV. Subject to Watchmode's privacy policy.</li>
+        <li><strong>AMC Theatres API</strong> — used in Theater Mode to find nearby cinemas and showtimes. Theater addresses and showtimes are public information; no user data is sent to AMC.</li>
+        <li><strong>Google Geocoding</strong> — converts theater addresses to coordinates (US-only). Your location is never sent to Google.</li>
         <li><strong>Google Fonts</strong> — typefaces loaded from fonts.googleapis.com. Subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a>.</li>
         <li><strong>Netflix, Prime Video, Max, Apple TV, Disney+</strong> — outbound search or direct links only. We do not share any user data with these platforms.</li>
       </ul>
 
-      <h3>7. Data Retention &amp; Deletion</h3>
+      <h3>8. Data Retention &amp; Deletion</h3>
       <p>You can permanently delete your account and all associated Firestore data yourself, at any time, from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar). The deletion is immediate. If you'd prefer we delete it for you, email <strong>hello@trysettle.app</strong> and we'll process the request within 30 days. Local browser data (localStorage, IndexedDB) is cleared automatically when you sign out, or can be cleared at any time through your browser settings.</p>
 
-      <h3>8. Children's Privacy</h3>
+      <h3>9. Children's Privacy</h3>
       <p>Settle is not directed at children under 13. We do not knowingly collect personal information from anyone under 13. If you believe a child has provided us with personal data, contact us and we will delete it promptly.</p>
 
-      <h3>9. Contact</h3>
+      <h3>10. Contact</h3>
       <p>Questions? Reach out at <strong>hello@trysettle.app</strong></p>
     </>
   );

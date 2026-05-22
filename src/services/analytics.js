@@ -92,6 +92,30 @@ export function trackPushDenied(reason)  { track('push_denied', { reason }); }
 export function trackPushUnsubscribed()  { track('push_unsubscribed'); }
 
 /**
+ * Theater Mode 2.0 events (PM spec). Note: raw coordinates NEVER appear
+ * in any of these — distance is bucketed and ZIP is logged as a presence
+ * flag, not its value.
+ */
+export function trackShowtimesOpened({ titleId, theaterCount, hasLocationPermission }) {
+  track('showtimes_opened', {
+    title_id: titleId,
+    theater_count: theaterCount,
+    has_location_permission: !!hasLocationPermission,
+  });
+}
+
+export function trackLocationPermissionResult({ result, promptType }) {
+  track('location_permission_result', {
+    result,        // 'granted' | 'denied'
+    prompt_type:   promptType, // 'first' | 'retry'
+  });
+}
+
+export function trackZipEntered({ firstTime }) {
+  track('zip_entered', { first_time: !!firstTime });
+}
+
+/**
  * Retention signal — user tapped "Watch trailer" on a pick. Captures
  * the title's service + type + mode so we can correlate trailer plays
  * with downstream "We're watching this" conversions.
