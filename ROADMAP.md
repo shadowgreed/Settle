@@ -3,11 +3,37 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-19 (PM Phases 1–3 shipped, push delivery deferred)
+Last updated: 2026-05-20 (Theater Mode 2.0 M2+M3 shipped, AMC vendor key blocked)
 
 ---
 
 ## Deferred / parked
+
+### Theater Mode 2.0 affiliate flow — blocked on AMC vendor key activation
+M2 (proximity foundation) + M3 (AMC integration) are fully shipped in
+commit `c4fb6dc`. Live verification shows AMC's servers reject our key
+with `code 12005, "Unauthorized VendorKey."` (403). Geocoding + theater
+discovery code work end-to-end — the only missing piece is AMC's side
+activating the vendor key on our partner account.
+
+Right now users who tap "🎟️ Get tickets" on a theater pick see a clean
+"Showtimes temporarily unavailable" message (commit `a819f7b`) instead
+of a misleading "not in catalog" error. When AMC activates the key,
+**no code change needed** — the existing proxy + UI start working.
+
+Next steps when unblocked:
+  1. Confirm vendor-key auth works by curling `/api/amc?_p=v2/theatres&location.lat=...`
+  2. Smoke-test the response shape against the normalizers in `src/services/amc.js`
+     (might need small field-name adjustments if HAL response shape differs
+     from what was assumed)
+  3. Then proceed to M4 (affiliate deep-link routing) + M5 (FTC disclosure,
+     ToS commission clause, remaining analytics events).
+
+Open questions for PM when revisiting:
+  - Is AMC's vendor-key activation manual? Has anyone contacted AMC support
+    about the 12005 error?
+  - Where do the keys appear in the AMC Developer Portal? User reported
+    not being able to see any keys at all in their account.
 
 ### Push notification delivery (server side) — blocked on Firebase service account key
 The client side is fully shipped (`28f0f15`): service worker push handlers,
