@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
-import { theatersNearby, showtimesAt, findMovieSlug, todayISO, formatShowtime } from '../services/amc';
+import { theatersNearby, showtimesAt, findMovieSlug, todayISO, formatShowtime, AmcServiceError } from '../services/amc';
 import { distanceMi, formatMi, DEFAULT_RADIUS_MI } from '../utils/haversine';
 import { trackShowtimesOpened } from '../services/analytics';
 import './ShowtimesSheet.css';
@@ -30,7 +30,8 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
   useFocusTrap(sheetRef, true);
 
   const [loading, setLoading]       = useState(true);
-  const [error, setError]           = useState('');
+  const [error, setError]           = useState('');         // generic catch-all
+  const [serviceDown, setServiceDown] = useState(false);    // AMC auth/network fail
   const [theaters, setTheaters]     = useState([]); // [{...theater, distanceMi, showtimes }]
   const [expanded, setExpanded]     = useState(false);
   const [movieFound, setMovieFound] = useState(true); // false if AMC doesn't carry this title
@@ -122,7 +123,15 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
         });
       } catch (e) {
         console.warn('[ShowtimesSheet] load failed:', e?.message);
-        if (!cancelled) setError('Could not load showtimes. Try again in a moment.');
+        if (cancelled) return;
+        // AmcServiceError = auth fail / network down / proxy 503. Different
+        // copy than "movie not in catalog" — the issue isn't with the pick,
+        // it's that the showtimes service isn't reachable right now.
+        if (e instanceof AmcServiceError) {
+          setServiceDown(true);
+        } else {
+          setError('Could not load showtimes. Try again in a moment.');
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -176,21 +185,31 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
             </div>
           )}
 
-          {!loading && error && (
+          {!loading && serviceDown && (
+            <div className="showtimes-empty">
+              <div className="showtimes-empty-icon" aria-hidden="true">🛠️</div>
+              <p>
+                Showtimes are temporarily unavailable. We're working on it —
+                check back in a bit.
+              </p>
+            </div>
+          )}
+
+          {!loading && !serviceDown && error && (
             <div className="showtimes-empty">
               <div className="showtimes-empty-icon" aria-hidden="true">⚠️</div>
               <p>{error}</p>
             </div>
           )}
 
-          {!loading && !error && !movieFound && (
+          {!loading && !serviceDown && !error && !movieFound && (
             <div className="showtimes-empty">
               <div className="showtimes-empty-icon" aria-hidden="true">🎬</div>
               <p>This pick isn't in AMC's catalog. Try a different one.</p>
             </div>
           )}
 
-          {!loading && !error && movieFound && visibleTheaters.length === 0 && (
+          {!loading && !serviceDown && !error && movieFound && visibleTheaters.length === 0 && (
             <div className="showtimes-empty">
               <div className="showtimes-empty-icon" aria-hidden="true">📍</div>
               <p>
@@ -200,7 +219,7 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
             </div>
           )}
 
-          {!loading && !error && movieFound && visibleTheaters.length > 0 && (
+          {!loading && !serviceDown && !error && movieFound && visibleTheaters.length > 0 && (
             <ul className="showtimes-list">
               {visibleTheaters.map(theater => (
                 <TheaterCard key={theater.id} theater={theater} />

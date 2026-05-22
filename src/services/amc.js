@@ -38,9 +38,31 @@ function setCached(key, value) {
   cache.set(key, { value, ts: Date.now() });
 }
 
+// Custom error type so callers can tell "service unavailable" (auth fail,
+// downtime, network) apart from "we got a clean response, just no matches".
+// The latter shows a different UI message — see ShowtimesSheet.
+export class AmcServiceError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.name = 'AmcServiceError';
+    this.status = status;
+  }
+}
+
 async function amcGet(path, params = {}) {
-  const res = await axios.get(AMC_BASE, { params: { _p: path, ...params } });
-  return res.data;
+  try {
+    const res = await axios.get(AMC_BASE, { params: { _p: path, ...params } });
+    return res.data;
+  } catch (err) {
+    // axios throws on non-2xx by default. 401/403 = auth fail (most likely
+    // vendor key not yet activated by AMC). 503 = our proxy reports
+    // missing env. Surface as AmcServiceError so the caller distinguishes.
+    const status = err.response?.status ?? 0;
+    const upstream = err.response?.data?.errors?.[0]?.exceptionMessage
+                  || err.response?.data?.error
+                  || err.message;
+    throw new AmcServiceError(status, upstream || 'AMC request failed');
+  }
 }
 
 /**
@@ -60,23 +82,20 @@ export async function theatersNearby({ lat, lng, radiusMi = 30 } = {}) {
   const hit = getCached(key);
   if (hit) return hit;
 
-  try {
-    const data = await amcGet('v2/theatres', {
-      'location.lat':    lat,
-      'location.long':   lng,
-      'location.radius': radiusMi,
-      'page-size':       30,
-    });
-
-    // AMC HAL response: theaters under data._embedded.theatres.
-    const list = data?._embedded?.theatres ?? data?.theatres ?? [];
-    const normalized = list.map(normalizeTheater).filter(Boolean);
-    setCached(key, normalized);
-    return normalized;
-  } catch (err) {
-    console.warn('[AMC] theatersNearby failed:', err.message);
-    return [];
-  }
+  // Service errors (auth fail, network down) propagate as AmcServiceError —
+  // callers distinguish from "0 results" by catching this. We only swallow
+  // shape-related issues (missing _embedded etc) since those are recoverable
+  // as "empty list."
+  const data = await amcGet('v2/theatres', {
+    'location.lat':    lat,
+    'location.long':   lng,
+    'location.radius': radiusMi,
+    'page-size':       30,
+  });
+  const list = data?._embedded?.theatres ?? data?.theatres ?? [];
+  const normalized = list.map(normalizeTheater).filter(Boolean);
+  setCached(key, normalized);
+  return normalized;
 }
 
 /**
@@ -98,18 +117,15 @@ export async function showtimesAt(theaterId, movieKey, dateISO) {
   const hit = getCached(key);
   if (hit) return hit;
 
-  try {
-    const data = await amcGet(`v2/theatres/${theaterId}/showtimes/${dateISO}`, {
-      movie: movieKey,
-    });
-    const list = data?._embedded?.showtimes ?? data?.showtimes ?? [];
-    const normalized = list.map(normalizeShowtime).filter(Boolean);
-    setCached(key, normalized);
-    return normalized;
-  } catch (err) {
-    console.warn('[AMC] showtimesAt failed:', err.message);
-    return [];
-  }
+  // Service errors propagate as AmcServiceError so the sheet shows the
+  // right banner; only "0 showtimes today" is a successful-empty result.
+  const data = await amcGet(`v2/theatres/${theaterId}/showtimes/${dateISO}`, {
+    movie: movieKey,
+  });
+  const list = data?._embedded?.showtimes ?? data?.showtimes ?? [];
+  const normalized = list.map(normalizeShowtime).filter(Boolean);
+  setCached(key, normalized);
+  return normalized;
 }
 
 /**
@@ -123,26 +139,22 @@ export async function findMovieSlug(title, year) {
   const hit = getCached(key);
   if (hit !== null) return hit;
 
-  try {
-    const data = await amcGet('v2/movies', { name: title, 'page-size': 5 });
-    const list = data?._embedded?.movies ?? data?.movies ?? [];
+  // AmcServiceError propagates so ShowtimesSheet can distinguish
+  // "auth/network fail" from "AMC has no matching title."
+  const data = await amcGet('v2/movies', { name: title, 'page-size': 5 });
+  const list = data?._embedded?.movies ?? data?.movies ?? [];
 
-    // Score matches: exact normalized title wins; release-year tiebreak.
-    const wanted = normalizeTitle(title);
-    const scored = list.map(m => ({
-      slug: m.slug || m.urlSlug || null,
-      titleMatch: normalizeTitle(m.name || m.title || '') === wanted ? 1 : 0,
-      yearMatch:  year && m.releaseDateUtc?.startsWith(String(year)) ? 1 : 0,
-    }));
-    scored.sort((a, b) => (b.titleMatch + b.yearMatch) - (a.titleMatch + a.yearMatch));
-    const top = scored[0]?.slug || null;
-    setCached(key, top);
-    return top;
-  } catch (err) {
-    console.warn('[AMC] findMovieSlug failed:', err.message);
-    setCached(key, null);
-    return null;
-  }
+  // Score matches: exact normalized title wins; release-year tiebreak.
+  const wanted = normalizeTitle(title);
+  const scored = list.map(m => ({
+    slug: m.slug || m.urlSlug || null,
+    titleMatch: normalizeTitle(m.name || m.title || '') === wanted ? 1 : 0,
+    yearMatch:  year && m.releaseDateUtc?.startsWith(String(year)) ? 1 : 0,
+  }));
+  scored.sort((a, b) => (b.titleMatch + b.yearMatch) - (a.titleMatch + a.yearMatch));
+  const top = scored[0]?.slug || null;
+  setCached(key, top);
+  return top;
 }
 
 // ── Normalisers ─────────────────────────────────────────────────────────────
