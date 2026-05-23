@@ -143,55 +143,85 @@
   to { transform: rotate(360deg); }
 }
 
-/* ── Blocked state ───────────────────────────────────────────────────────── */
+/* ── Direct CTA screen (known iframe-blocking domains) ───────────────────── */
 
-.tb-blocked {
-  position: absolute;
-  inset: 0;
+.tb-cta-screen {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 14px;
-  padding: 32px 28px;
-  background: #080808;
+  padding: 40px 32px 56px;
   text-align: center;
-  z-index: 2;
+  gap: 0;
 }
 
-.tb-blocked-icon {
-  font-size: 40px;
-  opacity: 0.6;
+.tb-cta-icon {
+  font-size: 52px;
+  line-height: 1;
+  margin-bottom: 20px;
 }
 
-.tb-blocked p {
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.6);
-  line-height: 1.55;
-  margin: 0;
+.tb-cta-provider {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #d9b04a;
+  margin-bottom: 14px;
 }
 
-.tb-blocked-cta {
-  margin-top: 8px;
-  padding: 13px 28px;
+.tb-cta-movie {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 28px;
+  font-weight: 300;
+  color: #f5f5f5;
+  margin: 0 0 10px;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.tb-cta-meta {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+  margin-bottom: 36px;
+  line-height: 1.5;
+}
+
+.tb-cta-theater {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.tb-cta-btn {
+  padding: 15px 36px;
   background: #d9b04a;
   color: #0c0c0c;
   font-family: 'Outfit', system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 700;
   border: none;
   border-radius: 100px;
   cursor: pointer;
   touch-action: manipulation;
   transition: opacity 0.15s, transform 0.1s;
+  letter-spacing: 0.01em;
+  min-width: 220px;
 }
-.tb-blocked-cta:hover,
-.tb-blocked-cta:focus-visible {
+.tb-cta-btn:hover,
+.tb-cta-btn:focus-visible {
   opacity: 0.88;
   outline: none;
 }
-.tb-blocked-cta:active {
+.tb-cta-btn:active {
   transform: scale(0.97);
+}
+
+.tb-cta-note {
+  margin-top: 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.28);
+  line-height: 1.5;
+  max-width: 260px;
 }
 
 /* ── iframe ──────────────────────────────────────────────────────────────── */

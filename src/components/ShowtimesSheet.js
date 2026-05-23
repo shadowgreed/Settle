@@ -216,8 +216,11 @@ function TheaterCard({ theater, movieTitle, onBuy }) {
   const visibleShows = theater.showtimes.slice(0, 6);
 
   const handleShowtimeClick = (showtime) => {
-    if (!showtime.purchaseUrl) return;
-    onBuy(showtime);
+    // Use direct purchase URL if SerpAPI provided one; otherwise fall back to
+    // a Fandango search for the movie so the user always lands somewhere useful.
+    const url = showtime.purchaseUrl
+      || `https://www.fandango.com/search?q=${encodeURIComponent(movieTitle || '')}`;
+    onBuy({ ...showtime, purchaseUrl: url });
   };
 
   return (
