@@ -55,9 +55,17 @@ export default function TicketBrowser({ url, movie, theater, timeStr, onClose })
   const overlayRef = useRef(null);
   useFocusTrap(overlayRef, true);
 
-  const openExternal = () => window.open(url, '_blank', 'noopener,noreferrer');
   const providerLabel = getProviderLabel(url);
   const blocked = isKnownBlocked(url);
+
+  // Safari (both browser and iOS PWA standalone) blocks window.open() via its
+  // popup blocker. <a target="_blank"> is the only fully reliable cross-browser
+  // way to open an external URL. All external-open affordances use anchor tags.
+  const externalLinkProps = {
+    href: url,
+    target: '_blank',
+    rel: 'noopener noreferrer',
+  };
 
   return (
     <div
@@ -86,14 +94,14 @@ export default function TicketBrowser({ url, movie, theater, timeStr, onClose })
           )}
         </div>
 
-        <button
+        <a
           className="tb-external"
-          onClick={openExternal}
+          {...externalLinkProps}
           aria-label={`Open on ${providerLabel}`}
           title={`Open on ${providerLabel}`}
         >
           <span aria-hidden="true">↗</span>
-        </button>
+        </a>
       </div>
 
       {/* ── Body ── */}
@@ -108,9 +116,9 @@ export default function TicketBrowser({ url, movie, theater, timeStr, onClose })
               {timeStr}
               {theater && <> · <span className="tb-cta-theater">{theater}</span></>}
             </div>
-            <button className="tb-cta-btn" onClick={openExternal}>
+            <a className="tb-cta-btn" {...externalLinkProps}>
               Buy Tickets on {providerLabel}
-            </button>
+            </a>
             <p className="tb-cta-note">
               You'll complete your purchase securely on {providerLabel}'s site.
             </p>
@@ -126,9 +134,9 @@ export default function TicketBrowser({ url, movie, theater, timeStr, onClose })
             />
             <div className="tb-fallback-bar">
               Not loading?{' '}
-              <button className="tb-fallback-link" onClick={openExternal}>
+              <a className="tb-fallback-link" {...externalLinkProps}>
                 Open in browser
-              </button>
+              </a>
             </div>
           </>
         )}

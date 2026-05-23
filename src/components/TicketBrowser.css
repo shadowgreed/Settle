@@ -42,6 +42,7 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
+  /* `display: inline-flex` must be explicit — <a> defaults to inline */
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -49,6 +50,7 @@
   flex-shrink: 0;
   touch-action: manipulation;
   transition: color 0.15s, background 0.15s;
+  text-decoration: none; /* <a> reset */
 }
 .tb-back:hover,
 .tb-back:focus-visible,
@@ -206,6 +208,9 @@
   transition: opacity 0.15s, transform 0.1s;
   letter-spacing: 0.01em;
   min-width: 220px;
+  /* <a> reset — display and text-decoration must be explicit */
+  display: inline-block;
+  text-decoration: none;
 }
 .tb-cta-btn:hover,
 .tb-cta-btn:focus-visible {
@@ -264,6 +269,8 @@
   text-decoration: underline;
   text-underline-offset: 2px;
   touch-action: manipulation;
+  /* <a> inherits from body — ensure font matches surrounding text */
+  display: inline;
 }
 .tb-fallback-link:hover,
 .tb-fallback-link:focus-visible {
