@@ -9,31 +9,28 @@ Last updated: 2026-05-20 (Theater Mode 2.0 M2+M3 shipped, AMC vendor key blocked
 
 ## Deferred / parked
 
-### Theater Mode 2.0 affiliate flow — blocked on AMC vendor key activation
-M2 (proximity foundation) + M3 (AMC integration) are fully shipped in
-commit `c4fb6dc`. Live verification shows AMC's servers reject our key
-with `code 12005, "Unauthorized VendorKey."` (403). Geocoding + theater
-discovery code work end-to-end — the only missing piece is AMC's side
-activating the vendor key on our partner account.
+### Theater Mode 2.0 — affiliate revenue (M4/M5) parked
+AMC API is a dead end: their ecommerce/showtimes APIs require a signed
+partnership contract and AMC is not accepting new applications via the
+developer portal. Fandango's API is similarly partner-gated.
 
-Right now users who tap "🎟️ Get tickets" on a theater pick see a clean
-"Showtimes temporarily unavailable" message (commit `a819f7b`) instead
-of a misleading "not in catalog" error. When AMC activates the key,
-**no code change needed** — the existing proxy + UI start working.
+**Pivot shipped:** replaced AMC backend with SerpAPI Google Showtimes
+(`api/showtimes.js` + `src/services/showtimes.js`). The feature is now
+fully functional — users see real theater listings and showtimes for
+today, and tapping a showtime pill opens the ticket purchase page
+(Fandango/AMC.com/etc.) that Google surfaces for that format.
 
-Next steps when unblocked:
-  1. Confirm vendor-key auth works by curling `/api/amc?_p=v2/theatres&location.lat=...`
-  2. Smoke-test the response shape against the normalizers in `src/services/amc.js`
-     (might need small field-name adjustments if HAL response shape differs
-     from what was assumed)
-  3. Then proceed to M4 (affiliate deep-link routing) + M5 (FTC disclosure,
-     ToS commission clause, remaining analytics events).
+`api/amc.js` is kept dormant in case an AMC partnership lands later.
 
-Open questions for PM when revisiting:
-  - Is AMC's vendor-key activation manual? Has anyone contacted AMC support
-    about the 12005 error?
-  - Where do the keys appear in the AMC Developer Portal? User reported
-    not being able to see any keys at all in their account.
+**Affiliate revenue:** deferred. Current state gives users a complete
+end-to-end experience (pick → showtimes → purchase) without Settle
+earning a cut. Affiliate commission can be layered on later via:
+  - Fandango affiliate program (CJ Affiliate) — no API needed, just
+    append affiliate tag to the Fandango URLs Google returns
+  - Direct AMC/Regal/Cinemark partnership if volume warrants it
+
+**M5 (FTC disclosure, ToS commission clause):** remains parked until
+there's an actual affiliate relationship to disclose.
 
 ### Push notification delivery (server side) — blocked on Firebase service account key
 The client side is fully shipped (`28f0f15`): service worker push handlers,

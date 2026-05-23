@@ -165,6 +165,16 @@
   letter-spacing: 0.02em;
 }
 
+.theater-address {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.40);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
 .theater-format-badge {
   font-size: 9px;
   font-weight: 600;
