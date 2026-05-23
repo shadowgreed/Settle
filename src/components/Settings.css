@@ -250,7 +250,7 @@
 }
 .settings-name-input {
   font-family: inherit;
-  font-size: 14px;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
   padding: 10px 12px;
   border: 1px solid #333;
   background: #0a0a0a;
@@ -348,7 +348,7 @@
 
 .settings-confirm-input {
   font-family: inherit;
-  font-size: 14px;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
   padding: 10px 12px;
   border: 1px solid #333;
   background: #0a0a0a;

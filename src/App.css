@@ -2,6 +2,9 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  /* Suppress the blue/grey tap highlight rectangle on iOS Safari.
+     Must be on * so it covers every tappable element. */
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Skip-to-main-content link — visually hidden until keyboard-focused.
@@ -265,6 +268,7 @@ button.sequel-badge {
   font-size: 12px;
   color: #b8b8b8;
   transition: all 0.15s;
+  -webkit-user-select: none;
   user-select: none;
   min-height: 40px;
   display: inline-flex;
@@ -379,6 +383,7 @@ button.sequel-badge {
   color: #555;
   letter-spacing: 0.04em;
   text-align: center;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -553,6 +558,7 @@ input[type="range"]::-moz-range-thumb {
   text-align: center;
   width: 100%;
   cursor: pointer;
+  -webkit-user-select: none;
   user-select: none;
   transition: background 0.15s;
 }
@@ -1265,10 +1271,10 @@ input[type="range"]::-moz-range-thumb {
   border: none;
   border-bottom: 1px solid currentColor;
   color: inherit;
-  font-size: 13px;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
   font-weight: 600;
   font-family: inherit;
-  width: 90px;
+  width: 100px;
   outline: none;
   padding: 0 2px;
 }

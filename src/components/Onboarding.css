@@ -12,6 +12,7 @@
   overflow: hidden;
   font-family: 'Outfit', system-ui, -apple-system, sans-serif;
   color: #fff;
+  -webkit-user-select: none;
   user-select: none;
   -webkit-tap-highlight-color: transparent;
 }
