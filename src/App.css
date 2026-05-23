@@ -1999,31 +1999,6 @@ input[type="range"]::-moz-range-thumb {
   font-weight: 500;
 }
 
-/* Pinned "Your top genres" row — surfaces the user's most-up-voted genres
-   above the "More genres" toggle so they don't have to expand the full list
-   to re-select what they already like. Only shown when the taste profile
-   has at least one ≥2-score entry. */
-.top-genres-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 8px 0 6px;
-}
-.top-genres-label {
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.40);
-}
-.top-genres-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-/* The chips themselves reuse the standard .chip styling so selection
-   states match the More-genres list. The .top-genre-chip modifier exists
-   in case we want to tint them differently in the future. */
 
 /* "At cap" hint inside the History panel — shown when the list is at its
    silent eviction cap (30 history, 20 saved). Small amber pill above the

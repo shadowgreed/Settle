@@ -2201,35 +2201,6 @@ function App() {
                   </button>
                 ))}
             </div>
-            {/* Pinned "your top genres" — only shown when the user has built
-                a taste profile (>=2 score on at least one genre). Surfaces
-                their gravitational center above the More-genres toggle. */}
-            {(() => {
-              const slot = moodPlayer === 'theater' ? 'solo' : moodPlayer;
-              const top = topGenresByPlayer[slot];
-              if (!top || top.length === 0) return null;
-              return (
-                <div className="top-genres-row" role="group" aria-label="Your top genres">
-                  <span className="top-genres-label">Your top genres</span>
-                  <div className="top-genres-chips">
-                    {top.map(genre => {
-                      const active = activeSlot.includes(genre.id);
-                      return (
-                        <button
-                          type="button"
-                          key={genre.id}
-                          className={`chip top-genre-chip ${getGenreClass(genre.id, moodPlayer)}`}
-                          onClick={() => handleGenreClick(genre.id, moodPlayer)}
-                          aria-pressed={active}
-                        >
-                          {genre.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
             <button
               className="show-genres-toggle"
               onClick={() => setShowAllGenres(prev => !prev)}
@@ -2394,33 +2365,6 @@ function App() {
                 </button>
               ))}
             </div>
-            {/* Pinned "your top genres" — per-player in couples mode so each
-                partner sees their own taste signal. */}
-            {(() => {
-              const top = topGenresByPlayer[activePlayer];
-              if (!top || top.length === 0) return null;
-              return (
-                <div className="top-genres-row" role="group" aria-label={`${playerNames[activePlayer]}'s top genres`}>
-                  <span className="top-genres-label">{playerNames[activePlayer]}'s top genres</span>
-                  <div className="top-genres-chips">
-                    {top.map(genre => {
-                      const active = selectedGenres[activePlayer]?.includes(genre.id);
-                      return (
-                        <button
-                          type="button"
-                          key={genre.id}
-                          className={`chip top-genre-chip ${getGenreClass(genre.id, activePlayer)}`}
-                          onClick={() => handleGenreClick(genre.id, activePlayer)}
-                          aria-pressed={active}
-                        >
-                          {genre.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
             <button
               className="show-genres-toggle"
               onClick={() => setShowAllGenres(prev => !prev)}
