@@ -33,8 +33,8 @@ export default async function handler(req, res) {
 
   try {
     const params = new URLSearchParams({
-      engine:   'google_showtimes',
-      q:        movie,
+      engine:   'google',
+      q:        `${movie} showtimes`,
       location,
       hl:       'en',
       gl:       'us',
