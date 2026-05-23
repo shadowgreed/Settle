@@ -1,0 +1,250 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   TicketBrowser — in-app ticket purchase overlay.
+   Full-screen, cinematic dark chrome, thin header bar.
+───────────────────────────────────────────────────────────────────────────── */
+
+.tb-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1800; /* above ShowtimesSheet (1750) */
+  display: flex;
+  flex-direction: column;
+  background: #080808;
+  animation: tb-slide-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+@keyframes tb-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+
+.tb-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px 10px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+  border-bottom: 0.5px solid #1a1a1a;
+  background: #0c0c0c;
+  flex-shrink: 0;
+  min-height: 54px;
+}
+
+.tb-back,
+.tb-external {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 18px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  touch-action: manipulation;
+  transition: color 0.15s, background 0.15s;
+}
+.tb-back:hover,
+.tb-back:focus-visible,
+.tb-external:hover,
+.tb-external:focus-visible {
+  color: #f5f5f5;
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
+}
+
+.tb-context {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.tb-context-movie {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f0f0f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
+  flex-shrink: 1;
+}
+
+.tb-context-sep {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.tb-context-detail {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tb-context-theater {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* ── Body ────────────────────────────────────────────────────────────────── */
+
+.tb-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Loading state ───────────────────────────────────────────────────────── */
+
+.tb-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: #080808;
+  z-index: 2;
+}
+
+.tb-loading p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 0;
+}
+
+.tb-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(217, 176, 74, 0.18);
+  border-top-color: #d9b04a;
+  border-radius: 50%;
+  animation: tb-spin 0.8s linear infinite;
+}
+
+@keyframes tb-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Blocked state ───────────────────────────────────────────────────────── */
+
+.tb-blocked {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 32px 28px;
+  background: #080808;
+  text-align: center;
+  z-index: 2;
+}
+
+.tb-blocked-icon {
+  font-size: 40px;
+  opacity: 0.6;
+}
+
+.tb-blocked p {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.55;
+  margin: 0;
+}
+
+.tb-blocked-cta {
+  margin-top: 8px;
+  padding: 13px 28px;
+  background: #d9b04a;
+  color: #0c0c0c;
+  font-family: 'Outfit', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  border-radius: 100px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.tb-blocked-cta:hover,
+.tb-blocked-cta:focus-visible {
+  opacity: 0.88;
+  outline: none;
+}
+.tb-blocked-cta:active {
+  transform: scale(0.97);
+}
+
+/* ── iframe ──────────────────────────────────────────────────────────────── */
+
+.tb-frame {
+  width: 100%;
+  flex: 1;
+  border: none;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.tb-frame--visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ── Fallback nudge bar ──────────────────────────────────────────────────── */
+
+.tb-fallback-bar {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background: #0c0c0c;
+  border-top: 0.5px solid #1a1a1a;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.35);
+  text-align: center;
+}
+
+.tb-fallback-link {
+  background: none;
+  border: none;
+  color: rgba(217, 176, 74, 0.85);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  touch-action: manipulation;
+}
+.tb-fallback-link:hover,
+.tb-fallback-link:focus-visible {
+  color: #d9b04a;
+  outline: none;
+}
+
+/* ── Narrow viewport ─────────────────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  .tb-header { padding: 8px 10px 8px; }
+  .tb-context-movie { font-size: 12px; }
+  .tb-context-detail { font-size: 11px; }
+}

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
 import { getShowtimes, ShowtimesServiceError } from '../services/showtimes';
 import { trackShowtimesOpened } from '../services/analytics';
+import TicketBrowser from './TicketBrowser';
 import './ShowtimesSheet.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -27,11 +28,13 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
   const sheetRef = useRef(null);
   useFocusTrap(sheetRef, true);
 
-  const [loading,     setLoading]     = useState(true);
-  const [error,       setError]       = useState('');
-  const [serviceDown, setServiceDown] = useState(false);
-  const [theaters,    setTheaters]    = useState([]);
-  const [expanded,    setExpanded]    = useState(false);
+  const [loading,       setLoading]       = useState(true);
+  const [error,         setError]         = useState('');
+  const [serviceDown,   setServiceDown]   = useState(false);
+  const [theaters,      setTheaters]      = useState([]);
+  const [expanded,      setExpanded]      = useState(false);
+  // { url, movie, theater, timeStr } — null when closed
+  const [ticketBrowser, setTicketBrowser] = useState(null);
 
   // Sort by distanceMi when available; otherwise preserve Google's proximity order.
   const visibleTheaters = useMemo(() => {
@@ -163,7 +166,19 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
           {!loading && !serviceDown && !error && visibleTheaters.length > 0 && (
             <ul className="showtimes-list">
               {visibleTheaters.map(theater => (
-                <TheaterCard key={theater.id} theater={theater} />
+                <TheaterCard
+                  key={theater.id}
+                  theater={theater}
+                  movieTitle={result?.title}
+                  onBuy={(showtime) =>
+                    setTicketBrowser({
+                      url:      showtime.purchaseUrl,
+                      movie:    result?.title,
+                      theater:  theater.name,
+                      timeStr:  showtime.timeStr,
+                    })
+                  }
+                />
               ))}
             </ul>
           )}
@@ -179,19 +194,30 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
           )}
         </div>
       </div>
+
+      {/* In-app ticket browser — slides in over the sheet */}
+      {ticketBrowser && (
+        <TicketBrowser
+          url={ticketBrowser.url}
+          movie={ticketBrowser.movie}
+          theater={ticketBrowser.theater}
+          timeStr={ticketBrowser.timeStr}
+          onClose={() => setTicketBrowser(null)}
+        />
+      )}
     </div>
   );
 }
 
 // ── Theater card ─────────────────────────────────────────────────────────────
 
-function TheaterCard({ theater }) {
+function TheaterCard({ theater, movieTitle, onBuy }) {
   // Cap visible showtimes to 6 per theater for comfortable density.
   const visibleShows = theater.showtimes.slice(0, 6);
 
   const handleShowtimeClick = (showtime) => {
     if (!showtime.purchaseUrl) return;
-    window.open(showtime.purchaseUrl, '_blank', 'noopener,noreferrer');
+    onBuy(showtime);
   };
 
   return (
