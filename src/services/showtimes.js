@@ -102,39 +102,43 @@ export async function getShowtimes(movieTitle, { lat, lng, zip } = {}) {
 function normalizeTheater(raw, index) {
   if (!raw?.name) return null;
 
-  // Flatten showing[] (per-format) → flat showtimes[] (per-time-slot)
+  // Flatten showing[] (per-format) → flat showtimes[] (per-time-slot).
+  // `showing` entries from independent theaters may omit `type` and `links`.
   const showtimes = [];
   (raw.showing || []).forEach((showing, si) => {
-    const format     = showing.type || 'Standard';
-    // Purchase link is per-format (same URL for all times in that format).
-    // Users land on Fandango's page for that movie/format and pick a time.
+    const format      = showing.type || null;          // null = standard, no badge
     const purchaseUrl = showing.links?.[0]?.link || null;
 
     (showing.time || []).forEach((timeStr, ti) => {
       showtimes.push({
-        id:          `${index}-${si}-${ti}`,
-        timeStr,          // "11:00am", "2:15pm" — already display-ready
-        format:      format !== 'Standard' ? format : null,
-        soldOut:     false,   // SerpAPI / Google doesn't surface sold-out state
+        id: `${index}-${si}-${ti}`,
+        timeStr,      // "11:00am", "2:15pm" — already display-ready
+        format,
+        soldOut:  false,   // Google doesn't surface sold-out state
         purchaseUrl,
       });
     });
   });
 
-  // Unique non-standard formats for badge chips on the theater card header
+  // Unique premium formats for badge chips (IMAX, Dolby Cinema, etc.)
   const formats = [
     ...new Set(
       (raw.showing || [])
         .map(s => s.type)
-        .filter(f => f && f !== 'Standard')
+        .filter(Boolean)
     ),
   ];
+
+  // SerpAPI returns distance as a string like "44.4 mi" — parse it out.
+  const distanceMi = raw.distance
+    ? parseFloat(raw.distance)
+    : null;
 
   return {
     id:         String(index),
     name:       raw.name,
     address:    raw.address || null,
-    distanceMi: null,  // Google sorts by proximity — no raw distance available
+    distanceMi,
     formats,
     showtimes,
   };

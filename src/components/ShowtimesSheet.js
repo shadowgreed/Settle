@@ -33,10 +33,14 @@ export default function ShowtimesSheet({ result, userLocation, onClose }) {
   const [theaters,    setTheaters]    = useState([]);
   const [expanded,    setExpanded]    = useState(false);
 
-  // Google pre-sorts by proximity — preserve their order, just cap the count.
+  // Sort by distanceMi when available; otherwise preserve Google's proximity order.
   const visibleTheaters = useMemo(() => {
     const withShowtimes = theaters.filter(t => t.showtimes && t.showtimes.length > 0);
-    return withShowtimes.slice(0, expanded ? EXPANDED_VISIBLE : DEFAULT_VISIBLE);
+    const hasDistances  = withShowtimes.some(t => t.distanceMi !== null);
+    const sorted = hasDistances
+      ? [...withShowtimes].sort((a, b) => (a.distanceMi ?? Infinity) - (b.distanceMi ?? Infinity))
+      : withShowtimes;
+    return sorted.slice(0, expanded ? EXPANDED_VISIBLE : DEFAULT_VISIBLE);
   }, [theaters, expanded]);
 
   const moreAvailable = useMemo(() => {
@@ -196,6 +200,9 @@ function TheaterCard({ theater }) {
         <div className="theater-card-info">
           <div className="theater-card-name">{theater.name}</div>
           <div className="theater-card-meta">
+            {theater.distanceMi !== null && (
+              <span className="theater-distance">{theater.distanceMi} mi</span>
+            )}
             {theater.address && (
               <span className="theater-address">{theater.address}</span>
             )}
