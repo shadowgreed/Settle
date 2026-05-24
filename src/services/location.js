@@ -30,13 +30,18 @@ let cachedCoords = null;
  * Uses sessionStorage NOTHING for the coordinates themselves — just
  * remembers the user's permission decision. The coordinates live in
  * `cachedCoords` for the page's lifetime only.
+ *
+ * Hard JS-level Promise.race timeout: Safari (especially in PWA standalone
+ * mode) has been documented to silently ignore the `timeout` option of
+ * `getCurrentPosition`, leaving the promise hanging forever. The manual
+ * race below guarantees we always settle within `timeoutMs`.
  */
-export async function getCurrentCoords({ forceRefresh = false } = {}) {
+export async function getCurrentCoords({ forceRefresh = false, timeoutMs = 8000 } = {}) {
   if (cachedCoords && !forceRefresh) return cachedCoords;
 
   if (typeof navigator === 'undefined' || !navigator.geolocation) return null;
 
-  return new Promise(resolve => {
+  const geo = new Promise(resolve => {
     navigator.geolocation.getCurrentPosition(
       pos => {
         // Spec: accept anything within 10km accuracy; below that, fall
@@ -54,9 +59,23 @@ export async function getCurrentCoords({ forceRefresh = false } = {}) {
         resolve(cachedCoords);
       },
       () => resolve(null),
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+      { enableHighAccuracy: false, timeout: timeoutMs, maximumAge: 5 * 60 * 1000 }
     );
   });
+
+  // Hard backstop — Safari iOS PWA may never invoke either callback.
+  const hardTimeout = new Promise(resolve => setTimeout(() => resolve(null), timeoutMs + 500));
+
+  return Promise.race([geo, hardTimeout]);
+}
+
+/**
+ * Manually invalidate the in-memory coords cache. Called when the user
+ * changes location from inside the showtimes sheet — forces the next
+ * read to either re-query GPS or fall through to the new ZIP.
+ */
+export function clearCachedCoords() {
+  cachedCoords = null;
 }
 
 /**

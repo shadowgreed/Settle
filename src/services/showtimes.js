@@ -1,28 +1,32 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Showtimes service — backed by SerpAPI Google Showtimes.
+// Showtimes service — SerpAPI Google Showtimes via /api/showtimes proxy.
 //
-// All calls go through the Vercel proxy at /api/showtimes, which injects
-// SERP_API_KEY server-side. The key never reaches the browser bundle.
+// All calls go through the Vercel proxy which injects SERP_API_KEY server-side
+// — the key never reaches the browser bundle.
 //
-// SerpAPI returns theaters sorted by proximity to the search location
-// (mirroring what Google shows). We normalise to the same flat shape
-// ShowtimesSheet expects so the component needs minimal changes.
+// SerpAPI returns theaters sorted by proximity to the search location, mirroring
+// what Google shows. We normalise the shape so ShowtimesSheet stays simple.
 //
-// Response shape from SerpAPI:
-//   showtimes[0].theaters[] → today's theaters (first entry = today)
-//     theater.name, .address, .showing[]
-//       showing.type  (format: "Standard" / "IMAX" / "Dolby" / etc.)
-//       showing.time  (["11:00am", "2:15pm", ...])
-//       showing.links ([ { title: "Fandango", link: "https://..." } ])
+// Response shape from SerpAPI Google search engine:
+//   showtimes[0]               → today's entry (label = "Today" usually)
+//     .theaters[]              → array of nearby theaters
+//       .name, .address, .distance ("44.4 mi" string)
+//       .showing[]             → per-format show blocks
+//         .type                → "IMAX" | "Dolby" | undefined (= standard)
+//         .time                → ["11:00am", "2:15pm", ...]
+//         .links[]             → [{ title: "Fandango", link: "https://..." }]
+//
+// Uses native `fetch` (not axios) to stay consistent with the rest of the
+// services and avoid axios' XHR-based code path which has historically
+// triggered edge cases in Safari (particularly in PWA standalone mode).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import axios from 'axios';
-
 const SHOWTIMES_BASE = '/api/showtimes';
+const REQUEST_TIMEOUT_MS = 12_000;
 
-// In-memory session cache — same pattern as the rest of the services.
-const cache      = new Map();
-const CACHE_TTL  = 1000 * 60 * 30; // 30 min
+// In-memory session cache. Dropped on page reload.
+const cache = new Map();
+const CACHE_TTL = 1000 * 60 * 30; // 30 min
 
 function getCached(key) {
   const entry = cache.get(key);
@@ -34,8 +38,10 @@ function setCached(key, value) {
   cache.set(key, { value, ts: Date.now() });
 }
 
-// Custom error type so ShowtimesSheet can distinguish "service down / API
-// error" from "clean empty result" and show the right banner.
+/**
+ * Custom error so ShowtimesSheet can distinguish "service down / API error"
+ * from "clean empty result" and pick the right banner.
+ */
 export class ShowtimesServiceError extends Error {
   constructor(status, message) {
     super(message);
@@ -45,56 +51,96 @@ export class ShowtimesServiceError extends Error {
 }
 
 /**
- * Fetch showtimes for `movieTitle` near the user's location.
+ * fetch() wrapper with an AbortController-backed timeout. Safari has been
+ * known to leave fetches hanging indefinitely when the network path is
+ * unhealthy — the hard timeout guarantees we always surface an error.
+ */
+async function fetchWithTimeout(url, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      signal:      controller.signal,
+      credentials: 'same-origin',
+      cache:       'default',
+      headers:     { Accept: 'application/json' },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Clear the in-memory cache for a specific movie+location, or all entries.
+ * Called when the user manually changes location so we always re-fetch.
+ */
+export function invalidateShowtimesCache() {
+  cache.clear();
+}
+
+/**
+ * Fetch showtimes for `movieTitle` near the given location.
  *
  * Returns a normalised array of theater objects:
  *   { id, name, address, distanceMi, formats, showtimes[] }
  *
- * `showtimes` entries: { id, timeStr, format, soldOut, purchaseUrl }
+ * Each showtimes entry: { id, timeStr, format, soldOut, purchaseUrl }.
  *
- * `distanceMi` is always null — Google already sorts by proximity so we
- * preserve their ordering rather than re-ranking. `purchaseUrl` is the
- * Fandango / AMC.com link Google surfaces for that format; tapping a
- * showtime pill opens it in a new tab.
- *
- * @param {string} movieTitle
- * @param {{ lat?: number, lng?: number, zip?: string }} location
+ * Throws ShowtimesServiceError on upstream failure. Returns [] (not throws)
+ * when no location is available — callers expecting empty UI can stay simple.
  */
 export async function getShowtimes(movieTitle, { lat, lng, zip } = {}) {
   if (!movieTitle) return [];
 
-  const locationKey = zip
-    || (lat != null && lng != null ? `${lat.toFixed(3)},${lng.toFixed(3)}` : null);
+  const locationKey =
+    zip
+      ? zip
+      : (lat != null && lng != null ? `${lat.toFixed(3)},${lng.toFixed(3)}` : null);
   if (!locationKey) return [];
 
   const cacheKey = `st:${movieTitle.toLowerCase()}:${locationKey}`;
   const hit = getCached(cacheKey);
   if (hit) return hit;
 
-  const params = { movie: movieTitle };
-  if (zip)              { params.zip = zip; }
-  else if (lat && lng)  { params.lat = lat; params.lng = lng; }
-
-  try {
-    const res  = await axios.get(SHOWTIMES_BASE, { params });
-    const data = res.data;
-
-    // showtimes[0] = today. Prefer a day entry labelled "Today", fall back
-    // to [0] so we still work if SerpAPI reorders the array.
-    const todayEntry =
-      data?.showtimes?.find(d => /today/i.test(d.day || ''))
-      ?? data?.showtimes?.[0];
-
-    const rawTheaters = todayEntry?.theaters ?? [];
-    const normalized  = rawTheaters.map(normalizeTheater).filter(Boolean);
-
-    setCached(cacheKey, normalized);
-    return normalized;
-  } catch (err) {
-    const status = err.response?.status ?? 0;
-    const msg    = err.response?.data?.error || err.message || 'Showtimes request failed';
-    throw new ShowtimesServiceError(status, msg);
+  const params = new URLSearchParams({ movie: movieTitle });
+  if (zip) {
+    params.set('zip', zip);
+  } else {
+    params.set('lat', String(lat));
+    params.set('lng', String(lng));
   }
+
+  let res;
+  try {
+    res = await fetchWithTimeout(`${SHOWTIMES_BASE}?${params}`);
+  } catch (err) {
+    // Network error, abort, DNS failure, etc.
+    throw new ShowtimesServiceError(0, err?.message || 'Network unavailable');
+  }
+
+  // Parse JSON defensively — Vercel error pages can sneak through as HTML.
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new ShowtimesServiceError(res.status, 'Bad response from showtimes service');
+  }
+
+  if (!res.ok) {
+    throw new ShowtimesServiceError(res.status, data?.error || `Service returned ${res.status}`);
+  }
+
+  // showtimes[0] = today. Prefer an entry labelled "Today"; fall back to [0]
+  // so we still work if SerpAPI ever reorders.
+  const todayEntry =
+    data?.showtimes?.find(d => /today/i.test(d.day || ''))
+    ?? data?.showtimes?.[0];
+
+  const rawTheaters = todayEntry?.theaters ?? [];
+  const normalized  = rawTheaters.map(normalizeTheater).filter(Boolean);
+
+  setCached(cacheKey, normalized);
+  return normalized;
 }
 
 // ── Normalisers ──────────────────────────────────────────────────────────────
@@ -103,24 +149,24 @@ function normalizeTheater(raw, index) {
   if (!raw?.name) return null;
 
   // Flatten showing[] (per-format) → flat showtimes[] (per-time-slot).
-  // `showing` entries from independent theaters may omit `type` and `links`.
+  // Independent theaters may omit `type` and `links` entirely.
   const showtimes = [];
   (raw.showing || []).forEach((showing, si) => {
-    const format      = showing.type || null;          // null = standard, no badge
+    const format      = showing.type || null;
     const purchaseUrl = showing.links?.[0]?.link || null;
 
     (showing.time || []).forEach((timeStr, ti) => {
       showtimes.push({
-        id: `${index}-${si}-${ti}`,
-        timeStr,      // "11:00am", "2:15pm" — already display-ready
+        id:       `${index}-${si}-${ti}`,
+        timeStr,                     // "11:00am", "2:15pm" — display-ready
         format,
-        soldOut:  false,   // Google doesn't surface sold-out state
+        soldOut:  false,             // Google doesn't surface sold-out state
         purchaseUrl,
       });
     });
   });
 
-  // Unique premium formats for badge chips (IMAX, Dolby Cinema, etc.)
+  // Unique premium formats for badge chips (IMAX, Dolby Cinema, etc.).
   const formats = [
     ...new Set(
       (raw.showing || [])
@@ -130,14 +176,12 @@ function normalizeTheater(raw, index) {
   ];
 
   // SerpAPI returns distance as a string like "44.4 mi" — parse it out.
-  const distanceMi = raw.distance
-    ? parseFloat(raw.distance)
-    : null;
+  const distanceMi = raw.distance ? parseFloat(raw.distance) : null;
 
   return {
-    id:         String(index),
-    name:       raw.name,
-    address:    raw.address || null,
+    id:        String(index),
+    name:      raw.name,
+    address:   raw.address || null,
     distanceMi,
     formats,
     showtimes,

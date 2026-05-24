@@ -13,6 +13,7 @@ import {
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
   zipToCoords, recordPermissionDecision, shouldRepromptAfterDecline,
+  clearCachedCoords,
 } from './services/location';
 import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice } from './services/push';
 import AuthGate from './components/AuthGate';
@@ -921,9 +922,9 @@ function App() {
           return;
         }
       }
-      // 7-day re-prompt timer elapsed? Show as retry. Otherwise straight
-      // to ZIP-only view (skip the permission ask).
-      setLocationPrompt(shouldRepromptAfterDecline() ? 'retry' : 'retry');
+      // 7-day re-prompt timer elapsed? Re-surface the full prompt (treat
+      // as first-time). Otherwise show the retry view which leads with ZIP.
+      setLocationPrompt(shouldRepromptAfterDecline() ? 'first' : 'retry');
       return;
     }
 
@@ -968,6 +969,38 @@ function App() {
     // User backed out without making a decision. Don't record anything —
     // they'll be re-prompted next time they tap "Get tickets".
     setLocationPrompt(null);
+  };
+
+  // ── Inline location change from ShowtimesSheet ─────────────────────────
+  // Called when the user taps the location chip inside the showtimes sheet
+  // and either enters a new ZIP or asks to re-try GPS. Throws on failure
+  // so the chip can surface a clean error to the user.
+  const handleLocationChange = async ({ mode, zip }) => {
+    if (mode === 'gps') {
+      clearCachedCoords();
+      const coords = await getCurrentCoords({ forceRefresh: true });
+      if (!coords) {
+        recordPermissionDecision('denied');
+        trackLocationPermissionResult({ result: 'denied', promptType: 'inline' });
+        throw new Error('Location unavailable. Try a ZIP instead.');
+      }
+      recordPermissionDecision('granted');
+      trackLocationPermissionResult({ result: 'granted', promptType: 'inline' });
+      setUserLocation({ ...coords, source: 'gps' });
+      return;
+    }
+
+    if (mode === 'zip') {
+      const coords = await zipToCoords(zip);
+      if (!coords) {
+        throw new Error("Couldn't find that ZIP. Try another.");
+      }
+      const isFirstTime = !getStoredZip();
+      setStoredZip(zip);
+      trackZipEntered({ firstTime: isFirstTime });
+      setUserLocation({ ...coords, source: 'zip', zip });
+      return;
+    }
   };
 
   const handleNewReleasesDismiss = () => {
@@ -2115,6 +2148,7 @@ function App() {
           result={result}
           userLocation={userLocation}
           onClose={() => setShowShowtimes(false)}
+          onLocationChange={handleLocationChange}
         />
       )}
 

@@ -98,6 +98,163 @@
   outline: none;
 }
 
+/* ── LocationChanger — pinned strip below header ─────────────────────── */
+/* Always-visible chip showing the active search location with a one-tap
+   editor. Stays anchored above the scrolling theater list so users can
+   widen / change their search without losing place. */
+.showtimes-locchip {
+  flex-shrink: 0;
+  padding: 8px 20px 10px;
+  border-bottom: 0.5px solid #161616;
+  background: #0c0c0c;
+}
+
+.showtimes-locchip-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 10px;
+  background: rgba(217, 176, 74, 0.06);
+  border: 0.5px solid rgba(217, 176, 74, 0.30);
+  color: #f0f0f0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border-radius: 100px;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 150ms, border-color 150ms;
+  max-width: 100%;
+}
+.showtimes-locchip-button:hover,
+.showtimes-locchip-button:focus-visible {
+  background: rgba(217, 176, 74, 0.12);
+  border-color: rgba(217, 176, 74, 0.55);
+  outline: none;
+}
+
+.showtimes-locchip-icon { font-size: 13px; line-height: 1; }
+.showtimes-locchip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+.showtimes-locchip-edit {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: #d9b04a;
+  padding-left: 4px;
+  border-left: 0.5px solid rgba(217, 176, 74, 0.35);
+  margin-left: 2px;
+}
+
+/* Inline editor — replaces the button when active */
+.showtimes-locchip-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.showtimes-locchip-row {
+  display: flex;
+  gap: 8px;
+}
+
+.showtimes-locchip-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: #0a0a0a;
+  border: 1px solid #2a2a2a;
+  color: #f5f5f5;
+  font-family: inherit;
+  font-size: 16px; /* ≥16px prevents iOS Safari auto-zoom on focus */
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  padding: 10px 14px;
+  border-radius: 8px;
+  text-align: center;
+  min-height: 44px;
+  transition: border-color 0.15s;
+}
+.showtimes-locchip-input:focus {
+  outline: none;
+  border-color: #d9b04a;
+}
+
+.showtimes-locchip-go {
+  background: #d9b04a;
+  color: #0c0c0c;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 10px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  min-height: 44px;
+  min-width: 80px;
+  touch-action: manipulation;
+  transition: opacity 0.15s, transform 0.1s;
+}
+.showtimes-locchip-go:hover:not(:disabled),
+.showtimes-locchip-go:focus-visible:not(:disabled) {
+  opacity: 0.9;
+  outline: none;
+}
+.showtimes-locchip-go:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.showtimes-locchip-go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.showtimes-locchip-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.showtimes-locchip-gps,
+.showtimes-locchip-cancel {
+  background: transparent;
+  border: 0.5px solid #2a2a2a;
+  color: rgba(255, 255, 255, 0.75);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 100px;
+  cursor: pointer;
+  min-height: 36px;
+  touch-action: manipulation;
+  transition: border-color 0.15s, color 0.15s;
+}
+.showtimes-locchip-gps:hover:not(:disabled),
+.showtimes-locchip-gps:focus-visible:not(:disabled),
+.showtimes-locchip-cancel:hover:not(:disabled),
+.showtimes-locchip-cancel:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.4);
+  color: #f5f5f5;
+  outline: none;
+}
+.showtimes-locchip-gps:disabled,
+.showtimes-locchip-cancel:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.showtimes-locchip-error {
+  font-size: 12px;
+  color: #ff8080;
+  margin: 0;
+  line-height: 1.4;
+}
+
 /* ── Body — scrollable area ──────────────────────────────────────────── */
 .showtimes-body {
   flex: 1 1 auto;
@@ -321,9 +478,11 @@
 
 /* ── Narrow viewport tweaks ──────────────────────────────────────────── */
 @media (max-width: 480px) {
-  .showtimes-header { padding: 16px 16px 12px; }
-  .showtimes-title  { font-size: 22px; }
-  .showtimes-body   { padding: 12px 14px 16px; }
-  .theater-card     { padding: 12px; }
-  .showtime-pill    { padding: 8px 12px; font-size: 12px; }
+  .showtimes-header     { padding: 16px 16px 12px; }
+  .showtimes-title      { font-size: 22px; }
+  .showtimes-body       { padding: 12px 14px 16px; }
+  .showtimes-locchip    { padding: 6px 16px 8px; }
+  .showtimes-locchip-label { max-width: 130px; }
+  .theater-card         { padding: 12px; }
+  .showtime-pill        { padding: 8px 12px; font-size: 12px; }
 }
