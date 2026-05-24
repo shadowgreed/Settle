@@ -11,7 +11,7 @@
 
 const SERP_BASE = 'https://serpapi.com/search.json';
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (!process.env.SERP_API_KEY) {
     console.error('[showtimes] SERP_API_KEY not configured');
     return res.status(503).json({ error: 'Showtimes service not configured' });
