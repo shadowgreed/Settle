@@ -116,6 +116,16 @@ export function trackZipEntered({ firstTime }) {
 }
 
 /**
+ * One-shot migration event — fired once per affected user when we detect
+ * a pre-swap "Easy Watch" fingerprint in their stored genre selection
+ * (the Mood Swap spec, May 2026: Easy Watch → Sci-Fi). Lets us size the
+ * affected segment without showing any migration UI to the user.
+ */
+export function trackMoodMigrationEasyWatchToFun() {
+  track('mood_migration_easy_watch_to_fun');
+}
+
+/**
  * Retention signal — user tapped "Watch trailer" on a pick. Captures
  * the title's service + type + mode so we can correlate trailer plays
  * with downstream "We're watching this" conversions.

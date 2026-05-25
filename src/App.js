@@ -9,6 +9,7 @@ import {
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
   trackPushPromptShown, trackPushAccepted, trackPushDenied, trackPushUnsubscribed,
   trackLocationPermissionResult, trackZipEntered,
+  trackMoodMigrationEasyWatchToFun,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -77,7 +78,11 @@ const MOODS = [
   { emoji: '💥', label: 'Thrilling',  ids: [28, 12, 80] },
   { emoji: '😢', label: 'Emotional',  ids: [18, 36] },
   { emoji: '🧠', label: 'Thoughtful', ids: [99, 9648] },
-  { emoji: '🍿', label: 'Easy Watch', ids: [10751, 35, 'anime'] },
+  // Sci-Fi replaced Easy Watch in the May 2026 mood swap. Easy Watch shared
+  // primary genres with Fun (Comedy + Family + Animation) and never had a
+  // distinct emotional signature — Sci-Fi (TMDB 878) fills a real gap in
+  // the mood map (speculative, world-building, idea-driven).
+  { emoji: '🛸', label: 'Sci-Fi',     ids: [878] },
   { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
   // Decade moods — added per PM roadmap 2.1. All three passed the catalog
   // audit (345 / 510 / 1050 combined pickable titles). Each decade ID is a
@@ -551,6 +556,31 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // ── Mood Swap migration (May 2026) — Easy Watch → Sci-Fi.
+  // One-shot fingerprint detection: if the user's stored genre selection
+  // contains the full pre-swap Easy Watch fingerprint (Family + Comedy +
+  // anime keyword), they were an Easy Watch user. Fire the PostHog event
+  // so PM can size the affected segment, then stamp a flag so we never
+  // fire it again. No UI shown — the migration is invisible per spec.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('settle_mood_migration_v1')) return;
+      const EASY_WATCH_FINGERPRINT = [10751, 35, 'anime'];
+      const slots = ['solo', 'p1', 'p2', 'theater'];
+      const hadEasyWatch = slots.some(slot => {
+        const ids = selectedGenres[slot] || [];
+        return EASY_WATCH_FINGERPRINT.every(id => ids.includes(id));
+      });
+      if (hadEasyWatch) {
+        trackMoodMigrationEasyWatchToFun();
+      }
+      safeSet('settle_mood_migration_v1', '1');
+    } catch { /* no-op — migration is best-effort */ }
+    // Run once after initial state hydrates. selectedGenres is read but
+    // never written here so re-runs would only re-no-op.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Show rating popup on mount for entries that have never been rated.
   // 'skip' is treated as a permanent decision — the popup never re-fires for it.
   useEffect(() => {
@@ -756,8 +786,9 @@ function App() {
     // Find which active moods match this result.
     // Use `every` on the selection check so a mood only qualifies if the user
     // explicitly activated it (all its IDs are present) — not just because one
-    // shared genre ID (e.g. Comedy=35 appears in both Fun and Easy Watch) causes
-    // a false match against a mood the user never selected.
+    // shared genre ID (e.g. Comedy=35 appears in both Fun and Thoughtful via
+    // overlap with TMDB tags) causes a false match against a mood the user
+    // never selected.
     const activeMoodLabels = MOODS
       .filter(mood =>
         mood.ids.every(id => activeGenreIds.includes(id)) &&
@@ -2257,11 +2288,18 @@ function App() {
                   </div>
                 ) : genres.map(genre => {
                   const active = activeSlot.includes(genre.id);
+                  // Mood-driven indicator (May 2026 Mood Swap spec, Step 3,
+                  // Option A): if this genre ID is part of a currently-active
+                  // mood, surface a subtle gold border so the user understands
+                  // why it's selected. Toggling the chip still works the same.
+                  const moodDriven = active && MOODS.some(m =>
+                    isMoodActive(m.ids, moodPlayer) && m.ids.includes(genre.id)
+                  );
                   return (
                     <button
                       type="button"
                       key={genre.id}
-                      className={`chip ${getGenreClass(genre.id, moodPlayer)}`}
+                      className={`chip ${getGenreClass(genre.id, moodPlayer)} ${moodDriven ? 'mood-driven' : ''}`}
                       onClick={() => handleGenreClick(genre.id, moodPlayer)}
                       aria-pressed={active}
                     >
@@ -2411,11 +2449,15 @@ function App() {
               <div className="chip-grid genre-expand" id="couple-genre-list" role="group" aria-label="Genres">
                 {genres.map(genre => {
                   const active = selectedGenres[activePlayer]?.includes(genre.id);
+                  // Mood-driven indicator (Mood Swap spec, Step 3, Option A)
+                  const moodDriven = active && MOODS.some(m =>
+                    isMoodActive(m.ids, activePlayer) && m.ids.includes(genre.id)
+                  );
                   return (
                     <button
                       type="button"
                       key={genre.id}
-                      className={`chip ${getGenreClass(genre.id, activePlayer)}`}
+                      className={`chip ${getGenreClass(genre.id, activePlayer)} ${moodDriven ? 'mood-driven' : ''}`}
                       onClick={() => handleGenreClick(genre.id, activePlayer)}
                       aria-pressed={active}
                     >

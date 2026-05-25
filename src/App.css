@@ -311,6 +311,16 @@ button.sequel-badge {
   border-color: #f5f5f5;
 }
 
+/* Mood-driven chip indicator (May 2026 Mood Swap spec, Step 3 / Option A).
+   When an active mood is the *reason* a genre chip is selected, surface a
+   subtle gold ring so the user understands the relationship — clicking the
+   chip still toggles the genre as usual; the mood just sets it initially.
+   Layered on top of .solo-on / .p1on / .p2on / .bothon, so the inner colour
+   stays accurate to whichever player's selection drove it. */
+.chip.mood-driven {
+  box-shadow: 0 0 0 1px rgba(217, 176, 74, 0.65);
+}
+
 .sdot {
   width: 7px;
   height: 7px;
