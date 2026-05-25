@@ -71,17 +71,30 @@ async function runConcurrent(fns, limit = 5) {
   return results;
 }
 
+// Mood → primary-genre map, locked to the Mood Swap spec (May 2026).
+// This table is canonical — do not edit individual mood IDs without a new
+// spec. The mappings were chosen so each mood owns a distinct emotional
+// fingerprint; overlap between moods (e.g. Drama in both Emotional and
+// Thoughtful) is intentional and handled by the `every` activation check
+// below: a mood is only "on" when ALL its IDs are present in the user's
+// active genres, so Drama alone activates Emotional only — pairing it
+// with Documentary then activates Thoughtful too.
+//
+//   Fun         → Comedy (35), Family (10751), Animation (16)
+//   Romantic    → Romance (10749)
+//   Scary       → Horror (27)
+//   Thrilling   → Thriller (53), Action (28), Mystery (9648)
+//   Emotional   → Drama (18)
+//   Sci-Fi      → Sci-Fi (878)              ← replaced Easy Watch, May 2026
+//   Thoughtful  → Drama (18), Documentary (99)
+//   Steamy      → virtual 'steamy' keyword
 const MOODS = [
-  { emoji: '😂', label: 'Fun',        ids: [35, 16] },
-  { emoji: '❤️', label: 'Romantic',   ids: [10749, 18] },
-  { emoji: '😱', label: 'Scary',      ids: [27, 53] },
-  { emoji: '💥', label: 'Thrilling',  ids: [28, 12, 80] },
-  { emoji: '😢', label: 'Emotional',  ids: [18, 36] },
-  { emoji: '🧠', label: 'Thoughtful', ids: [99, 9648] },
-  // Sci-Fi replaced Easy Watch in the May 2026 mood swap. Easy Watch shared
-  // primary genres with Fun (Comedy + Family + Animation) and never had a
-  // distinct emotional signature — Sci-Fi (TMDB 878) fills a real gap in
-  // the mood map (speculative, world-building, idea-driven).
+  { emoji: '😂', label: 'Fun',        ids: [35, 10751, 16] },
+  { emoji: '❤️', label: 'Romantic',   ids: [10749] },
+  { emoji: '😱', label: 'Scary',      ids: [27] },
+  { emoji: '💥', label: 'Thrilling',  ids: [53, 28, 9648] },
+  { emoji: '😢', label: 'Emotional',  ids: [18] },
+  { emoji: '🧠', label: 'Thoughtful', ids: [18, 99] },
   { emoji: '🛸', label: 'Sci-Fi',     ids: [878] },
   { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
   // Decade moods — added per PM roadmap 2.1. All three passed the catalog
@@ -785,10 +798,11 @@ function App() {
 
     // Find which active moods match this result.
     // Use `every` on the selection check so a mood only qualifies if the user
-    // explicitly activated it (all its IDs are present) — not just because one
-    // shared genre ID (e.g. Comedy=35 appears in both Fun and Thoughtful via
-    // overlap with TMDB tags) causes a false match against a mood the user
-    // never selected.
+    // explicitly activated it (all its IDs are present) — not just because
+    // one shared genre ID (e.g. Drama=18 appears in both Emotional and
+    // Thoughtful per the canonical map) causes a false match against a mood
+    // the user never selected. Drama alone → Emotional only; Drama +
+    // Documentary → Thoughtful (and Emotional, since Drama still satisfies it).
     const activeMoodLabels = MOODS
       .filter(mood =>
         mood.ids.every(id => activeGenreIds.includes(id)) &&
