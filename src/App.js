@@ -86,17 +86,18 @@ async function runConcurrent(fns, limit = 5) {
 //   Thrilling   → Thriller (53), Action (28), Mystery (9648)
 //   Emotional   → Drama (18)
 //   Sci-Fi      → Sci-Fi (878)              ← replaced Easy Watch, May 2026
-//   Thoughtful  → Drama (18), Documentary (99)
-//   Steamy      → Romance (10749), Drama (18), virtual 'steamy' adult-filter keyword
+//   Thoughtful  → Documentary (99), History (36)
+//   Steamy      → virtual 'steamy' adult-filter keyword only
+// NOTE: no mood shares a genre ID with another — prevents co-activation.
 const MOODS = [
   { emoji: '😂', label: 'Fun',        ids: [35, 10751, 16] },
   { emoji: '❤️', label: 'Romantic',   ids: [10749] },
   { emoji: '😱', label: 'Scary',      ids: [27] },
   { emoji: '💥', label: 'Thrilling',  ids: [53, 28, 9648] },
   { emoji: '😢', label: 'Emotional',  ids: [18] },
-  { emoji: '🧠', label: 'Thoughtful', ids: [18, 99] },
+  { emoji: '🧠', label: 'Thoughtful', ids: [99, 36] },
   { emoji: '🛸', label: 'Sci-Fi',     ids: [878] },
-  { emoji: '🔥', label: 'Steamy',     ids: [10749, 18, 'steamy'] },
+  { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
   // Decade moods — added per PM roadmap 2.1. All three passed the catalog
   // audit (345 / 510 / 1050 combined pickable titles). Each decade ID is a
   // virtual genre that pickContent translates into a TMDB date-range query
