@@ -1633,24 +1633,49 @@ function App() {
                 );
               }
 
-              // Currently only 'anime' is a special (keyword-based) virtual ID,
-              // but the loop stays generic so future virtual keyword genres
-              // (e.g. K-drama, telenovela) drop in without restructuring.
+              // Currently only 'anime' is a special (virtual) ID. The loop
+              // stays generic so future virtual genres (K-drama, telenovela,
+              // Bollywood) drop in without restructuring.
+              //
+              // Anime fetch fires TWO complementary queries combined into one
+              // pool — the keyword tag 210024 alone is inconsistently applied
+              // across TMDB's database (especially on Netflix's massive anime
+              // catalog), so we anchor on origin country + animation genre
+              // for the canonical reach, then layer the keyword query for
+              // manga adaptations / live-action / mixed-origin edge cases.
               for (const id of specialIds) {
-                const keywordsForId = id === 'anime' ? ANIME_KEYWORD : null;
-                if (!keywordsForId) continue;
-                fetchFns.push(() =>
-                  tmdbService.discoverContent({
-                    service,
-                    type,
-                    genre: null,
-                    keywords: keywordsForId,
-                    minRating,
-                    hiddenGems: false,
-                    maxCertification,
-                    dateGte, dateLte,
-                  })
-                );
+                if (id === 'anime') {
+                  // Query A — Japanese animation (most reliable; catches the
+                  // bulk of the catalog regardless of keyword tagging).
+                  fetchFns.push(() =>
+                    tmdbService.discoverContent({
+                      service,
+                      type,
+                      genre: '16',          // Animation
+                      originCountry: 'JP',  // Japan
+                      minRating,
+                      hiddenGems: false,
+                      maxCertification,
+                      dateGte, dateLte,
+                    })
+                  );
+                  // Query B — anime keyword fallback (manga adaptations and
+                  // anime-flavored titles not strictly Japanese-animated).
+                  fetchFns.push(() =>
+                    tmdbService.discoverContent({
+                      service,
+                      type,
+                      genre: null,
+                      keywords: ANIME_KEYWORD,
+                      minRating,
+                      hiddenGems: false,
+                      maxCertification,
+                      dateGte, dateLte,
+                    })
+                  );
+                  continue;
+                }
+                // Future virtual genres: add their fetch thunks here.
               }
             }
           }

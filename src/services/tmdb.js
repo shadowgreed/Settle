@@ -45,8 +45,8 @@ class TMDBService {
   }
 
   // Discover content by streaming service and filters
-  async discoverContent({ service, type = 'movie', genre = null, keywords = null, minRating = 0, hiddenGems = false, maxCertification = null, maxPages = null, dateGte = null, dateLte = null }) {
-    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${minRating}-${hiddenGems}-${maxCertification}-${dateGte}-${dateLte}`;
+  async discoverContent({ service, type = 'movie', genre = null, keywords = null, originCountry = null, minRating = 0, hiddenGems = false, maxCertification = null, maxPages = null, dateGte = null, dateLte = null }) {
+    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${originCountry}-${minRating}-${hiddenGems}-${maxCertification}-${dateGte}-${dateLte}`;
 
     return this.getCached(cacheKey, async () => {
       const providerId = PROVIDER_IDS[service];
@@ -78,6 +78,10 @@ class TMDBService {
 
       if (genre) params.with_genres = genre;
       if (keywords) params.with_keywords = keywords;
+      // Origin country filter — added for Anime mood. TMDB's `with_origin_country`
+      // is the reliable way to pull a national catalog (Japanese animation, K-drama,
+      // etc.) since keyword tagging is inconsistent across titles.
+      if (originCountry) params.with_origin_country = originCountry;
       // Certification filter applies to movies only (TV uses a separate rating system)
       if (maxCertification && type === 'movie') {
         params.certification_country = 'US';
