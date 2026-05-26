@@ -1637,30 +1637,49 @@ function App() {
               // stays generic so future virtual genres (K-drama, telenovela,
               // Bollywood) drop in without restructuring.
               //
-              // Anime fetch fires TWO complementary queries combined into one
-              // pool — the keyword tag 210024 alone is inconsistently applied
-              // across TMDB's database (especially on Netflix's massive anime
-              // catalog), so we anchor on origin country + animation genre
-              // for the canonical reach, then layer the keyword query for
-              // manga adaptations / live-action / mixed-origin edge cases.
+              // Anime fetch fires THREE complementary queries combined into
+              // one deduplicated pool. The single keyword query was returning
+              // near-zero results on Netflix because TMDB's keyword tagging
+              // is inconsistent, so we widen the net across three independent
+              // anchors. The vote-count floor is relaxed (50→20) because
+              // legit anime titles often have smaller TMDB audiences than
+              // mainstream catalogs; the popularity sort still pushes noise
+              // down without that floor. The user's rating slider (minRating)
+              // is preserved — that's an explicit user preference.
+              const ANIME_VOTE_FLOOR = 20;
               for (const id of specialIds) {
                 if (id === 'anime') {
-                  // Query A — Japanese animation (most reliable; catches the
-                  // bulk of the catalog regardless of keyword tagging).
+                  // Query A — Japanese animation by origin country.
                   fetchFns.push(() =>
                     tmdbService.discoverContent({
                       service,
                       type,
-                      genre: '16',          // Animation
-                      originCountry: 'JP',  // Japan
+                      genre: '16',                // Animation
+                      originCountry: 'JP',        // Japan
                       minRating,
+                      voteCountFloor: ANIME_VOTE_FLOOR,
                       hiddenGems: false,
                       maxCertification,
                       dateGte, dateLte,
                     })
                   );
-                  // Query B — anime keyword fallback (manga adaptations and
-                  // anime-flavored titles not strictly Japanese-animated).
+                  // Query B — Japanese-language animation (catches titles
+                  // with original_language=ja but missing origin_country).
+                  fetchFns.push(() =>
+                    tmdbService.discoverContent({
+                      service,
+                      type,
+                      genre: '16',                // Animation
+                      originalLanguage: 'ja',     // Japanese
+                      minRating,
+                      voteCountFloor: ANIME_VOTE_FLOOR,
+                      hiddenGems: false,
+                      maxCertification,
+                      dateGte, dateLte,
+                    })
+                  );
+                  // Query C — anime keyword fallback (catches manga
+                  // adaptations and anime-flavored mixed-origin titles).
                   fetchFns.push(() =>
                     tmdbService.discoverContent({
                       service,
@@ -1668,6 +1687,7 @@ function App() {
                       genre: null,
                       keywords: ANIME_KEYWORD,
                       minRating,
+                      voteCountFloor: ANIME_VOTE_FLOOR,
                       hiddenGems: false,
                       maxCertification,
                       dateGte, dateLte,

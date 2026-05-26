@@ -1,4 +1,4 @@
-// Settle service worker — v5
+// Settle service worker — v6
 //
 // Also handles Web Push (PM roadmap 3.1) — see push + notificationclick
 // listeners at the bottom.
@@ -8,8 +8,8 @@
 //   cross-origin          → pass-through (TMDB images, analytics, etc.)
 //   navigation (HTML)     → network-first, cache fallback → /index.html
 
-const SHELL_CACHE  = 'settle-shell-v5';
-const STATIC_CACHE = 'settle-static-v5';
+const SHELL_CACHE  = 'settle-shell-v6';
+const STATIC_CACHE = 'settle-static-v6';
 const ALL_CACHES   = [SHELL_CACHE, STATIC_CACHE];
 
 // App shell — pre-cached on install so the app loads offline immediately
