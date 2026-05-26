@@ -48,7 +48,10 @@ const USER_DATA_KEYS = [
   'settle_pending_email',
 ];
 
-const STEAMY_KEYWORDS = '256466|738|3182|286925|41404|41260|278555|298666';
+// TMDB keyword 210024 = "anime". The canonical wide-net tag that covers
+// both original Japanese animation AND manga-adapted titles (live-action
+// and animated). Used by the Anime mood + Anime genre chip — both route
+// through the same keyword discovery query.
 
 // Concurrency limiter — runs up to `limit` async tasks in parallel,
 // queuing the rest until a slot opens. Prevents cold-start pile-ups when
@@ -87,7 +90,7 @@ async function runConcurrent(fns, limit = 5) {
 //   Emotional   → Drama (18)
 //   Sci-Fi      → Sci-Fi (878)              ← replaced Easy Watch, May 2026
 //   Thoughtful  → Documentary (99), History (36)
-//   Steamy      → virtual 'steamy' adult-filter keyword only
+//   Anime       → virtual 'anime' keyword (Japanese animation + manga adaptations)
 // NOTE: no mood shares a genre ID with another — prevents co-activation.
 const MOODS = [
   { emoji: '😂', label: 'Fun',        ids: [35, 10751, 16] },
@@ -97,7 +100,7 @@ const MOODS = [
   { emoji: '😢', label: 'Emotional',  ids: [18] },
   { emoji: '🧠', label: 'Thoughtful', ids: [99, 36] },
   { emoji: '🛸', label: 'Sci-Fi',     ids: [878] },
-  { emoji: '🔥', label: 'Steamy',     ids: ['steamy'] },
+  { emoji: '⛩️', label: 'Anime',      ids: ['anime'] },
   // Decade moods — added per PM roadmap 2.1. All three passed the catalog
   // audit (345 / 510 / 1050 combined pickable titles). Each decade ID is a
   // virtual genre that pickContent translates into a TMDB date-range query
@@ -121,7 +124,7 @@ const DECADE_YEARS = {
 // special query behavior (keywords, date ranges, etc). The pickContent code
 // uses this to decide whether an ID should appear in the with_genres param
 // or be translated into a different filter.
-const VIRTUAL_GENRES = new Set(['steamy', 'anime', 'decade-80s', 'decade-90s', 'decade-00s']);
+const VIRTUAL_GENRES = new Set(['anime', 'decade-80s', 'decade-90s', 'decade-00s']);
 
 // Taste-profile weighting constants. Promoted from inline literals so the
 // relationship between explicit votes and the soft trailer signal is
@@ -719,8 +722,7 @@ function App() {
        .map(g => g.name === 'Science Fiction' ? { ...g, name: 'Sci-Fi' } : g);
 
       const customGenres = [
-        { id: 'anime', name: 'Anime ⛩️' },
-        { id: 'steamy', name: 'Steamy 🔥' }
+        { id: 'anime', name: 'Anime ⛩️' }
       ];
 
       const allWithCustom = [...uniqueGenres, ...customGenres]
@@ -1578,12 +1580,12 @@ function App() {
 
         // Split activeGenres into three buckets:
         //   regularIds  → real TMDB genre IDs (combined into one OR query)
-        //   specialIds  → keyword-based virtual genres (steamy, anime)
+        //   specialIds  → keyword-based virtual genres (currently just 'anime')
         //   decadeIds   → date-range virtual genres ('80s, '90s, '00s)
         // The three buckets are independent layers; decade range applies to
-        // ALL queries (regular + special) so '80s + Steamy = '80s steamy.
+        // ALL queries (regular + special) so '80s + Anime = '80s anime.
         const regularIds = activeGenresForFetch.filter(id => !VIRTUAL_GENRES.has(id));
-        const specialIds = activeGenresForFetch.filter(id => id === 'steamy' || id === 'anime');
+        const specialIds = activeGenresForFetch.filter(id => id === 'anime');
         const decadeIds  = activeGenresForFetch.filter(id => DECADE_YEARS[id]);
 
         // Combine multiple decades by spanning the union (min gte, max lte).
@@ -1631,14 +1633,18 @@ function App() {
                 );
               }
 
+              // Currently only 'anime' is a special (keyword-based) virtual ID,
+              // but the loop stays generic so future virtual keyword genres
+              // (e.g. K-drama, telenovela) drop in without restructuring.
               for (const id of specialIds) {
-                const isSteamy = id === 'steamy';
+                const keywordsForId = id === 'anime' ? ANIME_KEYWORD : null;
+                if (!keywordsForId) continue;
                 fetchFns.push(() =>
                   tmdbService.discoverContent({
                     service,
                     type,
                     genre: null,
-                    keywords: isSteamy ? STEAMY_KEYWORDS : ANIME_KEYWORD,
+                    keywords: keywordsForId,
                     minRating,
                     hiddenGems: false,
                     maxCertification,
