@@ -13,9 +13,12 @@ const PROVIDER_IDS = {
   'Prime Video':  9,      // Amazon Prime Video (US)
 };
 
-// Cache for API results to avoid duplicate calls
+// In-memory LRU cache for TMDB responses. Bounded so a long-running session
+// can't grow the cache indefinitely — each entry can hold up to ~80 normalized
+// titles (≈40-50 KB), so 200 entries caps memory at roughly 8-10 MB.
 const cache = new Map();
 const CACHE_DURATION = 1000 * 60 * 30; // 30 minutes
+const MAX_CACHE_SIZE = 200;
 
 class TMDBService {
   constructor() {
@@ -33,13 +36,22 @@ class TMDBService {
     });
   }
 
-  // Get cached data or fetch new
+  // Get cached data or fetch new. Map iteration order = insertion order,
+  // so on a hit we delete-and-reinsert to bump the entry to the "newest"
+  // position (proper LRU). On a miss-with-full-cache we evict the oldest
+  // entry — the first key Map yields.
   async getCached(key, fetchFn) {
     const cached = cache.get(key);
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      cache.delete(key);
+      cache.set(key, cached);
       return cached.data;
     }
     const data = await fetchFn();
+    if (cache.size >= MAX_CACHE_SIZE) {
+      const oldest = cache.keys().next().value;
+      cache.delete(oldest);
+    }
     cache.set(key, { data, timestamp: Date.now() });
     return data;
   }
@@ -52,13 +64,13 @@ class TMDBService {
       const providerId = PROVIDER_IDS[service];
       if (!providerId) throw new Error(`Unknown service: ${service}`);
 
-      // Catalog tuning (May 2026 optimization pass):
-      //   • vote_count.gte lowered (100→50 regular, 300→200 gems) — opens up
-      //     deeper-catalog indie / foreign titles that previously sat below
-      //     the floor. Popularity sort still buries true noise on its own.
-      //   • Page caps bumped (see pageCap below) — doubles/widens the pool
-      //     per query at near-zero latency cost because we now fire all
-      //     pages in parallel instead of awaiting page 1 first.
+      // Catalog tuning:
+      //   • vote_count.gte = 50 (regular) / 200 (hidden gems) — opens up
+      //     deeper-catalog indie / foreign titles. Popularity sort still
+      //     buries true noise on its own. Callers can override via
+      //     `voteCountFloor` (Anime queries lower it to 20).
+      //   • Page caps see `pageCap` below — all pages fire in parallel
+      //     so raising the cap costs near-zero extra latency.
       const params = hiddenGems
         ? {
             with_watch_providers: providerId,

@@ -1844,6 +1844,7 @@ function App() {
     const links = {
       'Netflix':      `https://www.netflix.com/search?q=${q}`,
       'Max':          `https://www.max.com/search?q=${q}`,
+      'Disney+':      `https://www.disneyplus.com/search?q=${q}`,
       'Apple TV':     `https://tv.apple.com/search?term=${q}`,
       'Prime Video':  `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${q}`,
       'In Theaters':  `https://www.google.com/search?q=${q}+movie+showtimes`,
@@ -3283,7 +3284,11 @@ function App() {
                 );
               }
               const useWatchmode = cinemaSource === 'pick' && (cinemaItem.service === 'Disney+' || cinemaItem.service === 'Apple TV');
-              const href = useWatchmode ? watchLink : getPlatformLink(cinemaItem.service, cinemaItem.title);
+              // Prefer Watchmode's direct title deep-link when we have it;
+              // otherwise fall through to the platform's search-page URL so
+              // Disney+ / Apple TV picks never end up with a missing "Open
+              // on X" button when Watchmode fails to resolve the title.
+              const href = (useWatchmode && watchLink) || getPlatformLink(cinemaItem.service, cinemaItem.title);
               return href ? (
                 <div className="cinema-actions">
                   <a
