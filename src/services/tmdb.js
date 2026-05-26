@@ -52,13 +52,20 @@ class TMDBService {
       const providerId = PROVIDER_IDS[service];
       if (!providerId) throw new Error(`Unknown service: ${service}`);
 
+      // Catalog tuning (May 2026 optimization pass):
+      //   • vote_count.gte lowered (100→50 regular, 300→200 gems) — opens up
+      //     deeper-catalog indie / foreign titles that previously sat below
+      //     the floor. Popularity sort still buries true noise on its own.
+      //   • Page caps bumped (see pageCap below) — doubles/widens the pool
+      //     per query at near-zero latency cost because we now fire all
+      //     pages in parallel instead of awaiting page 1 first.
       const params = hiddenGems
         ? {
             with_watch_providers: providerId,
             watch_region: 'US',
             sort_by: 'vote_average.desc',
             'vote_average.gte': 7.5,
-            'vote_count.gte': 300,
+            'vote_count.gte': 200,
             'popularity.lte': 50
           }
         : {
@@ -66,7 +73,7 @@ class TMDBService {
             watch_region: 'US',
             sort_by: 'popularity.desc',
             'vote_average.gte': minRating,
-            'vote_count.gte': 100
+            'vote_count.gte': 50
           };
 
       if (genre) params.with_genres = genre;
@@ -87,25 +94,27 @@ class TMDBService {
       }
 
       const endpoint = type === 'movie' ? '/discover/movie' : '/discover/tv';
-      // Page cap priority: explicit caller override > hidden gems (2) >
-      // genre-filtered (1 — combined OR query already covers the mood well) >
-      // unfiltered browse (3, wider net needed for random variety).
-      const pageCap = maxPages !== null ? maxPages : hiddenGems ? 2 : genre ? 1 : 3;
-      const firstPage = await this.api.get(endpoint, { params: { ...params, page: 1 } });
-      const totalPages = Math.min(firstPage.data.total_pages, pageCap);
+      // Page cap priority: explicit caller override > hidden gems (3) >
+      // genre-filtered (2 — combined OR query already covers the mood well,
+      // 2 pages = 40 titles per service+format) > unfiltered browse (4,
+      // widest net for random variety).
+      const pageCap = maxPages !== null ? maxPages : hiddenGems ? 3 : genre ? 2 : 4;
 
-      // Page 1 is already fetched — collect remaining pages in a small parallel batch
-      const remainingNums = Array.from({ length: Math.max(0, totalPages - 1) }, (_, i) => i + 2);
-      const remainingPages = await Promise.allSettled(
-        remainingNums.map(p => this.api.get(endpoint, { params: { ...params, page: p } }))
+      // Fire all pages in parallel from the start. Previously we awaited
+      // page 1 to read `total_pages`, then fired remaining pages — two
+      // sequential round-trips. Firing 1..pageCap in parallel costs the
+      // same wall-time as a single page fetch and lets us raise pageCap
+      // without proportionally raising latency. TMDB returns an empty
+      // `results` array for over-range pages (no error), so we just keep
+      // every fulfilled response and flatten.
+      const pageNums  = Array.from({ length: pageCap }, (_, i) => i + 1);
+      const responses = await Promise.allSettled(
+        pageNums.map(p => this.api.get(endpoint, { params: { ...params, page: p } }))
       );
 
-      const allPages = [
-        firstPage,
-        ...remainingPages.filter(r => r.status === 'fulfilled').map(r => r.value)
-      ];
-
-      return allPages.flatMap(res => res.data.results.map(item => this.normalizeContent(item, type, service)));
+      return responses
+        .filter(r => r.status === 'fulfilled')
+        .flatMap(r => r.value.data.results.map(item => this.normalizeContent(item, type, service)));
     });
   }
 
