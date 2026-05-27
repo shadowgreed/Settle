@@ -53,6 +53,17 @@ const USER_DATA_KEYS = [
 // and animated). Used by the Anime mood + Anime genre chip — both route
 // through the same keyword discovery query.
 
+// Stand-up comedy keyword union:
+//   9716   = stand-up comedy        (primary tag)
+//   276162 = stand-up comedian      (performer tag)
+//   356038 = stand-up specials      (special-format tag)
+// Stand-up is a virtual GENRE only — no mood references it. Selecting
+// the Stand-up chip fires a compound query (Comedy genre + these keywords).
+// All Comedy-containing queries (Fun mood, Comedy chip alone, etc.) add
+// these to `without_keywords` so stand-up never leaks into a non-stand-up
+// pool.
+const STANDUP_KEYWORDS = '9716|276162|356038';
+
 // Concurrency limiter — runs up to `limit` async tasks in parallel,
 // queuing the rest until a slot opens. Prevents cold-start pile-ups when
 // many Vercel serverless functions would otherwise all fire at once.
@@ -92,6 +103,9 @@ async function runConcurrent(fns, limit = 5) {
 //   Thoughtful  → Documentary (99), History (36)
 //   Anime       → virtual 'anime' keyword (Japanese animation + manga adaptations)
 // NOTE: no mood shares a genre ID with another — prevents co-activation.
+// NOTE: Stand-up is a GENRE-ONLY virtual ID (chip only, no mood). All
+//       Comedy-containing mood queries exclude stand-up keywords so the
+//       Stand-up chip is the only path that surfaces those specials.
 const MOODS = [
   { emoji: '😂', label: 'Fun',        ids: [35, 10751, 16] },
   { emoji: '❤️', label: 'Romantic',   ids: [10749] },
@@ -124,7 +138,7 @@ const DECADE_YEARS = {
 // special query behavior (keywords, date ranges, etc). The pickContent code
 // uses this to decide whether an ID should appear in the with_genres param
 // or be translated into a different filter.
-const VIRTUAL_GENRES = new Set(['anime', 'decade-80s', 'decade-90s', 'decade-00s']);
+const VIRTUAL_GENRES = new Set(['anime', 'standup', 'decade-80s', 'decade-90s', 'decade-00s']);
 
 // Taste-profile weighting constants. Promoted from inline literals so the
 // relationship between explicit votes and the soft trailer signal is
@@ -722,11 +736,28 @@ function App() {
        .map(g => g.name === 'Science Fiction' ? { ...g, name: 'Sci-Fi' } : g);
 
       const customGenres = [
-        { id: 'anime', name: 'Anime ⛩️' }
+        { id: 'anime', name: 'Anime ⛩️' },
+        { id: 'standup', name: 'Stand-up 🎤' }
       ];
 
-      const allWithCustom = [...uniqueGenres, ...customGenres]
+      // Sort alphabetically, then pin Stand-up immediately after Comedy.
+      // Stand-up is conceptually a Comedy sub-category, so positioning it
+      // next to Comedy gives the user a clear "either/or" choice. The
+      // alphabetical sort would otherwise drop it between Sci-Fi and
+      // Thriller, far from its semantic neighbor.
+      const sorted = [...uniqueGenres, ...customGenres]
         .sort((a, b) => a.name.localeCompare(b.name));
+      const standupIdx = sorted.findIndex(g => g.id === 'standup');
+      if (standupIdx !== -1) {
+        const [standup] = sorted.splice(standupIdx, 1);
+        const comedyIdx = sorted.findIndex(g => g.name === 'Comedy');
+        if (comedyIdx !== -1) {
+          sorted.splice(comedyIdx + 1, 0, standup);
+        } else {
+          sorted.push(standup); // Defensive: shouldn't happen, Comedy is a TMDB staple
+        }
+      }
+      const allWithCustom = sorted;
 
       setGenres(allWithCustom);
       setGenreError(false);
@@ -1580,13 +1611,22 @@ function App() {
 
         // Split activeGenres into three buckets:
         //   regularIds  → real TMDB genre IDs (combined into one OR query)
-        //   specialIds  → keyword-based virtual genres (currently just 'anime')
+        //   specialIds  → keyword-based virtual genres ('anime', 'standup')
         //   decadeIds   → date-range virtual genres ('80s, '90s, '00s)
         // The three buckets are independent layers; decade range applies to
         // ALL queries (regular + special) so '80s + Anime = '80s anime.
         const regularIds = activeGenresForFetch.filter(id => !VIRTUAL_GENRES.has(id));
-        const specialIds = activeGenresForFetch.filter(id => id === 'anime');
+        const specialIds = activeGenresForFetch.filter(id => id === 'anime' || id === 'standup');
         const decadeIds  = activeGenresForFetch.filter(id => DECADE_YEARS[id]);
+
+        // Stand-up exclusion: when the regular query includes Comedy (35),
+        // we drop stand-up-tagged titles from it so they only ever surface
+        // when the user explicitly selects the Stand-up chip. Same rule for
+        // the no-genre browse path (catches any incidental Comedy).
+        const COMEDY_GENRE_ID = 35;
+        const excludeStandup = !specialIds.includes('standup');
+        const regularExcludeKeywords =
+          excludeStandup && regularIds.includes(COMEDY_GENRE_ID) ? STANDUP_KEYWORDS : null;
 
         // Combine multiple decades by spanning the union (min gte, max lte).
         const dateGte = decadeIds.length
@@ -1602,6 +1642,8 @@ function App() {
 
             // No genre filter case — fires when nothing is selected OR when
             // only decade moods are selected. The date range still applies.
+            // Stand-up exclusion still fires here so an unfiltered browse
+            // doesn't surface stand-up specials by accident.
             if (regularIds.length === 0 && specialIds.length === 0) {
               fetchFns.push(() =>
                 tmdbService.discoverContent({
@@ -1610,6 +1652,7 @@ function App() {
                   minRating: hiddenGems ? 0 : minRating,
                   hiddenGems,
                   maxCertification: hiddenGems ? null : maxCertification,
+                  excludeKeywords: excludeStandup ? STANDUP_KEYWORDS : null,
                   // maxRuntime removed in P2.2 — surfaced on the result card instead.
                   dateGte, dateLte,
                 })
@@ -1628,6 +1671,7 @@ function App() {
                     minRating,
                     hiddenGems: false,
                     maxCertification,
+                    excludeKeywords: regularExcludeKeywords,
                     dateGte, dateLte,
                   })
                 );
@@ -1688,6 +1732,25 @@ function App() {
                       keywords: ANIME_KEYWORD,
                       minRating,
                       voteCountFloor: ANIME_VOTE_FLOOR,
+                      hiddenGems: false,
+                      maxCertification,
+                      dateGte, dateLte,
+                    })
+                  );
+                  continue;
+                }
+                if (id === 'standup') {
+                  // Stand-up compound query: Comedy genre (35) intersected
+                  // with the stand-up keyword union. Single query — no need
+                  // for multi-anchor fallback because the keyword tagging
+                  // on stand-up specials is consistent in TMDB.
+                  fetchFns.push(() =>
+                    tmdbService.discoverContent({
+                      service,
+                      type,
+                      genre: '35',                  // Comedy
+                      keywords: STANDUP_KEYWORDS,
+                      minRating,
                       hiddenGems: false,
                       maxCertification,
                       dateGte, dateLte,

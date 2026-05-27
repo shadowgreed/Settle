@@ -48,6 +48,19 @@ async function track(eventName, properties = {}) {
   if (posthog) posthog.capture(eventName, properties);
 }
 
+// ── Tracked genre keys ────────────────────────────────────────────────────────
+// Canonical identifiers for non-numeric (virtual) genres recognised by
+// analytics. Numeric TMDB genre IDs are tracked as-is; these strings are
+// the additional shapes a `genre_id` property might carry. Adding a new
+// virtual genre? Add its key here so downstream dashboards know it exists.
+export const VIRTUAL_GENRE_KEYS = Object.freeze({
+  ANIME:      'anime',
+  STANDUP:    'standup',
+  DECADE_80S: 'decade-80s',
+  DECADE_90S: 'decade-90s',
+  DECADE_00S: 'decade-00s',
+});
+
 // ── Public event API ──────────────────────────────────────────────────────────
 
 /**

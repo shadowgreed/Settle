@@ -57,8 +57,8 @@ class TMDBService {
   }
 
   // Discover content by streaming service and filters
-  async discoverContent({ service, type = 'movie', genre = null, keywords = null, originCountry = null, originalLanguage = null, minRating = 0, voteCountFloor = null, hiddenGems = false, maxCertification = null, maxPages = null, dateGte = null, dateLte = null }) {
-    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${originCountry}-${originalLanguage}-${minRating}-${voteCountFloor}-${hiddenGems}-${maxCertification}-${dateGte}-${dateLte}`;
+  async discoverContent({ service, type = 'movie', genre = null, keywords = null, excludeKeywords = null, originCountry = null, originalLanguage = null, minRating = 0, voteCountFloor = null, hiddenGems = false, maxCertification = null, maxPages = null, dateGte = null, dateLte = null }) {
+    const cacheKey = `discover-${service}-${type}-${genre}-${keywords}-${excludeKeywords}-${originCountry}-${originalLanguage}-${minRating}-${voteCountFloor}-${hiddenGems}-${maxCertification}-${dateGte}-${dateLte}`;
 
     return this.getCached(cacheKey, async () => {
       const providerId = PROVIDER_IDS[service];
@@ -94,6 +94,10 @@ class TMDBService {
 
       if (genre) params.with_genres = genre;
       if (keywords) params.with_keywords = keywords;
+      // `excludeKeywords` maps to TMDB's `without_keywords` — used by the
+      // Comedy-containing queries to suppress stand-up specials so they
+      // only ever surface when the user explicitly selects Stand-up.
+      if (excludeKeywords) params.without_keywords = excludeKeywords;
       // Origin country / original language — added for Anime mood. TMDB's
       // metadata is inconsistent (some titles have origin_country but not
       // original_language and vice versa), so callers can pass either or
