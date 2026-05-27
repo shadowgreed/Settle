@@ -740,24 +740,8 @@ function App() {
         { id: 'standup', name: 'Stand-up 🎤' }
       ];
 
-      // Sort alphabetically, then pin Stand-up immediately after Comedy.
-      // Stand-up is conceptually a Comedy sub-category, so positioning it
-      // next to Comedy gives the user a clear "either/or" choice. The
-      // alphabetical sort would otherwise drop it between Sci-Fi and
-      // Thriller, far from its semantic neighbor.
-      const sorted = [...uniqueGenres, ...customGenres]
+      const allWithCustom = [...uniqueGenres, ...customGenres]
         .sort((a, b) => a.name.localeCompare(b.name));
-      const standupIdx = sorted.findIndex(g => g.id === 'standup');
-      if (standupIdx !== -1) {
-        const [standup] = sorted.splice(standupIdx, 1);
-        const comedyIdx = sorted.findIndex(g => g.name === 'Comedy');
-        if (comedyIdx !== -1) {
-          sorted.splice(comedyIdx + 1, 0, standup);
-        } else {
-          sorted.push(standup); // Defensive: shouldn't happen, Comedy is a TMDB staple
-        }
-      }
-      const allWithCustom = sorted;
 
       setGenres(allWithCustom);
       setGenreError(false);
