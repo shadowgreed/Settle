@@ -2,54 +2,44 @@
  * Vercel cron — weekly re-engagement push for idle Settle users.
  * PM roadmap 3.1.
  *
- * Schedule: configured via vercel.json `crons` (recommended: weekly Friday 7pm UTC).
- * Vercel hits this endpoint with a CRON_SECRET header that we verify.
+ * Reads push profiles from Upstash (lib/pushStore.js), NOT Firestore. This is
+ * the unblock: the original version needed firebase-admin → a service-account
+ * key → forbidden by org policy `iam.disableServiceAccountKeyCreation`. Upstash
+ * is read over plain REST with the token we already use for rate limiting, so
+ * no service-account key is required.
  *
  * For each user that:
- *   - has at least one pushSubscription saved
- *   - hasn't been active in 3+ days (lastSeenAt < now - 3 days)
- *   - has a built taste profile (>=1 top genre)
- * we:
- *   - find their top 3 genres from tasteProfile.solo
- *   - query TMDB for new releases in those genres + their selected services
- *   - send a push notification via web-push library (signed with VAPID)
+ *   - has at least one push subscription
+ *   - has been idle 3+ days (lastSeenAt older than the cutoff)
+ *   - hasn't been pushed in the last 7 days (lastNotifiedAt frequency gate)
+ *   - has a built taste profile (≥1 top genre) and ≥1 known service
+ *   - actually has new releases this week in those genres + services
+ * we send a single notification via web-push (signed with VAPID) and prune any
+ * subscriptions the push service reports as gone (404/410).
+ *
+ * SCHEDULE: configured in vercel.json. We run DAILY but the per-user 7-day
+ * lastNotifiedAt gate means any given user is pinged at most weekly — so this
+ * works on any Vercel plan (incl. Hobby's once-per-day cron limit) without
+ * over-notifying.
  *
  * Required environment variables:
- *   VAPID_PUBLIC_KEY        — same value as REACT_APP_VAPID_PUBLIC_KEY
- *   VAPID_PRIVATE_KEY       — server-only, NEVER expose to client
- *   VAPID_SUBJECT           — mailto:hello@trysettle.app
- *   CRON_SECRET             — opaque token Vercel sends in the Authorization header
- *   FIREBASE_PROJECT_ID     — for Firebase Admin SDK
- *   FIREBASE_CLIENT_EMAIL   — service account email
- *   FIREBASE_PRIVATE_KEY    — service account private key
- *   TMDB_KEY                — already configured for the proxy
- *
- * Setup (one-time):
- *   1. npx web-push generate-vapid-keys
- *      → copy publicKey to REACT_APP_VAPID_PUBLIC_KEY
- *      → copy privateKey to VAPID_PRIVATE_KEY
- *   2. Add a CRON_SECRET (any long random string) to Vercel env
- *   3. Generate a Firebase service account JSON:
- *      Firebase Console → Settings → Service accounts → Generate new private key
- *      Add the email + key + project_id to Vercel env
- *   4. Configure the cron schedule in vercel.json (see comment block below)
- *   5. npm install web-push firebase-admin in the project root
- *
- * This file is SCAFFOLDED — wire-up code is present, but the VAPID and
- * Firebase Admin pieces require the env vars above to actually fire pushes.
- * Without them the endpoint returns a friendly error so cron retries don't
- * burn budget.
+ *   VAPID_PUBLIC_KEY   — same value as REACT_APP_VAPID_PUBLIC_KEY
+ *   VAPID_PRIVATE_KEY  — server-only, NEVER expose to the client
+ *   VAPID_SUBJECT      — mailto:hello@trysettle.app (or your contact URL)
+ *   CRON_SECRET        — opaque token Vercel sends in the Authorization header
+ *   TMDB_KEY           — already configured for the TMDB proxy
+ *   UPSTASH_REDIS_REST_URL / _TOKEN (or KV_REST_API_URL / _TOKEN)
  */
 
-// Conditional imports — these throw at install time if not present, so we
-// require them lazily inside the handler. The endpoint stays callable for
-// health checks even before deps are installed.
-let webpush, admin;
-
 const crypto = require('crypto');
+const { isEnabled, listProfiles, commitAfterSend } = require('../../lib/pushStore');
 
-// Constant-time string compare so the CRON_SECRET check doesn't leak length
-// or prefix-match information through response timing.
+// web-push is CommonJS; require it lazily so the function still loads (for the
+// 503 health response) even if the dependency is somehow absent.
+let webpush;
+
+// Constant-time compare so the CRON_SECRET check doesn't leak length/prefix
+// information through response timing.
 function safeEqual(a, b) {
   const ab = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
@@ -60,166 +50,174 @@ function safeEqual(a, b) {
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
+// App service names → TMDB watch-provider ids (US).
 const PROVIDER_IDS = {
-  'Netflix':     8,
-  'Max':         1899,
-  'Disney+':     337,
-  'Apple TV':    350,
+  Netflix: 8,
+  Max: 1899,
+  'Disney+': 337,
+  'Apple TV': 350,
   'Prime Video': 9,
 };
 
 module.exports = async function handler(req, res) {
-  // ── Auth ─────────────────────────────────────────────────────────────
+  // ── Auth ─────────────────────────────────────────────────────────────────
   const expectedAuth = `Bearer ${process.env.CRON_SECRET || ''}`;
   if (!process.env.CRON_SECRET || !safeEqual(req.headers.authorization || '', expectedAuth)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
-  // ── Env sanity ───────────────────────────────────────────────────────
-  const requiredEnv = [
-    'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT',
-    'FIREBASE_PROJECT_ID', 'FIREBASE_CLIENT_EMAIL', 'FIREBASE_PRIVATE_KEY',
-    'TMDB_KEY',
-  ];
-  const missing = requiredEnv.filter(k => !process.env[k]);
+  // ── Env sanity ─────────────────────────────────────────────────────────────
+  const requiredEnv = ['VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT', 'TMDB_KEY'];
+  const missing = requiredEnv.filter((k) => !process.env[k]);
   if (missing.length > 0) {
     console.warn('[push cron] Missing env:', missing.join(', '));
     return res.status(503).json({ error: 'env not configured', missing });
   }
-
-  // ── Lazy require so the function loads even without deps installed ──
-  try {
-    webpush = require('web-push');
-    admin   = require('firebase-admin');
-  } catch (e) {
-    return res.status(503).json({
-      error: 'dependencies not installed',
-      hint:  'npm install web-push firebase-admin',
-    });
+  if (!isEnabled()) {
+    return res.status(503).json({ error: 'push store not configured' });
   }
 
-  // ── Init ─────────────────────────────────────────────────────────────
+  try {
+    webpush = require('web-push');
+  } catch {
+    return res.status(503).json({ error: 'web-push not installed' });
+  }
   webpush.setVapidDetails(
     process.env.VAPID_SUBJECT,
     process.env.VAPID_PUBLIC_KEY,
-    process.env.VAPID_PRIVATE_KEY,
+    process.env.VAPID_PRIVATE_KEY
   );
 
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId:   process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        // Vercel stores newlines as literal "\n" in env vars — convert.
-        privateKey:  process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-      }),
-    });
+  // ── Load candidates from Upstash ───────────────────────────────────────────
+  let profiles;
+  try {
+    profiles = await listProfiles();
+  } catch (e) {
+    console.error('[push cron] listProfiles failed:', e.message);
+    return res.status(500).json({ error: 'store read failed' });
   }
-  const db = admin.firestore();
 
-  // ── Find candidate users ─────────────────────────────────────────────
-  // Users with at least one push subscription. We then filter client-side
-  // by lastSeenAt because Firestore queries on missing fields are tricky.
-  const cutoff = Date.now() - THREE_DAYS_MS;
-  const snap = await db.collection('users').get();
+  const now = Date.now();
+  const idleCutoff = now - THREE_DAYS_MS; // lastSeenAt older than this = idle
+  const notifyCutoff = now - SEVEN_DAYS_MS; // lastNotifiedAt older than this = eligible
+  const releaseFloor = new Date(now - SEVEN_DAYS_MS).toISOString().slice(0, 10);
 
-  let sent = 0, skipped = 0, failed = 0, gone = 0;
-  for (const userDoc of snap.docs) {
-    const u = userDoc.data();
-    const subs = Array.isArray(u.pushSubscriptions) ? u.pushSubscriptions : [];
-    if (subs.length === 0)                       { skipped++; continue; }
+  let users = 0;
+  let sent = 0;
+  let skipped = 0;
+  let failed = 0;
+  let gone = 0;
 
-    // updatedAt is the sync timestamp we already write on every push. If
-    // it's recent (< 3 days), the user is active — skip.
-    const lastSeen = u.updatedAt?.toMillis?.() ?? 0;
-    if (lastSeen > cutoff)                       { skipped++; continue; }
+  for (const p of profiles) {
+    const subs = Array.isArray(p.subs) ? p.subs : [];
+    if (subs.length === 0) {
+      skipped++;
+      continue;
+    }
+    // Active recently — leave them alone.
+    if ((p.lastSeenAt || 0) > idleCutoff) {
+      skipped++;
+      continue;
+    }
+    // Already pinged this week — frequency cap.
+    if ((p.lastNotifiedAt || 0) > notifyCutoff) {
+      skipped++;
+      continue;
+    }
 
-    // Build top genres from tasteProfile.solo
-    const profile = u.tasteProfile?.solo || {};
-    const topIds = Object.entries(profile)
-      .filter(([, score]) => score >= 2)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([id]) => id);
-    if (topIds.length === 0)                     { skipped++; continue; }
+    const topIds = (Array.isArray(p.topGenres) ? p.topGenres : [])
+      .map(Number)
+      .filter(Number.isFinite)
+      .slice(0, 3);
+    if (topIds.length === 0) {
+      skipped++;
+      continue;
+    }
 
-    const services = u.prefs?.services || [];
-    const providerIds = services
-      .map(s => PROVIDER_IDS[s])
+    const providerIds = (Array.isArray(p.services) ? p.services : [])
+      .map((s) => PROVIDER_IDS[s])
       .filter(Boolean)
       .join('|');
-    if (!providerIds)                            { skipped++; continue; }
+    if (!providerIds) {
+      skipped++;
+      continue;
+    }
 
-    // Count new releases in those genres + services for the last 7 days.
-    const floor = new Date(Date.now() - SEVEN_DAYS_MS).toISOString().slice(0, 10);
+    // How many new releases this week in their genres + services?
     let count = 0;
     try {
       const params = new URLSearchParams({
-        api_key:                    process.env.TMDB_KEY,
-        with_watch_providers:       providerIds,
-        watch_region:               'US',
-        'primary_release_date.gte': floor,
-        with_genres:                topIds.join('|'),
-        'vote_count.gte':           '5',
-        page:                       '1',
+        api_key: process.env.TMDB_KEY,
+        with_watch_providers: providerIds,
+        watch_region: 'US',
+        'primary_release_date.gte': releaseFloor,
+        with_genres: topIds.join('|'),
+        'vote_count.gte': '5',
+        page: '1',
       });
       const r = await fetch(`https://api.themoviedb.org/3/discover/movie?${params}`);
       const json = await r.json();
       count = json?.total_results || 0;
     } catch (e) {
-      console.warn('[push cron] TMDB query failed for', userDoc.id, e.message);
+      console.warn('[push cron] TMDB query failed for', p.uid, e.message);
+    }
+    if (count === 0) {
+      skipped++;
+      continue;
     }
 
-    if (count === 0)                             { skipped++; continue; }
-
+    users++;
     const payload = JSON.stringify({
       title: 'Settle',
-      body:  `${count} new title${count === 1 ? '' : 's'} in your genres dropped this week.`,
-      url:   '/',
-      tag:   'settle-newrel-weekly',
+      body: `${count} new title${count === 1 ? '' : 's'} in your genres dropped this week.`,
+      url: '/',
+      tag: 'settle-newrel-weekly',
     });
 
-    // Send to all of this user's subscribed devices. Remove any that
-    // come back with 404/410 — they're stale endpoints (uninstalled PWA,
-    // revoked permission, etc.) and will never deliver.
+    // Send to every device. Drop endpoints the push service says are gone
+    // (404/410 = uninstalled PWA / revoked permission); keep on transient errors.
     const validSubs = [];
+    let okThisUser = 0;
     for (const sub of subs) {
       try {
         await webpush.sendNotification(sub, payload);
         validSubs.push(sub);
+        okThisUser++;
         sent++;
       } catch (e) {
         if (e.statusCode === 404 || e.statusCode === 410) {
-          gone++; // drop it
+          gone++;
         } else {
-          validSubs.push(sub); // keep on transient errors
+          validSubs.push(sub);
           failed++;
-          console.warn('[push cron] send failed for', userDoc.id, e.statusCode, e.body);
+          console.warn('[push cron] send failed for', p.uid, e.statusCode);
         }
       }
     }
 
-    // Persist pruned subscription list if any were removed.
-    if (validSubs.length !== subs.length) {
-      await userDoc.ref.update({ pushSubscriptions: validSubs });
+    // Persist pruned subs + stamp lastNotifiedAt only if something landed.
+    try {
+      await commitAfterSend(p.uid, { subs: validSubs, notified: okThisUser > 0 });
+    } catch (e) {
+      console.warn('[push cron] commit failed for', p.uid, e.message);
     }
   }
 
-  console.log(`[push cron] sent=${sent} skipped=${skipped} failed=${failed} gone=${gone}`);
-  return res.status(200).json({ sent, skipped, failed, gone });
+  console.log(
+    `[push cron] users=${users} sent=${sent} skipped=${skipped} failed=${failed} gone=${gone}`
+  );
+  return res.status(200).json({ users, sent, skipped, failed, gone });
 };
 
 /*
-  ── vercel.json cron config ─────────────────────────────────────────────
+  ── vercel.json cron config ─────────────────────────────────────────────────
   Add to vercel.json:
 
     "crons": [
-      {
-        "path": "/api/cron/push-notifications",
-        "schedule": "0 19 * * 5"   // Fridays at 19:00 UTC (3pm ET / noon PT)
-      }
+      { "path": "/api/cron/push-notifications", "schedule": "0 19 * * *" }
     ]
 
-  Vercel automatically attaches the Authorization: Bearer <CRON_SECRET>
-  header when invoking the cron, as long as CRON_SECRET is set in env.
+  Runs daily at 19:00 UTC; the per-user 7-day gate keeps each user weekly.
+  Vercel attaches Authorization: Bearer <CRON_SECRET> automatically when
+  CRON_SECRET is set in the project env.
 */

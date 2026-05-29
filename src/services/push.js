@@ -5,26 +5,30 @@
 //   1. App detects support + checks current permission
 //   2. After 3rd successful pick, opt-in banner asks the user
 //   3. User accepts → requestPermission() → subscribe via PushManager
-//   4. PushSubscription JSON saved to Firestore (per-user, multi-device)
-//   5. Server cron iterates subscriptions weekly and sends notifications
-//      via the web-push library (signed with VAPID private key).
+//   4. Subscription POSTed to /api/push/subscribe and stored in Upstash
+//      (NOT Firestore — the re-engagement cron reads it back over REST, which
+//      sidesteps the firebase-admin service-account key the org policy blocks).
+//   5. Server cron iterates subscriptions and sends notifications weekly via
+//      the web-push library (signed with the VAPID private key).
+//
+// The /api/push/* endpoints derive the Firebase uid from the ID token in the
+// Authorization header, so a client can only ever write its own profile.
 //
 // Platform note: web push works on Android Chrome / Firefox / Edge today.
-// iOS Safari supports it only when the PWA is installed to the home
-// screen on iOS 16.4+. The opt-in banner is suppressed when push isn't
-// available, so users never see a prompt that can't be honored.
+// iOS Safari supports it only when the PWA is installed to the home screen on
+// iOS 16.4+. The opt-in banner is suppressed when push isn't available, so
+// users never see a prompt that can't be honored.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { db } from './firebase';
+import { authHeader } from './authHeader';
 
 const VAPID_PUBLIC_KEY = process.env.REACT_APP_VAPID_PUBLIC_KEY || '';
 
 // True if the browser supports Web Push (Service Worker + Push API) AND the
 // server-side VAPID key is configured. The VAPID check effectively gates the
-// entire feature behind environment configuration — without it set, the
-// opt-in banner and Settings toggle stay hidden, so users never opt in to a
-// feature that can't actually deliver notifications.
+// entire feature behind environment configuration — without it set, the opt-in
+// banner and Settings toggle stay hidden, so users never opt in to a feature
+// that can't actually deliver notifications.
 //
 // On iOS specifically, also requires the PWA to be home-screen-installed.
 export function isPushSupported() {
@@ -41,8 +45,8 @@ export function notificationPermission() {
   return typeof Notification !== 'undefined' ? Notification.permission : 'default';
 }
 
-// Convert the base64url-encoded VAPID public key into the Uint8Array form
-// the PushManager.subscribe() applicationServerKey option expects.
+// Convert the base64url-encoded VAPID public key into the Uint8Array form the
+// PushManager.subscribe() applicationServerKey option expects.
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
@@ -52,24 +56,42 @@ function urlBase64ToUint8Array(base64String) {
   return out;
 }
 
-// Subscribe the current device to push.
-// Returns the PushSubscription on success, throws on failure (permission
-// denied, no VAPID key configured, network error, etc.).
-export async function subscribeToPush(uid) {
+// POST JSON to one of our same-origin endpoints with the Firebase ID token
+// attached. Returns the Response (callers decide how to handle non-2xx).
+async function postJson(path, body) {
+  return fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+    body: JSON.stringify(body),
+  });
+}
+
+function cleanTargeting(targeting = {}) {
+  return {
+    topGenres: Array.isArray(targeting.topGenres) ? targeting.topGenres : [],
+    services: Array.isArray(targeting.services) ? targeting.services : [],
+  };
+}
+
+// Subscribe the current device to push and persist it server-side.
+// `targeting` = { topGenres: number[], services: string[] } feeds the cron's
+// "new in your genres" query. Returns the PushSubscription on success; throws
+// on the failures the UI cares about (no support, permission denied, no key).
+export async function subscribeToPush(uid, targeting = {}) {
   if (!isPushSupported()) throw new Error('Push not supported');
   if (!VAPID_PUBLIC_KEY) throw new Error('VAPID public key not configured');
   if (!uid) throw new Error('User must be signed in to subscribe');
 
-  // Ask the user for permission. On iOS, this also requires the
-  // installed-PWA context — the browser handles the gate.
+  // Ask the user for permission. On iOS this also requires the installed-PWA
+  // context — the browser handles that gate.
   const perm = await Notification.requestPermission();
   if (perm !== 'granted') {
     throw new Error(`Permission ${perm}`);
   }
 
   const reg = await navigator.serviceWorker.ready;
-  // Reuse an existing subscription if the user is already opted in on this
-  // device — no point creating a second endpoint.
+  // Reuse an existing subscription if this device is already opted in — no
+  // point minting a second endpoint.
   let sub = await reg.pushManager.getSubscription();
   if (!sub) {
     sub = await reg.pushManager.subscribe({
@@ -78,36 +100,54 @@ export async function subscribeToPush(uid) {
     });
   }
 
-  // Save to Firestore so the server can iterate them when sending
-  // notifications. Stored as a JSON-serializable object, not the live
-  // PushSubscription (which can't cross the network boundary directly).
-  const subJson = sub.toJSON();
-  const userDoc = doc(db, 'users', uid);
-  const snap = await getDoc(userDoc);
-  if (snap.exists()) {
-    await updateDoc(userDoc, { pushSubscriptions: arrayUnion(subJson) });
-  } else {
-    await setDoc(userDoc, { pushSubscriptions: [subJson] }, { merge: true });
+  // Persist to Upstash via the API. If this POST fails the browser is still
+  // subscribed; the app-open heartbeat (syncPushProfile) will re-sync later,
+  // so we don't treat a transient persist failure as an opt-in failure.
+  try {
+    const res = await postJson('/api/push/subscribe', {
+      subscription: sub.toJSON(),
+      ...cleanTargeting(targeting),
+    });
+    if (!res.ok) console.warn('[Push] subscribe persist failed:', res.status);
+  } catch (e) {
+    console.warn('[Push] subscribe persist error:', e.message);
   }
+
   return sub;
 }
 
-// Unsubscribe this device + remove the subscription from Firestore.
+// Heartbeat — called on app open when already subscribed. Re-sends the existing
+// subscription so the server refreshes lastSeenAt (idle detection) and the
+// latest genre/service targeting. No permission prompt, no-op if unsubscribed.
+export async function syncPushProfile(uid, targeting = {}) {
+  if (!isPushSupported() || !uid) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return; // not subscribed on this device — nothing to refresh
+    await postJson('/api/push/subscribe', {
+      subscription: sub.toJSON(),
+      ...cleanTargeting(targeting),
+    });
+  } catch (e) {
+    console.warn('[Push] profile sync failed:', e.message);
+  }
+}
+
+// Unsubscribe this device + remove the subscription server-side.
 export async function unsubscribeFromPush(uid) {
   if (!isPushSupported() || !uid) return;
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
     if (sub) {
-      const subJson = sub.toJSON();
+      // Capture the endpoint BEFORE unsubscribing — afterwards it's gone.
+      const endpoint = sub.endpoint;
       await sub.unsubscribe();
       try {
-        await updateDoc(doc(db, 'users', uid), {
-          pushSubscriptions: arrayRemove(subJson),
-        });
+        await postJson('/api/push/unsubscribe', { endpoint });
       } catch (e) {
-        // Doc may not exist yet — that's fine, just means there's nothing to remove.
-        console.warn('[Push] Could not remove subscription from Firestore:', e.message);
+        console.warn('[Push] Could not remove subscription server-side:', e.message);
       }
     }
   } catch (e) {
