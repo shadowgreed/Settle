@@ -2286,7 +2286,7 @@ function App() {
       )}
 
       {/* Theater Mode 2.0 — showtimes sheet (M2+M3). Opens when the user
-          taps "Get tickets" on a theater pick. Shows nearest AMC theaters
+          taps "Get tickets" on a theater pick. Shows nearest theaters
           + today's showtimes for the picked movie. */}
       {showShowtimes && result && (
         <ShowtimesSheet
@@ -3305,7 +3305,7 @@ function App() {
             {(() => {
               // Theater picks now open the in-app ShowtimesSheet (Theater
               // Mode 2.0) instead of routing out to Google search. The
-              // sheet handles location permission + nearby AMC theaters +
+              // sheet handles location permission + nearby theaters +
               // showtimes. Streaming picks still get the existing deep
               // link to their service.
               if (cinemaSource === 'pick' && cinemaItem.service === 'In Theaters') {

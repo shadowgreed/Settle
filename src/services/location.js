@@ -15,6 +15,8 @@
 //   • If granted → silently re-use on subsequent sessions until expired.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { authHeader } from './authHeader';
+
 const PERMISSION_STORAGE_KEY = 'settle_location_permission'; // tri-state: 'granted' | 'denied' | null
 const PERMISSION_DENIED_AT   = 'settle_location_denied_at'; // ISO timestamp for re-prompt timer
 const ZIP_STORAGE_KEY        = 'settle_zip_fallback';       // string, last typed ZIP
@@ -156,7 +158,9 @@ export async function zipToCoords(zip) {
   if (zipCoordsCache.has(zip)) return zipCoordsCache.get(zip);
 
   try {
-    const res = await fetch(`/api/geocode?address=${encodeURIComponent(zip)}`);
+    const res = await fetch(`/api/geocode?address=${encodeURIComponent(zip)}`, {
+      headers: await authHeader(),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     if (typeof data.lat === 'number' && typeof data.lng === 'number') {

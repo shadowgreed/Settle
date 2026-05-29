@@ -21,6 +21,8 @@
 // triggered edge cases in Safari (particularly in PWA standalone mode).
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { authHeader } from './authHeader';
+
 const SHOWTIMES_BASE = '/api/showtimes';
 const REQUEST_TIMEOUT_MS = 12_000;
 
@@ -55,7 +57,7 @@ export class ShowtimesServiceError extends Error {
  * known to leave fetches hanging indefinitely when the network path is
  * unhealthy — the hard timeout guarantees we always surface an error.
  */
-async function fetchWithTimeout(url, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+async function fetchWithTimeout(url, { timeoutMs = REQUEST_TIMEOUT_MS, headers = {} } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -63,7 +65,7 @@ async function fetchWithTimeout(url, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
       signal:      controller.signal,
       credentials: 'same-origin',
       cache:       'default',
-      headers:     { Accept: 'application/json' },
+      headers:     { Accept: 'application/json', ...headers },
     });
   } finally {
     clearTimeout(timer);
@@ -110,9 +112,13 @@ export async function getShowtimes(movieTitle, { lat, lng, zip } = {}) {
     params.set('lng', String(lng));
   }
 
+  // Attach the signed-in user's ID token so the proxy can rate-limit per
+  // verified user (uid) instead of per shared IP. {} when signed out.
+  const headers = await authHeader();
+
   let res;
   try {
-    res = await fetchWithTimeout(`${SHOWTIMES_BASE}?${params}`);
+    res = await fetchWithTimeout(`${SHOWTIMES_BASE}?${params}`, { headers });
   } catch (err) {
     // Network error, abort, DNS failure, etc.
     throw new ShowtimesServiceError(0, err?.message || 'Network unavailable');

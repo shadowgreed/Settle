@@ -26,11 +26,35 @@
 // mode — explicit ACAO + ACAM avoids any ambiguity.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const { enforceRateLimit } = require('../lib/rateLimit');
+
 const SERP_BASE    = 'https://serpapi.com/search.json';
 const GEOCODE_BASE = 'https://maps.googleapis.com/maps/api/geocode/json';
 
-function setCorsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin',  '*');
+// Origins permitted to read this endpoint cross-origin: production hosts plus
+// Vercel preview deploys (settle-*.vercel.app). SerpAPI is a *paid, metered*
+// upstream, so a wildcard ACAO ('*') would let any third-party site spend our
+// search budget. The app itself is same-origin and never relies on these
+// headers — they only service explicitly-trusted origins. (Non-browser clients
+// ignore CORS, so this is defence-in-depth, not a substitute for rate-limiting.)
+const ALLOWED_ORIGINS = ['https://trysettle.app', 'https://www.trysettle.app'];
+
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    return host === 'vercel.app' || host.endsWith('.vercel.app');
+  } catch {
+    return false;
+  }
+}
+
+function setCorsHeaders(req, res) {
+  const origin = req.headers.origin;
+  if (isAllowedOrigin(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
   res.setHeader('Vary',                         'Origin');
@@ -89,7 +113,7 @@ async function reverseGeocode(lat, lng) {
 }
 
 module.exports = async function handler(req, res) {
-  setCorsHeaders(res);
+  setCorsHeaders(req, res);
 
   // Preflight — some Safari PWA contexts send OPTIONS unexpectedly.
   if (req.method === 'OPTIONS') {
@@ -107,8 +131,38 @@ module.exports = async function handler(req, res) {
 
   const { movie, zip, lat, lng } = req.query;
 
-  if (!movie) {
+  // Validate inputs BEFORE touching the metered SerpAPI / Google upstreams.
+  // Every param here flows into a paid request, so reject junk early.
+  if (!movie || typeof movie !== 'string') {
     return res.status(400).json({ error: 'movie parameter required' });
+  }
+  if (movie.length > 200) {
+    return res.status(400).json({ error: 'movie parameter too long' });
+  }
+  // ZIP is optional, but if present it must be a real US 5-digit ZIP — the
+  // client only ever sends that shape.
+  if (zip != null && zip !== '' && !/^\d{5}$/.test(zip)) {
+    return res.status(400).json({ error: 'invalid zip' });
+  }
+  // lat/lng are optional, but if present must be finite and in range.
+  if ((lat != null && lat !== '') || (lng != null && lng !== '')) {
+    const latN = Number(lat);
+    const lngN = Number(lng);
+    if (!Number.isFinite(latN) || !Number.isFinite(lngN) ||
+        latN < -90 || latN > 90 || lngN < -180 || lngN > 180) {
+      return res.status(400).json({ error: 'invalid lat/lng' });
+    }
+  }
+
+  // Rate-limit BEFORE any paid upstream work (reverse-geocode + SerpAPI).
+  // Two-tier: tight per-user (verified Firebase uid) + loose per-IP backstop;
+  // fail-open if Upstash is unreachable. See lib/rateLimit.js.
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'showtimes', userMax: 20, ipMax: 80, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Too many requests — please slow down and try again shortly.' });
   }
 
   // Resolve the SerpAPI `location` string. Order of preference:
@@ -158,8 +212,11 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: msg });
     }
 
-    // Showtimes are date-specific; 30-min CDN cache is safe.
-    res.setHeader('Cache-Control', 's-maxage=1800, stale-while-revalidate=300');
+    // Showtimes are date-specific; 30-min CDN cache is safe. `public` keeps the
+    // CDN caching this shared (non-user-specific) response even though the
+    // request now carries an Authorization header for per-user rate limiting —
+    // the body is keyed only on movie+location, never on the user.
+    res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=300');
     return res.status(200).json(data);
   } catch (err) {
     console.error('[showtimes proxy]', err.message);

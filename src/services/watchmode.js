@@ -1,5 +1,7 @@
 // All Watchmode requests route through /api/watchmode — a Vercel serverless proxy
 // that injects the API key server-side. The key is never in the JS bundle.
+import { authHeader } from './authHeader';
+
 const WATCHMODE_BASE_URL = '/api/watchmode';
 const CACHE_KEY_PREFIX = 'wm_';
 const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -45,7 +47,8 @@ class WatchmodeService {
 
     try {
       const res = await fetch(
-        `${WATCHMODE_BASE_URL}?_p=search&search_field=${tmdbField}&search_value=${tmdbId}`
+        `${WATCHMODE_BASE_URL}?_p=search&search_field=${tmdbField}&search_value=${tmdbId}`,
+        { headers: await authHeader() }
       );
       if (!res.ok) { this._setCache(cacheKey, null); return null; }
       const json = await res.json();
@@ -67,7 +70,8 @@ class WatchmodeService {
 
     try {
       const res = await fetch(
-        `${WATCHMODE_BASE_URL}?_p=title/${watchmodeId}/sources&regions=US`
+        `${WATCHMODE_BASE_URL}?_p=title/${watchmodeId}/sources&regions=US`,
+        { headers: await authHeader() }
       );
       if (!res.ok) { this._setCache(cacheKey, []); return []; }
       const sources = await res.json();

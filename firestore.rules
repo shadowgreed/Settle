@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settle — Firestore Security Rules
+//
+// The app's entire data model is a single per-user document: users/{uid}.
+// The web client reads and writes its OWN document directly (see
+// src/services/cloudSync.js and src/services/push.js). The weekly push cron
+// (api/cron/push-notifications.js) uses the Firebase Admin SDK, which bypasses
+// these rules entirely — so the rules only need to constrain the client.
+//
+// Without an owner-check here, ANY signed-in user could read or overwrite ANY
+// other user's document (email-linked profile, watch history, taste profile,
+// push subscriptions). The rule below is the single most important control for
+// this app: a user may only touch the document whose id equals their own uid.
+//
+// IMPORTANT — REVIEW BEFORE DEPLOYING: diff this against the rules currently
+//   live in the Firebase Console (Firestore -> Rules) before running
+//   `firebase deploy --only firestore:rules`. Deploying overwrites whatever is
+//   there. This file is the intended source of truth going forward.
+// ─────────────────────────────────────────────────────────────────────────────
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Per-user profile document — owner-only access.
+    match /users/{userId} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId;
+    }
+
+    // Default deny — anything not explicitly matched above is forbidden.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

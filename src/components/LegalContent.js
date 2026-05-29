@@ -33,10 +33,10 @@ export function PrivacyBody() {
       <h3>3. Location &amp; Theater Mode</h3>
       <p>Theater Mode (US-only) shows you cinemas near you ranked by distance. We get your location two ways, depending on what you allow:</p>
       <ul>
-        <li><strong>Browser location (preferred):</strong> If you grant permission, your device shares its approximate coordinates with your browser. These coordinates are <strong>never sent to or stored on our servers</strong> — they stay in your browser's memory for the session and are discarded when you close the tab.</li>
+        <li><strong>Browser location (preferred):</strong> If you grant permission, your device shares its approximate coordinates. To find showtimes near you, these coordinates are sent — only at the moment you open showtimes — to our server, which converts them into an approximate area (such as a ZIP code) to query nearby cinemas. Your raw coordinates are <strong>never stored</strong>: they're used for that single lookup and discarded from your browser's memory when you close the tab.</li>
         <li><strong>ZIP code fallback:</strong> If you decline location, you can type a ZIP. The ZIP is stored with your account (it's lower-resolution than precise coordinates and you explicitly typed it).</li>
       </ul>
-      <p><strong>Geocoding:</strong> theater addresses are sent to Google's Geocoding API to convert them to coordinates — but your location is never sent to Google. Theater coordinates are cached in our database for 30 days.</p>
+      <p><strong>Geocoding:</strong> we use Google's Geocoding API in two ways — to turn theater addresses into map coordinates, and, when you use precise location, to convert your coordinates into an approximate area for the showtimes search. Theater geocoding results are cached in our database for 30 days; your personal location is never stored.</p>
       <p><strong>Analytics:</strong> when you tap on a showtime, we log a coarse distance bucket ("under 5 miles", "5–10 miles", etc.) — never your raw coordinates.</p>
       <p>You can change your location decision any time by clearing your browser's site data, or by typing a different ZIP in Theater Mode.</p>
 
@@ -53,7 +53,7 @@ export function PrivacyBody() {
       <ul>
         <li><strong>TMDB API</strong> — movie and series data (titles, posters, ratings). Subject to the <a href="https://www.themoviedb.org/privacy-policy" target="_blank" rel="noopener noreferrer">TMDB Privacy Policy</a>.</li>
         <li><strong>Watchmode API</strong> — direct streaming links for Disney+ and Apple TV. Subject to Watchmode's privacy policy.</li>
-        <li><strong>AMC Theatres API</strong> — used in Theater Mode to find nearby cinemas and showtimes. Theater addresses and showtimes are public information; no user data is sent to AMC.</li>
+        <li><strong>Google Showtimes (via SerpAPI)</strong> — used in Theater Mode to find nearby cinemas and showtimes. The movie title and your approximate location (a ZIP code, or a coarse area derived from your coordinates) are sent to perform the search. No account information is shared.</li>
         <li><strong>Google Geocoding</strong> — converts theater addresses to coordinates (US-only). Your location is never sent to Google.</li>
         <li><strong>Google Fonts</strong> — typefaces loaded from fonts.googleapis.com. Subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a>.</li>
         <li><strong>Netflix, Prime Video, Max, Apple TV, Disney+</strong> — outbound search or direct links only. We do not share any user data with these platforms.</li>

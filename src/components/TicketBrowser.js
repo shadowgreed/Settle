@@ -51,18 +51,31 @@ function isKnownBlocked(url) {
   }
 }
 
+// `url` originates from upstream SerpAPI showtimes data — an untrusted source.
+// Only http(s) URLs may ever reach an href or an iframe src; a hostile
+// `javascript:` or `data:` value would otherwise execute in our origin (XSS).
+// Anything that doesn't parse as http(s) falls back to a safe Fandango search.
+function toSafeUrl(raw, movie) {
+  try {
+    const u = new URL(raw);
+    if (u.protocol === 'http:' || u.protocol === 'https:') return raw;
+  } catch { /* not a parseable URL — fall through */ }
+  return `https://www.fandango.com/search?q=${encodeURIComponent(movie || '')}`;
+}
+
 export default function TicketBrowser({ url, movie, theater, timeStr, onClose }) {
   const overlayRef = useRef(null);
   useFocusTrap(overlayRef, true);
 
-  const providerLabel = getProviderLabel(url);
-  const blocked = isKnownBlocked(url);
+  const safeUrl = toSafeUrl(url, movie);
+  const providerLabel = getProviderLabel(safeUrl);
+  const blocked = isKnownBlocked(safeUrl);
 
   // Safari (both browser and iOS PWA standalone) blocks window.open() via its
   // popup blocker. <a target="_blank"> is the only fully reliable cross-browser
   // way to open an external URL. All external-open affordances use anchor tags.
   const externalLinkProps = {
-    href: url,
+    href: safeUrl,
     target: '_blank',
     rel: 'noopener noreferrer',
   };
@@ -128,7 +141,7 @@ export default function TicketBrowser({ url, movie, theater, timeStr, onClose })
           <>
             <iframe
               className="tb-frame tb-frame--visible"
-              src={url}
+              src={safeUrl}
               title={`Buy tickets on ${providerLabel}`}
               sandbox="allow-scripts allow-forms allow-same-origin allow-popups allow-popups-to-escape-sandbox"
             />

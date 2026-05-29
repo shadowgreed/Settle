@@ -46,6 +46,17 @@
 // health checks even before deps are installed.
 let webpush, admin;
 
+const crypto = require('crypto');
+
+// Constant-time string compare so the CRON_SECRET check doesn't leak length
+// or prefix-match information through response timing.
+function safeEqual(a, b) {
+  const ab = Buffer.from(String(a));
+  const bb = Buffer.from(String(b));
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -60,7 +71,7 @@ const PROVIDER_IDS = {
 module.exports = async function handler(req, res) {
   // ── Auth ─────────────────────────────────────────────────────────────
   const expectedAuth = `Bearer ${process.env.CRON_SECRET || ''}`;
-  if (!process.env.CRON_SECRET || req.headers.authorization !== expectedAuth) {
+  if (!process.env.CRON_SECRET || !safeEqual(req.headers.authorization || '', expectedAuth)) {
     return res.status(401).json({ error: 'unauthorized' });
   }
 
