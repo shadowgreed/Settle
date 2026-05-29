@@ -32,7 +32,7 @@
  */
 
 const crypto = require('crypto');
-const { isEnabled, listProfiles, commitAfterSend } = require('../../lib/pushStore');
+const { isEnabled, listProfiles, commitAfterSend, clearWatchLoop } = require('../../lib/pushStore');
 
 // web-push is CommonJS; require it lazily so the function still loads (for the
 // 503 health response) even if the dependency is somehow absent.
@@ -203,10 +203,51 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // ── Pass 2: watch-loop nudge ─────────────────────────────────────────────
+  // For each user with a watchLoopPending entry whose sendAfter time has
+  // elapsed, send a "how was [Title]?" push and clear the pending entry.
+  // This is separate from the weekly re-engagement pass — a user can receive
+  // both in the same cron run (one per type), but the watch-loop notification
+  // fires at most once per watch event and stops if the user opens the app
+  // and rates the title before the cron runs (scheduleWatchLoop overwrites,
+  // not accumulates, so there's only ever one pending entry per user).
+  let wlSent = 0;
+  const wlNow = Date.now();
+  for (const p of profiles) {
+    const wl = p.watchLoopPending;
+    if (!wl?.titleName || !wl?.sendAfter) continue;
+    if (wlNow < wl.sendAfter) continue; // not due yet
+    const subs = Array.isArray(p.subs) ? p.subs : [];
+    if (subs.length === 0) continue;
+
+    const wlPayload = JSON.stringify({
+      title: 'Settle',
+      body:  `How was ${wl.titleName}? Rate it and sharpen your future picks.`,
+      url:   '/',
+      tag:   'settle-watchloop',
+    });
+
+    let wlOk = 0;
+    for (const sub of subs) {
+      try {
+        await webpush.sendNotification(sub, wlPayload);
+        wlOk++;
+        wlSent++;
+      } catch (e) {
+        if (![404, 410].includes(e.statusCode)) {
+          console.warn('[push cron] wl send failed for', p.uid, e.statusCode);
+        }
+      }
+    }
+    if (wlOk > 0) {
+      try { await clearWatchLoop(p.uid); } catch {}
+    }
+  }
+
   console.log(
-    `[push cron] users=${users} sent=${sent} skipped=${skipped} failed=${failed} gone=${gone}`
+    `[push cron] users=${users} sent=${sent} skipped=${skipped} failed=${failed} gone=${gone} wl_sent=${wlSent}`
   );
-  return res.status(200).json({ users, sent, skipped, failed, gone });
+  return res.status(200).json({ users, sent, skipped, failed, gone, wlSent });
 };
 
 /*

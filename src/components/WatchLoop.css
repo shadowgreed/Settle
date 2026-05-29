@@ -1,0 +1,191 @@
+/* WatchLoop — "did you watch it / how was it?" popup */
+
+.watchloop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.78);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  animation: fadeIn 0.3s ease;
+  touch-action: none;
+  overscroll-behavior: contain;
+}
+
+.watchloop-popup {
+  background: #111;
+  border: 0.5px solid #222;
+  border-radius: 18px;
+  padding: 26px 22px 22px;
+  width: 100%;
+  max-width: 340px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  animation: cinemaCardIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* Eyebrow — "You settled on…" / "How'd it land?" */
+.watchloop-eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0;
+  text-align: center;
+}
+
+/* Title card */
+.watchloop-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  background: #161616;
+  border-radius: 10px;
+  padding: 10px;
+  border: 0.5px solid #1e1e1e;
+}
+
+.watchloop-poster {
+  width: 44px;
+  height: 66px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #1a1a1a;
+}
+
+.watchloop-poster-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+}
+
+.watchloop-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.watchloop-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f5f5f5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.watchloop-meta {
+  font-size: 11px;
+  color: #777;
+  margin-top: 3px;
+}
+
+/* Confirm step */
+.watchloop-question {
+  font-size: 17px;
+  font-weight: 600;
+  color: #f0f0f0;
+  text-align: center;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.watchloop-confirm-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  width: 100%;
+}
+
+.watchloop-btn {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+.watchloop-btn.primary {
+  background: #f5f5f5;
+  color: #111;
+}
+.watchloop-btn.primary:hover { opacity: 0.9; }
+
+.watchloop-btn.ghost {
+  background: rgba(255,255,255,0.06);
+  color: #d0d0d0;
+  border: 0.5px solid rgba(255,255,255,0.1);
+}
+.watchloop-btn.ghost:hover { background: rgba(255,255,255,0.1); }
+
+.watchloop-skip {
+  background: transparent;
+  border: none;
+  color: #666;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px 12px;
+  transition: color 0.15s;
+  font-family: inherit;
+  text-decoration: underline;
+}
+.watchloop-skip:hover { color: #999; }
+
+/* Rate step */
+.watchloop-vote-actions {
+  display: flex;
+  gap: 14px;
+  width: 100%;
+}
+
+.watchloop-vote-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 12px;
+  border-radius: 12px;
+  border: 0.5px solid #222;
+  background: #161616;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  font-family: inherit;
+}
+
+.watchloop-vote-btn span:first-child {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.watchloop-vote-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+.watchloop-vote-btn.vote-up:hover {
+  background: rgba(74, 222, 128, 0.1);
+  border-color: #4ade80;
+  transform: scale(1.04);
+}
+
+.watchloop-vote-btn.vote-down:hover {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: #ef4444;
+  transform: scale(1.04);
+}
+
+.watchloop-vote-btn:active { transform: scale(0.96); }

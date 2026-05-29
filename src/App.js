@@ -29,6 +29,7 @@ import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
 import { onAuthChange, signOut, deleteCurrentUser } from './services/auth';
 import { migrateLocalToCloud, pushUserData, pushUserDataAuthoritative, buildPayload, deleteUserData } from './services/cloudSync';
+import { authHeader } from './services/authHeader';
 import {
   savePartnerLink, clearPartnerLink,
   generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
@@ -36,6 +37,7 @@ import {
 } from './services/couple';
 import CoupleLink from './components/CoupleLink';
 import AsyncBallot from './components/AsyncBallot';
+import WatchLoop from './components/WatchLoop';
 import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
 
@@ -224,6 +226,8 @@ function App() {
     catch { return { solo: {}, p1: {}, p2: {} }; }
   });
   const [ratingPopup, setRatingPopup] = useState(null);
+  // watchLoopStep: 'confirm' (did you watch?) → 'rate' (how was it?) → null (closed)
+  const [watchLoopStep, setWatchLoopStep] = useState(null);
   const [welcomeBack] = useState(() => Object.keys(loadPrefs()).length > 0);
   const [watchLink, setWatchLink] = useState(null);
   // Theater-specific enrichment — cert (G/PG/PG-13/R) + wide vs limited release.
@@ -360,7 +364,6 @@ function App() {
   // Refs for each modal container — useFocusTrap captures and restores focus
   // so keyboard users can't Tab past the modal onto the page underneath.
   const historyPanelRef = useRef(null);
-  const ratingPopupRef  = useRef(null);
   const cinemaCardRef   = useRef(null);
   const ballotCardRef   = useRef(null);
   const privacyModalRef = useRef(null);
@@ -368,7 +371,7 @@ function App() {
   const shareModalRef   = useRef(null);
 
   useFocusTrap(historyPanelRef, showHistory);
-  useFocusTrap(ratingPopupRef,  !!ratingPopup);
+  // ratingPopupRef focus trap removed — WatchLoop component manages its own
   useFocusTrap(cinemaCardRef,   cinemaMode);
   useFocusTrap(ballotCardRef,   showBallot);
   useFocusTrap(privacyModalRef, showPrivacy);
@@ -544,7 +547,7 @@ function App() {
       if (showPrivacy)    { setShowPrivacy(false); return; }
       if (showTerms)      { setShowTerms(false); return; }
       if (showHistory)    { setShowHistory(false); return; }
-      if (ratingPopup)    { handleVote('skip'); return; }
+      if (ratingPopup)    { handleWatchSkip(); return; }
       if (cinemaMode)     { setCinemaMode(false); setReplayResult(null); return; }
       if (showBallot)     { setShowBallot(false); return; }
     };
@@ -634,12 +637,40 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Show rating popup on mount for entries that have never been rated.
-  // 'skip' is treated as a permanent decision — the popup never re-fires for it.
+  // Watch loop — surface the "did you watch it?" prompt on app open.
+  //
+  // Rules:
+  //   1. Entry must be unrated (rated === null).
+  //   2. Must be at least 30 min old — avoids interrupting the same session
+  //      where the user just tapped "Watching this". On the NEXT open
+  //      (tomorrow evening, typically) the age condition is easily met.
+  //   3. Global snooze respected — if the user tapped "Not yet — ask tomorrow",
+  //      we store a timestamp in localStorage and skip until after it expires.
+  //
+  // The snooze key applies to all pending ratings, not per-title. If someone
+  // isn't in the mood to rate anything tonight, they're not in the mood — one
+  // dismissal defers everything to tomorrow.
   useEffect(() => {
-    const unrated = watchHistory.find(entry => !entry.rated);
-    if (!unrated) return;
-    const t = setTimeout(() => setRatingPopup(unrated), 800);
+    const now = Date.now();
+    const MIN_AGE_MS = 30 * 60 * 1000; // 30 minutes
+
+    // Respect global snooze
+    try {
+      const snoozeUntil = localStorage.getItem('settle_watchloop_snooze');
+      if (snoozeUntil && now < new Date(snoozeUntil).getTime()) return;
+    } catch {}
+
+    const candidate = watchHistory.find(entry => {
+      if (entry.rated) return false; // already rated or permanently skipped
+      const age = now - new Date(entry.watchedAt).getTime();
+      return age >= MIN_AGE_MS;
+    });
+    if (!candidate) return;
+
+    const t = setTimeout(() => {
+      setRatingPopup(candidate);
+      setWatchLoopStep('confirm');
+    }, 800);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -2065,6 +2096,20 @@ function App() {
     });
     setShowToast(true);
     setTimeout(() => setShowToast(false), 2800);
+
+    // Schedule a next-day "how was it?" push — best-effort, fire and forget.
+    // The server stores the title in Upstash with a ~20h delay; the daily
+    // cron sends the nudge and clears it. Only fires when push is subscribed
+    // and the user has a uid (signed in).
+    if (pushSubscribed && user?.uid) {
+      authHeader().then(headers => {
+        fetch('/api/push/watch-loop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...headers },
+          body: JSON.stringify({ titleName: item.title }),
+        }).catch(() => {});
+      });
+    }
   };
 
   const handleHistoryReplay = (entry) => {
@@ -2138,6 +2183,33 @@ function App() {
       timeSincePick,
     });
     setRatingPopup(null);
+    setWatchLoopStep(null);
+  };
+
+  // ── Watch loop handlers ───────────────────────────────────────────────────
+
+  // Step 1 confirmed — they watched it. Advance to the rating step.
+  const handleWatchConfirm = () => {
+    setWatchLoopStep('rate');
+  };
+
+  // "Not yet — ask tomorrow." Set a global 24h snooze and close the popup
+  // WITHOUT rating the entry, so it re-surfaces on the next open after the
+  // snooze expires.
+  const handleWatchSnooze = () => {
+    try {
+      const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      localStorage.setItem('settle_watchloop_snooze', tomorrow);
+    } catch {}
+    setRatingPopup(null);
+    setWatchLoopStep(null);
+  };
+
+  // "We/I skipped it." Permanent dismiss — marks rated: 'skip' so it never
+  // re-surfaces. Does NOT feed the taste model (they didn't form a view).
+  const handleWatchSkip = () => {
+    handleVote('skip');
+    // handleVote already calls setRatingPopup(null) and setWatchLoopStep(null)
   };
 
   const clearHistory = () => {
@@ -3426,55 +3498,17 @@ function App() {
         </div>
       )}
 
-      {/* Rating popup */}
-      {ratingPopup && (
-        <div className="rating-overlay" onClick={() => handleVote('skip')}>
-          <div
-            ref={ratingPopupRef}
-            className="rating-popup"
-            onClick={e => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="rating-popup-title"
-            tabIndex={-1}
-          >
-            <h2 id="rating-popup-title" className="rating-popup-eyebrow">How was it?</h2>
-            <div className="rating-popup-card">
-              {ratingPopup.posterPath ? (
-                <img
-                  className="rating-popup-poster"
-                  src={tmdbService.getPosterUrl(ratingPopup.posterPath, 'w92')}
-                  alt=""
-                />
-              ) : (
-                <div className="rating-popup-poster rating-popup-poster-placeholder" aria-hidden="true">🎬</div>
-              )}
-              <div className="rating-popup-info">
-                <div className="rating-popup-title">{ratingPopup.title}</div>
-                <div className="rating-popup-meta">{ratingPopup.year} · {ratingPopup.type}</div>
-              </div>
-            </div>
-            <div className="rating-popup-actions">
-              <button
-                className="vote-btn vote-up"
-                onClick={() => handleVote('up')}
-                aria-label={`Liked ${ratingPopup.title}`}
-              >
-                <span aria-hidden="true">👍</span>
-              </button>
-              <button
-                className="vote-btn vote-down"
-                onClick={() => handleVote('down')}
-                aria-label={`Disliked ${ratingPopup.title}`}
-              >
-                <span aria-hidden="true">👎</span>
-              </button>
-            </div>
-            <button className="rating-skip" onClick={() => handleVote('skip')}>
-              Skip
-            </button>
-          </div>
-        </div>
+      {/* Watch loop — "did you watch it? / how was it?" (replaces old rating popup) */}
+      {ratingPopup && watchLoopStep && (
+        <WatchLoop
+          entry={ratingPopup}
+          step={watchLoopStep}
+          onConfirm={handleWatchConfirm}
+          onSnooze={handleWatchSnooze}
+          onSkip={handleWatchSkip}
+          onVote={handleVote}
+          getPosterUrl={(path, size) => tmdbService.getPosterUrl(path, size)}
+        />
       )}
 
       {cinemaMode && (cinemaSource === 'history' ? replayResult : result) && (() => {
