@@ -524,6 +524,7 @@ function App() {
         tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
         mode, selectedServices, selectedGenres, selectedFormats, minRating,
         maxCertification,
+        displayName: user.displayName || user.email?.split('@')[0] || '',
       }));
     }, 2000);
     return () => { if (syncTimerRef.current) clearTimeout(syncTimerRef.current); };
@@ -1256,7 +1257,16 @@ function App() {
     // Load partner's display name + saved items.
     readPartnerDoc(partnerUid).then(data => {
       if (data) {
-        setPartnerName(data.playerNames?.p1 || data.playerNames?.p2 || 'Your partner');
+        // Prefer the Firebase Auth identity stored in displayName — that's the
+        // person's real name (e.g. "Sarah" from Google sign-in). Fall back to
+        // the ballot labels only if displayName hasn't synced yet (e.g. partner
+        // hasn't opened the app since this field was added).
+        setPartnerName(
+          data.displayName ||
+          data.playerNames?.p1 ||
+          data.playerNames?.p2 ||
+          'Your partner'
+        );
         setPartnerSaved(Array.isArray(data.savedForLater) ? data.savedForLater : []);
       }
     });
@@ -1285,7 +1295,16 @@ function App() {
 
   // Generate a code (P1 side). Called by CoupleLink.
   const handleGenerateCode = async () => {
-    const code = await generateInviteCode(playerNames?.p1 || 'Your partner');
+    // Use the Firebase Auth identity (Google display name or email prefix) — not
+    // the couples-ballot label (playerNames.p1 = 'Him' by default), which is
+    // what P2 would see as "Linked with: Him". Fall through to the ballot label
+    // only as a last resort, so the code always has something human-readable.
+    const displayName =
+      user?.displayName ||
+      user?.email?.split('@')[0] ||
+      playerNames?.p1 ||
+      'Your partner';
+    const code = await generateInviteCode(displayName);
     return code;
   };
 
@@ -2234,6 +2253,7 @@ function App() {
       tasteProfile, recentPicks, savedForLater, watchHistory, playerNames, consent,
       mode, selectedServices, selectedGenres, selectedFormats, minRating,
       maxCertification,
+      displayName: user.displayName || user.email?.split('@')[0] || '',
       ...overrides,
     }));
   };

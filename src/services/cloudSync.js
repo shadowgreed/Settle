@@ -111,6 +111,10 @@ export const buildPayload = (state) => ({
   savedForLater: state.savedForLater,
   watchHistory:  state.watchHistory,
   playerNames:   state.playerNames,
+  // displayName is the Firebase Auth identity (Google display name or email
+  // prefix). Stored here so linked partners can read a real name rather than
+  // the couples-ballot label (playerNames.p1 = "Him"/"Her" by default).
+  displayName:   state.displayName   || null,
   consent:       state.consent,
   onboarded:     true,
   prefs: {
