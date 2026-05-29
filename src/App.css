@@ -2901,6 +2901,45 @@ input[type="range"]::-moz-range-thumb {
 .saved-remove-btn:hover { opacity: 0.6; }
 
 /* ─────────────────────────────────────────────────────────────
+   Partner saved items section (couples retention)
+   ──────────────────────────────────────────────────────────── */
+.partner-saved-section {
+  margin-top: 20px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 14px;
+}
+
+.partner-saved-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 10px;
+  padding: 0 16px;
+}
+
+.partner-saved-icon { font-size: 1rem; }
+
+.partner-saved-entry {
+  opacity: 0.9;
+}
+
+.partner-saved-star {
+  color: #EF9F27;
+  font-size: 0.9rem;
+}
+
+/* "Send to partner" button on result card */
+.async-ballot-send-btn {
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────────────────────
    Couples streak counter (inside history panel)
    ──────────────────────────────────────────────────────────── */
 .streak-info {

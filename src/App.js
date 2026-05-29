@@ -16,7 +16,7 @@ import {
   zipToCoords, recordPermissionDecision, shouldRepromptAfterDecline,
   clearCachedCoords,
 } from './services/location';
-import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice } from './services/push';
+import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice, syncPushProfile } from './services/push';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
 import LocationPermission from './components/LocationPermission';
@@ -29,6 +29,13 @@ import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
 import { onAuthChange, signOut, deleteCurrentUser } from './services/auth';
 import { migrateLocalToCloud, pushUserData, pushUserDataAuthoritative, buildPayload, deleteUserData } from './services/cloudSync';
+import {
+  savePartnerLink, clearPartnerLink,
+  generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
+  createBallot, subscribeToIncomingBallot, voteBallot, dismissBallot,
+} from './services/couple';
+import CoupleLink from './components/CoupleLink';
+import AsyncBallot from './components/AsyncBallot';
 import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
 
@@ -260,6 +267,16 @@ function App() {
   );
   const [pushBusy, setPushBusy] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
+
+  // ── Couple retention (async ballot + partner linking) ─────────────────────
+  // partnerUid / partnerName come from the linked user doc once the couple link
+  // is established. partnerSaved is the partner's savedForLater — loaded lazily
+  // and shown in the Saved tab. incomingBallot is the live Firestore ballot P2
+  // is waiting to vote on; null when there's nothing pending.
+  const [partnerUid, setPartnerUid]       = useState(null);
+  const [partnerName, setPartnerName]     = useState(null);
+  const [partnerSaved, setPartnerSaved]   = useState([]);
+  const [incomingBallot, setIncomingBallot] = useState(null);
   // Runtime metadata for the result card (P2.2):
   //   movie  → { runtimeMin: 102 }
   //   series → { episodes: 8, avgEpisodeMin: 45 }
@@ -369,6 +386,7 @@ function App() {
     if (Array.isArray(data.savedForLater)) setSavedForLater(data.savedForLater);
     if (Array.isArray(data.watchHistory))  setWatchHistory(data.watchHistory);
     if (data.playerNames && typeof data.playerNames === 'object') setPlayerNames(data.playerNames);
+    if (data.couplePartnerUid) setPartnerUid(data.couplePartnerUid);
     if (data.consent != null) {
       setConsent(data.consent);
       if (data.consent) setShowConsent(false);
@@ -456,6 +474,10 @@ function App() {
     setResult(null);
     setPickReason(null);
     setHasSearched(false);
+    setPartnerUid(null);
+    setPartnerName(null);
+    setPartnerSaved([]);
+    setIncomingBallot(null);
     USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     try { await signOut(); } catch (e) { console.warn('[Auth] signOut failed:', e.message); }
   };
@@ -1089,6 +1111,18 @@ function App() {
     return () => { cancelled = true; };
   }, [user?.uid]);
 
+  // Heartbeat — once this device is subscribed, refresh the server-side push
+  // profile on app open and whenever top genres / services change. Keeps the
+  // re-engagement cron's lastSeenAt (idle detection) and targeting current.
+  // Lightweight: re-sends the existing subscription, no permission prompt.
+  useEffect(() => {
+    if (!user?.uid || !pushSubscribed) return;
+    syncPushProfile(user.uid, {
+      topGenres: topSoloIdsKey ? topSoloIdsKey.split(',').map(Number).filter(Number.isFinite) : [],
+      services: servicesKey ? servicesKey.split(',') : [],
+    });
+  }, [user?.uid, pushSubscribed, topSoloIdsKey, servicesKey]);
+
   // Fire the analytics "prompt shown" event the first time the banner
   // becomes visible. Tracked separately from "accepted/denied" so the funnel
   // can measure prompt-to-acceptance conversion.
@@ -1104,11 +1138,19 @@ function App() {
     if (shouldShowOptIn) trackPushPromptShown();
   }, [shouldShowOptIn]);
 
+  // Targeting passed to the push subscription so the cron knows which genres +
+  // services to surface "new releases" for. Reads the user's top solo genres
+  // (TMDB ids) and their selected services.
+  const pushTargeting = () => ({
+    topGenres: (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean),
+    services: selectedServices,
+  });
+
   const handlePushAccept = async () => {
     if (!user) return;
     setPushBusy(true);
     try {
-      await subscribeToPush(user.uid);
+      await subscribeToPush(user.uid, pushTargeting());
       setPushSubscribed(true);
       setPushPrompted(true);
       safeSet('settle_push_prompted', 'true');
@@ -1144,7 +1186,7 @@ function App() {
     setPushBusy(true);
     try {
       if (wantOn) {
-        await subscribeToPush(user.uid);
+        await subscribeToPush(user.uid, pushTargeting());
         setPushSubscribed(true);
         trackPushAccepted();
       } else {
@@ -1167,6 +1209,102 @@ function App() {
     setPlayerNames(updated);
     if (consent) safeSet('streaming-player-names', JSON.stringify(updated));
     setEditingPlayer(null);
+  };
+
+  // ── Couple linking effects + handlers ──────────────────────────────────────
+
+  // When partnerUid is set, load their display name + saved list. Also subscribe
+  // to incoming ballots so P2 sees the vote banner without needing to refresh.
+  useEffect(() => {
+    if (!partnerUid) {
+      setPartnerName(null);
+      setPartnerSaved([]);
+      setIncomingBallot(null);
+      return;
+    }
+    // Load partner's display name + saved items.
+    readPartnerDoc(partnerUid).then(data => {
+      if (data) {
+        setPartnerName(data.playerNames?.p1 || data.playerNames?.p2 || 'Your partner');
+        setPartnerSaved(Array.isArray(data.savedForLater) ? data.savedForLater : []);
+      }
+    });
+  }, [partnerUid]);
+
+  // Incoming ballot listener — only while we have a partner and are signed in.
+  useEffect(() => {
+    if (!user?.uid || !partnerUid) return;
+    const unsub = subscribeToIncomingBallot(user.uid, setIncomingBallot);
+    return unsub;
+  }, [user?.uid, partnerUid]);
+
+  // On app open (after sign-in), check if P1's partner has accepted the code
+  // while P1 was away. Claims the pending-link and writes the partner uid.
+  useEffect(() => {
+    if (!user?.uid) return;
+    // Only poll if we don't already have a partner (avoid double-write).
+    if (partnerUid) return;
+    checkPendingLink().then(async ({ partnerUid: pUid }) => {
+      if (!pUid) return;
+      await savePartnerLink(user.uid, pUid);
+      setPartnerUid(pUid);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.uid]);
+
+  // Generate a code (P1 side). Called by CoupleLink.
+  const handleGenerateCode = async () => {
+    const code = await generateInviteCode(playerNames?.p1 || 'Your partner');
+    return code;
+  };
+
+  // Verify a code (P2 side). Saves the link to Firestore + state. Called by CoupleLink.
+  const handleVerifyCode = async (code) => {
+    const { partnerUid: pUid, partnerName: pName } = await verifyInviteCode(code);
+    await savePartnerLink(user.uid, pUid);
+    setPartnerUid(pUid);
+    setPartnerName(pName || 'Your partner');
+  };
+
+  // Unlink — clears couplePartnerUid on this user's doc.
+  const handleUnlinkPartner = async () => {
+    if (!user?.uid) return;
+    await clearPartnerLink(user.uid);
+    setPartnerUid(null);
+    setPartnerName(null);
+    setPartnerSaved([]);
+    setIncomingBallot(null);
+  };
+
+  // Send an async ballot to the partner (P1 sends to P2).
+  const handleSendAsyncBallot = async () => {
+    if (!result || !partnerUid || !user?.uid) return;
+    try {
+      await createBallot({
+        initiatorUid:  user.uid,
+        partnerUid,
+        initiatorName: playerNames?.p1 || 'Your partner',
+        partnerName:   partnerName    || 'Your partner',
+        title:         result,
+        initiatorVote: 'up', // P1 is sending because they want to watch it
+      });
+    } catch (e) {
+      console.warn('[Ballot] Failed to send:', e.message);
+    }
+  };
+
+  // P2 votes on an incoming ballot.
+  const handleVoteIncomingBallot = async (vote) => {
+    if (!incomingBallot) return 'missed';
+    const outcome = await voteBallot(incomingBallot.id, incomingBallot, vote);
+    return outcome;
+  };
+
+  // P2 dismisses (skips for now) an incoming ballot.
+  const handleDismissIncomingBallot = () => {
+    if (!incomingBallot) return;
+    dismissBallot(incomingBallot.id);
+    setIncomingBallot(null);
   };
 
   // Memoised compatibility banner copy. Reads `compatScore` + `overlapGenres`
@@ -2244,6 +2382,14 @@ function App() {
           pushSupported={isPushSupported()}
           pushSubscribed={pushSubscribed}
           pushBusy={pushBusy}
+          partnerLinkSlot={user && (
+            <CoupleLink
+              partnerName={partnerName}
+              onGenerateCode={handleGenerateCode}
+              onVerifyCode={handleVerifyCode}
+              onUnlink={handleUnlinkPartner}
+            />
+          )}
           onClose={() => setShowSettings(false)}
           onWithdrawConsent={handleWithdrawConsent}
           onDeleteAccount={handleDeleteAccount}
@@ -2271,6 +2417,18 @@ function App() {
           watchHistory={watchHistory}
           streak={streakInfo}
           onClose={() => setShowStreakHistory(false)}
+        />
+      )}
+
+      {/* Async ballot overlay — shown to P2 when a partner has sent a ballot.
+          P1's vote is locked; P2 casts theirs and sees the reveal. */}
+      {incomingBallot && (
+        <AsyncBallot
+          ballot={incomingBallot}
+          onVote={handleVoteIncomingBallot}
+          onDismiss={handleDismissIncomingBallot}
+          getPosterUrl={(path, size) => tmdbService.getPosterUrl(path, size)}
+          getServiceColor={(svc) => serviceByName.get(svc)?.color || '#999'}
         />
       )}
 
@@ -2932,9 +3090,21 @@ function App() {
                   Try another
                 </button>
                 {mode === 'couple' ? (
-                  <button className="act primary ballot-trigger" onClick={openBallot}>
-                    <span aria-hidden="true">🗳️</span> Secret Vote
-                  </button>
+                  <>
+                    <button className="act primary ballot-trigger" onClick={openBallot}>
+                      <span aria-hidden="true">🗳️</span> Secret Vote
+                    </button>
+                    {partnerUid && (
+                      <button
+                        className="act async-ballot-send-btn"
+                        onClick={handleSendAsyncBallot}
+                        aria-label={`Send to ${partnerName || 'partner'} to vote later`}
+                        title={`Send to ${partnerName || 'your partner'} — they'll vote when they open the app`}
+                      >
+                        <span aria-hidden="true">📨</span> {partnerName ? `Send to ${partnerName}` : 'Send to partner'}
+                      </button>
+                    )}
+                  </>
                 ) : (
                   <button className="act primary" onClick={() => { setTryAnotherCount(0); setCinemaSource('pick'); setCinemaMode(true); saveToHistory(result); }}>
                     Watching this <span aria-hidden="true">✓</span>
@@ -3202,6 +3372,51 @@ function App() {
                   </button>
                 </>
               )
+            )}
+
+            {/* Partner's saved items — visible when a partner is linked and
+                has saved something. Read-only: the ★ shows their interest but
+                the user can't remove it from here. */}
+            {partnerUid && partnerSaved.length > 0 && (
+              <div className="partner-saved-section">
+                <div className="partner-saved-header">
+                  <span className="partner-saved-icon" aria-hidden="true">💑</span>
+                  {partnerName ? `${partnerName} wants to watch` : 'Your partner saved these'}
+                </div>
+                <div className="history-list">
+                  {partnerSaved.map(entry => (
+                    <button
+                      key={entry.id}
+                      className="history-entry partner-saved-entry"
+                      onClick={() => handleHistoryReplay(entry)}
+                      aria-label={`View ${entry.title}`}
+                    >
+                      <div className="history-poster">
+                        {entry.posterPath ? (
+                          <img src={tmdbService.getPosterUrl(entry.posterPath, 'w92')} alt="" />
+                        ) : (
+                          <div className="history-poster-placeholder" aria-hidden="true">🎬</div>
+                        )}
+                      </div>
+                      <div className="history-info">
+                        <div className="history-entry-title">{entry.title}</div>
+                        <div className="history-entry-meta">{entry.year} · {entry.type}</div>
+                        <div className="history-entry-bottom">
+                          <span className="history-service" style={{
+                            color: entry.service === 'In Theaters' ? '#EF9F27'
+                              : serviceByName.get(entry.service)?.color || '#999'
+                          }}>
+                            {entry.service}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="history-right">
+                        <span className="partner-saved-star" aria-hidden="true">★</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Manual import/export removed — cloud sync (Firestore) is now

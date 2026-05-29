@@ -1,0 +1,189 @@
+/* CoupleLink — partner linking UI embedded in Settings */
+
+.couplelink-description {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #aaa);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
+.couplelink-instruction {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #aaa);
+  margin: 0 0 12px;
+  line-height: 1.4;
+}
+
+.couplelink-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.couplelink-btn {
+  flex: 1;
+  min-width: 100px;
+  padding: 9px 16px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s, background 0.15s;
+}
+.couplelink-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.couplelink-btn.primary {
+  background: var(--accent, #e50914);
+  color: #fff;
+}
+.couplelink-btn.primary:hover:not(:disabled) { opacity: 0.88; }
+
+.couplelink-btn.ghost {
+  background: rgba(255,255,255,0.07);
+  color: var(--text-primary, #fff);
+  border: 1px solid rgba(255,255,255,0.12);
+}
+.couplelink-btn.ghost:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+
+.couplelink-error {
+  font-size: 0.8rem;
+  color: #ff6b6b;
+  margin: 0 0 10px;
+}
+
+/* Code display */
+.couplelink-code-display {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.couplelink-code-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.couplelink-code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  color: var(--text-primary, #fff);
+  flex: 1;
+}
+
+.couplelink-copy {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-primary, #fff);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.couplelink-copy:hover { background: rgba(255,255,255,0.18); }
+
+.couplelink-waiting {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #aaa);
+  margin: 0;
+  font-style: italic;
+}
+
+.couplelink-cancel {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #aaa);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  align-self: flex-start;
+}
+.couplelink-cancel:hover { color: var(--text-primary, #fff); }
+
+/* Code entry */
+.couplelink-enter-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.couplelink-input {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 8px;
+  color: var(--text-primary, #fff);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  padding: 10px 14px;
+  text-align: center;
+  text-transform: uppercase;
+  width: 100%;
+  box-sizing: border-box;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.couplelink-input:focus { border-color: var(--accent, #e50914); }
+.couplelink-input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: normal; }
+
+/* Linked state */
+.couplelink-linked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+
+.couplelink-linked-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+}
+
+.couplelink-linked-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.couplelink-linked-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary, #aaa);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.couplelink-linked-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text-primary, #fff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.couplelink-unlink {
+  background: none;
+  border: 1px solid rgba(255,255,255,0.18);
+  color: var(--text-secondary, #aaa);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+.couplelink-unlink:hover { border-color: #ff6b6b; color: #ff6b6b; }

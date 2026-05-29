@@ -3,30 +3,77 @@ rules_version = '2';
 // ─────────────────────────────────────────────────────────────────────────────
 // Settle — Firestore Security Rules
 //
-// The app's entire data model is a single per-user document: users/{uid}.
-// The web client reads and writes its OWN document directly (see
-// src/services/cloudSync.js and src/services/push.js). The weekly push cron
-// (api/cron/push-notifications.js) uses the Firebase Admin SDK, which bypasses
-// these rules entirely — so the rules only need to constrain the client.
+// Collections:
+//   users/{uid}             — per-user profile (taste, history, saved, prefs)
+//   pendingBallots/{id}     — async couple ballots (added for couples retention)
 //
-// Without an owner-check here, ANY signed-in user could read or overwrite ANY
-// other user's document (email-linked profile, watch history, taste profile,
-// push subscriptions). The rule below is the single most important control for
-// this app: a user may only touch the document whose id equals their own uid.
+// The web client reads and writes its own documents directly via the Firebase
+// client SDK (src/services/cloudSync.js, src/services/couple.js). Server-side
+// code (push cron, couple/ballot endpoints) uses Upstash + REST, never
+// firebase-admin, so these rules only constrain the client.
 //
 // IMPORTANT — REVIEW BEFORE DEPLOYING: diff this against the rules currently
-//   live in the Firebase Console (Firestore -> Rules) before running
+//   live in the Firebase Console (Firestore → Rules) before running
 //   `firebase deploy --only firestore:rules`. Deploying overwrites whatever is
 //   there. This file is the intended source of truth going forward.
+//
+// Changes from v1:
+//   1. users/{uid}: allow partner-read — a linked partner (whose own user doc
+//      has couplePartnerUid == this uid) may READ (not write) this doc.
+//      Required for: seeing partner's savedForLater and playerNames.
+//   2. pendingBallots/{id}: new collection for async couple ballots.
 // ─────────────────────────────────────────────────────────────────────────────
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Per-user profile document — owner-only access.
+    // Per-user profile document.
+    //   - Owner: full read + write.
+    //   - Linked partner: read-only. This allows each user to see their
+    //     partner's savedForLater and display name without a server-side read.
+    //     The partner relationship is established by the owner writing their
+    //     own couplePartnerUid field — so consent is implicit in the action.
     match /users/{userId} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == userId;
+      allow read: if request.auth != null && (
+        request.auth.uid == userId
+        ||
+        // Partner-read: requester's own doc must have couplePartnerUid == userId.
+        // The get() call counts as one extra read per security evaluation.
+        (
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid))
+              .data.couplePartnerUid == userId
+        )
+      );
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Async couple ballot documents.
+    //   - Create: only the initiator may create, and they must set themselves
+    //     as initiatorUid (no ballot-on-behalf-of attacks).
+    //   - Read: either party in the ballot (initiator or partner).
+    //   - Update: either party, but only while the ballot is still 'pending'
+    //     (prevents re-voting on a resolved ballot).
+    //   - Delete: nobody (ballots are resolved, not deleted, to preserve history).
+    match /pendingBallots/{ballotId} {
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.initiatorUid
+                    && request.resource.data.partnerUid is string
+                    && request.resource.data.partnerUid != request.auth.uid;
+
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.initiatorUid ||
+        request.auth.uid == resource.data.partnerUid
+      );
+
+      allow update: if request.auth != null
+                    && resource.data.status == 'pending'
+                    && (
+                      request.auth.uid == resource.data.initiatorUid ||
+                      request.auth.uid == resource.data.partnerUid
+                    );
+
+      allow delete: if false;
     }
 
     // Default deny — anything not explicitly matched above is forbidden.

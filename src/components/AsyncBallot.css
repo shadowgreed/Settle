@@ -1,0 +1,212 @@
+/* AsyncBallot — P2's incoming ballot overlay */
+
+.async-ballot-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+  box-sizing: border-box;
+}
+
+.async-ballot-card {
+  background: var(--card-bg, #1a1a1a);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 18px;
+  padding: 22px 20px 24px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Header row */
+.async-ballot-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.async-ballot-from {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #aaa);
+  font-weight: 500;
+}
+
+.async-ballot-lock { font-size: 0.9rem; }
+
+.async-ballot-skip {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #aaa);
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  flex-shrink: 0;
+}
+.async-ballot-skip:hover { color: var(--text-primary, #fff); }
+
+/* Cue */
+.async-ballot-cue {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  margin-top: -6px;
+}
+
+/* Title row */
+.async-ballot-title-row {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.async-ballot-poster {
+  width: 62px;
+  height: 93px;
+  object-fit: cover;
+  border-radius: 8px;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.06);
+}
+
+.async-ballot-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.async-ballot-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+  line-height: 1.3;
+}
+
+.async-ballot-meta {
+  font-size: 0.8rem;
+  color: var(--text-secondary, #aaa);
+}
+
+.async-ballot-rating {
+  font-size: 0.8rem;
+  color: #f5c518;
+}
+
+/* Vote buttons */
+.async-ballot-votes {
+  display: flex;
+  gap: 12px;
+}
+
+.async-ballot-vote {
+  flex: 1;
+  font-size: 1.9rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  padding: 14px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.async-ballot-vote:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+.async-ballot-vote:active:not(:disabled) { transform: scale(0.94); }
+.async-ballot-vote:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.async-ballot-vote.yes:hover:not(:disabled) { border-color: #4caf50; background: rgba(76,175,80,0.15); }
+.async-ballot-vote.no:hover:not(:disabled)  { border-color: #f44336; background: rgba(244,67,54,0.15); }
+
+/* Suspense */
+.async-ballot-suspense {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 0;
+}
+
+.async-ballot-dots {
+  display: flex;
+  gap: 8px;
+}
+
+.async-ballot-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent, #e50914);
+  animation: ballot-pulse 1.2s ease-in-out infinite;
+}
+.async-ballot-dots span:nth-child(2) { animation-delay: 0.2s; }
+.async-ballot-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes ballot-pulse {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40%            { transform: scale(1);   opacity: 1; }
+}
+
+.async-ballot-suspense-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary, #aaa);
+}
+
+/* Result */
+.async-ballot-result {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+  text-align: center;
+}
+
+.async-ballot-result-icon {
+  font-size: 2.6rem;
+  line-height: 1;
+}
+
+.async-ballot-result-title {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-primary, #fff);
+}
+
+.async-ballot-result-sub {
+  font-size: 0.88rem;
+  color: var(--text-secondary, #aaa);
+  line-height: 1.4;
+  max-width: 280px;
+}
+
+.async-ballot-action {
+  margin-top: 6px;
+  padding: 11px 28px;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.15s;
+}
+.async-ballot-action.primary {
+  background: var(--accent, #e50914);
+  color: #fff;
+}
+.async-ballot-action.primary:hover { opacity: 0.88; }

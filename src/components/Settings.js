@@ -30,6 +30,7 @@ export default function Settings({
   pushSupported,
   pushSubscribed,
   pushBusy,
+  partnerLinkSlot,   // ReactNode — CoupleLink rendered by App.js
   onClose,
   onWithdrawConsent,
   onDeleteAccount,
@@ -160,6 +161,16 @@ export default function Settings({
               </div>
             </div>
           </div>
+
+          {/* ══ GROUP: PARTNER ══════════════════════════════════════════ */}
+          {partnerLinkSlot && (
+            <div className="settings-group">
+              <h3 className="settings-group-title">Partner</h3>
+              <section className="settings-section">
+                {partnerLinkSlot}
+              </section>
+            </div>
+          )}
 
           {/* ══ GROUP: PREFERENCES ═══════════════════════════════════════ */}
           {(pushSupported || true) && (
