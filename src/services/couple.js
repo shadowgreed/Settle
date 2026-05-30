@@ -276,3 +276,104 @@ export async function dismissBallot(ballotId) {
     await updateDoc(doc(db, 'pendingBallots', ballotId), { status: 'expired' });
   } catch {}
 }
+
+// ── Live couple session (collaborative mood → pick) ────────────────────────────
+//
+// Extends the two-device model back to mood selection. Each partner picks their
+// moods on their own phone; when both are ready, the INITIATOR runs the pick and
+// broadcasts the result so both screens show the same title. The existing
+// LiveBallot then handles the secret vote on that result.
+//
+// coupleSessions/{id}:
+//   initiatorUid, partnerUid, initiatorName, partnerName
+//   initiatorGenres [], partnerGenres []   — each partner writes only their own
+//   initiatorReady, partnerReady (bool)
+//   status: 'selecting' | 'result' | 'closed'
+//   result: null | { picked title object }
+//   createdAt, expiresAt
+
+const sessionsRef = () => collection(db, 'coupleSessions');
+
+/** Initiator starts a session. Returns the new session id. Wakes the partner. */
+export async function createCoupleSession({ initiatorUid, partnerUid, initiatorName, partnerName }) {
+  const now = Timestamp.now();
+  const expiresAt = Timestamp.fromMillis(Date.now() + BALLOT_TTL_MS);
+
+  const docRef = await addDoc(sessionsRef(), {
+    initiatorUid,
+    partnerUid,
+    initiatorName:   initiatorName || 'Your partner',
+    partnerName:     partnerName   || 'Your partner',
+    initiatorGenres: [],
+    partnerGenres:   [],
+    initiatorReady:  false,
+    partnerReady:    false,
+    status:          'selecting',
+    result:          null,
+    createdAt:       now,
+    expiresAt,
+  });
+
+  // Best-effort push to wake the partner.
+  fetch('/api/ballot/notify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
+    body: JSON.stringify({
+      partnerUid,
+      eventType:  'session_started',
+      titleName:  '',
+      senderName: initiatorName || 'Your partner',
+      ballotId:   docRef.id,
+    }),
+  }).catch(() => {});
+
+  return docRef.id;
+}
+
+/** Partner discovery — a session where this user is the partner and selecting. */
+export function subscribeIncomingSession(uid, cb) {
+  const q = query(
+    sessionsRef(),
+    where('partnerUid', '==', uid),
+    where('status', '==', 'selecting'),
+    orderBy('createdAt', 'desc'),
+    limit(1),
+  );
+  return onSnapshot(
+    q,
+    (snap) => cb(snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() }),
+    () => cb(null),
+  );
+}
+
+/** Direct doc subscription (both sides, full lifecycle incl. result/closed). */
+export function subscribeCoupleSession(id, cb) {
+  return onSnapshot(
+    doc(db, 'coupleSessions', id),
+    (snap) => cb(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    () => cb(null),
+  );
+}
+
+/** Write this device's genre selection + ready flag. */
+export async function setSessionReady(id, role, genres, ready) {
+  const field = role === 'initiator' ? 'initiator' : 'partner';
+  await updateDoc(doc(db, 'coupleSessions', id), {
+    [`${field}Genres`]: Array.isArray(genres) ? genres : [],
+    [`${field}Ready`]:  !!ready,
+  });
+}
+
+/** Initiator broadcasts the picked result to both devices. */
+export async function broadcastSessionResult(id, result) {
+  // JSON round-trip strips undefined fields (Firestore rejects them).
+  const clean = result ? JSON.parse(JSON.stringify(result)) : null;
+  await updateDoc(doc(db, 'coupleSessions', id), { result: clean, status: 'result' });
+}
+
+/** End the session. */
+export async function closeCoupleSession(id) {
+  try {
+    await updateDoc(doc(db, 'coupleSessions', id), { status: 'closed' });
+  } catch {}
+}

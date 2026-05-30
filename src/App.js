@@ -34,9 +34,12 @@ import {
   savePartnerLink, clearPartnerLink,
   generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
   createLiveBallot, subscribeToIncomingBallot, subscribeBallot, castVote, dismissBallot,
+  createCoupleSession, subscribeIncomingSession, subscribeCoupleSession,
+  setSessionReady, broadcastSessionResult, closeCoupleSession,
 } from './services/couple';
 import CoupleLink from './components/CoupleLink';
 import LiveBallot from './components/LiveBallot';
+import CoupleSessionSelect from './components/CoupleSessionSelect';
 import WatchLoop from './components/WatchLoop';
 import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
@@ -186,7 +189,9 @@ function App() {
   const [selectedServices, setSelectedServices] = useState(() => loadPrefs().services || SERVICES.map(s => s.name));
   const [selectedGenres, setSelectedGenres] = useState(() => {
     const saved = loadPrefs().genres || {};
-    return { solo: [], p1: [], p2: [], theater: [], ...saved };
+    // `session` is a transient slot for this device's pick in a live couple
+    // session — never persisted, always reset when a session starts.
+    return { solo: [], p1: [], p2: [], theater: [], session: [], ...saved };
   });
   const [selectedFormats, setSelectedFormats] = useState(() => loadPrefs().formats || ['Movie', 'Series']);
   const [minRating, setMinRating] = useState(() => loadPrefs().minRating ?? 6.0);
@@ -286,6 +291,15 @@ function App() {
   const [liveBallotId, setLiveBallotId]   = useState(null);
   const [liveBallot, setLiveBallot]       = useState(null);
   const [liveRole, setLiveRole]           = useState(null);
+
+  // Live couple session (collaborative two-device mood → pick). coupleSessionId
+  // is the Firestore doc id; coupleSession is its live snapshot; sessionRole is
+  // which side THIS device is ('initiator' = started it, 'partner' = joined).
+  const [coupleSessionId, setCoupleSessionId] = useState(null);
+  const [coupleSession, setCoupleSession]     = useState(null);
+  const [sessionRole, setSessionRole]         = useState(null);
+  const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
+  const coupleSessionIdRef  = useRef(null);
   // Runtime metadata for the result card (P2.2):
   //   movie  → { runtimeMin: 102 }
   //   series → { episodes: 8, avgEpisodeMin: 45 }
@@ -488,6 +502,9 @@ function App() {
     setLiveBallotId(null);
     setLiveBallot(null);
     setLiveRole(null);
+    setCoupleSessionId(null);
+    setCoupleSession(null);
+    setSessionRole(null);
     USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     try { await signOut(); } catch (e) { console.warn('[Auth] signOut failed:', e.message); }
   };
@@ -1399,6 +1416,14 @@ function App() {
   const handleLiveMatch = () => {
     const t = liveBallot?.title;
     closeLiveBallot();
+    // If this match came out of a couple session, end the session too.
+    if (coupleSessionId) {
+      closeCoupleSession(coupleSessionId);
+      setCoupleSessionId(null);
+      setCoupleSession(null);
+      setSessionRole(null);
+      sessionPickedForRef.current = null;
+    }
     if (!t) return;
     saveToHistory(t, { coupleAgreed: true, mode: 'couple' });
     if (Array.isArray(t.genres) && t.genres.length) {
@@ -1416,6 +1441,139 @@ function App() {
   const handleLiveRetry = () => {
     closeLiveBallot({ expire: true });
     pickContent(false);
+  };
+
+  // ── Live couple session (collaborative mood → pick) ────────────────────────
+
+  useEffect(() => { coupleSessionIdRef.current = coupleSessionId; }, [coupleSessionId]);
+
+  // Partner discovery — a session where this user is the partner just started.
+  // Join it: force couples mode, reset our session mood slot, clear any result.
+  useEffect(() => {
+    if (!user?.uid || !partnerUid) return;
+    const unsub = subscribeIncomingSession(user.uid, (incoming) => {
+      if (incoming && !coupleSessionIdRef.current) {
+        setSessionRole('partner');
+        setCoupleSessionId(incoming.id);
+        setMode('couple');
+        setSelectedGenres(g => ({ ...g, session: [] }));
+        setResult(null);
+        setHasSearched(false);
+      }
+    });
+    return unsub;
+  }, [user?.uid, partnerUid]);
+
+  // Direct doc subscription — both sides, full lifecycle (survives status flips).
+  useEffect(() => {
+    if (!coupleSessionId) { setCoupleSession(null); return; }
+    const unsub = subscribeCoupleSession(coupleSessionId, (docData) => {
+      if (!docData || docData.status === 'closed') {
+        setCoupleSession(null);
+        setCoupleSessionId(null);
+        setSessionRole(null);
+        sessionPickedForRef.current = null;
+      } else {
+        setCoupleSession(docData);
+      }
+    });
+    return unsub;
+  }, [coupleSessionId]);
+
+  // Both locked in → the INITIATOR runs the pick once and broadcasts it.
+  useEffect(() => {
+    if (!coupleSession || sessionRole !== 'initiator') return;
+    if (coupleSession.status !== 'selecting') return;
+    if (!(coupleSession.initiatorReady && coupleSession.partnerReady)) return;
+    if (sessionPickedForRef.current === coupleSession.id) return; // already picked this round
+    sessionPickedForRef.current = coupleSession.id;
+
+    const combined = [...new Set([
+      ...(coupleSession.initiatorGenres || []),
+      ...(coupleSession.partnerGenres || []),
+    ])];
+    (async () => {
+      const picked = await pickContent(false, false, combined);
+      if (picked) {
+        try { await broadcastSessionResult(coupleSession.id, picked); }
+        catch (e) { console.warn('[CoupleSession] broadcast failed:', e.message); }
+      } else {
+        // No pick (e.g. no services / no matches) — let the initiator retry by
+        // un-readying so the UI returns to selection.
+        sessionPickedForRef.current = null;
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coupleSession?.status, coupleSession?.initiatorReady, coupleSession?.partnerReady, sessionRole]);
+
+  // Result handoff — once a result is broadcast, BOTH devices show it via the
+  // normal result card (the partner especially, who didn't run the pick).
+  useEffect(() => {
+    if (coupleSession?.status === 'result' && coupleSession.result) {
+      const r = coupleSession.result;
+      setResult(prev => (prev?.id === r.id ? prev : r));
+      setHasSearched(true);
+      setLoading(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coupleSession?.status, coupleSession?.result?.id]);
+
+  // Start a session (initiator).
+  const handleStartSession = async () => {
+    if (!partnerUid || !user?.uid) return;
+    setSelectedGenres(g => ({ ...g, session: [] }));
+    setResult(null);
+    setHasSearched(false);
+    try {
+      const id = await createCoupleSession({
+        initiatorUid:  user.uid,
+        partnerUid,
+        initiatorName: user.displayName || user.email?.split('@')[0] || playerNames?.p1 || 'Your partner',
+        partnerName:   partnerName || 'Your partner',
+      });
+      setSessionRole('initiator');
+      setCoupleSessionId(id);
+    } catch (e) {
+      console.warn('[CoupleSession] start failed:', e.message);
+    }
+  };
+
+  // Lock in my moods (write my genres + ready=true).
+  const handleSessionReady = () => {
+    if (!coupleSessionId || !sessionRole) return;
+    const myGenres = selectedGenres.session || [];
+    if (myGenres.length === 0) return;
+    setSessionReady(coupleSessionId, sessionRole, myGenres, true).catch(() => {});
+  };
+
+  // Un-lock (go back to choosing).
+  const handleSessionUnready = () => {
+    if (!coupleSessionId || !sessionRole) return;
+    setSessionReady(coupleSessionId, sessionRole, selectedGenres.session || [], false).catch(() => {});
+  };
+
+  // Cancel / close the session (either party).
+  const handleCancelSession = () => {
+    if (coupleSessionId) closeCoupleSession(coupleSessionId);
+    setCoupleSession(null);
+    setCoupleSessionId(null);
+    setSessionRole(null);
+    sessionPickedForRef.current = null;
+  };
+
+  // "Try another" inside an active session — the initiator re-picks from the
+  // combined moods and re-broadcasts; the partner's tap is a no-op (they wait).
+  const handleSessionTryAnother = async () => {
+    if (sessionRole !== 'initiator' || !coupleSession) return;
+    const combined = [...new Set([
+      ...(coupleSession.initiatorGenres || []),
+      ...(coupleSession.partnerGenres || []),
+    ])];
+    const picked = await pickContent(false, false, combined);
+    if (picked) {
+      try { await broadcastSessionResult(coupleSession.id, picked); }
+      catch (e) { console.warn('[CoupleSession] re-broadcast failed:', e.message); }
+    }
   };
 
   // Memoised compatibility banner copy. Reads `compatScore` + `overlapGenres`
@@ -1590,6 +1748,9 @@ function App() {
   // two-device ballot: it appears on the partner's phone in real time and each
   // votes on their own device. Otherwise fall back to the single-device ballot.
   const openBallot = async () => {
+    // Already in a live ballot (e.g. the partner's discovery listener opened it
+    // when we tapped Secret Vote) — don't create a second one.
+    if (liveBallotId) return;
     if (partnerUid && result && user?.uid) {
       try {
         const id = await createLiveBallot({
@@ -2146,6 +2307,9 @@ function App() {
         if (consent) safeSet('streaming-seen', JSON.stringify(updated));
         return updated;
       });
+      // Return the chosen item so callers (e.g. the couple-session initiator)
+      // can broadcast it to the partner's device.
+      return picked;
     } catch (error) {
       console.error('Error fetching content:', error);
       if (!fetchTimedOut && isCurrent()) {
@@ -2796,6 +2960,31 @@ function App() {
             )}
           </div>
 
+          {coupleSession && coupleSession.status === 'selecting' ? (
+            <CoupleSessionSelect
+              session={coupleSession}
+              role={sessionRole}
+              partnerName={partnerName}
+              moods={MOODS}
+              genres={genres}
+              selectedIds={selectedGenres.session || []}
+              isMoodActive={(ids) => isMoodActive(ids, 'session')}
+              getGenreClass={(id) => getGenreClass(id, 'session')}
+              onToggleMood={(ids) => handleMoodClick(ids, 'session')}
+              onToggleGenre={(id) => handleGenreClick(id, 'session')}
+              showAllGenres={showAllGenres}
+              onToggleShowGenres={() => setShowAllGenres(p => !p)}
+              onReady={handleSessionReady}
+              onUnready={handleSessionUnready}
+              onCancel={handleCancelSession}
+            />
+          ) : coupleSession && coupleSession.status === 'result' ? (
+            <div className="csess-resultbar">
+              <span><span aria-hidden="true">🎬</span> Couple pick with {(partnerName || 'your partner').split(' ')[0]}</span>
+              <button className="csess-cancel" onClick={handleCancelSession}>End session</button>
+            </div>
+          ) : (
+          <>
           {/* Player tab switcher */}
           <div className="player-tabs" role="tablist" aria-label="Player">
             <div className={`player-tab p1-tab ${activePlayer === 'p1' ? 'active' : ''}`}>
@@ -2942,6 +3131,14 @@ function App() {
               </div>
             </div>
           )}
+
+          {partnerUid && (
+            <button className="start-session-btn" onClick={handleStartSession}>
+              <span aria-hidden="true">🎬</span> Start a couple session with {(partnerName || 'your partner').split(' ')[0]}
+            </button>
+          )}
+          </>
+          )}
         </>
       )}
 
@@ -3075,16 +3272,21 @@ function App() {
           `matchCount` is still tracked in state so the empty-state branch
           below can fire when the filter combo produces zero results. */}
 
-      <div className="btn-row">
-        <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
-          {loading ? 'Finding...' : 'Find something for us →'}
-        </button>
-        {mode !== 'theater' && (
-          <button className="hidden-gem-btn" onClick={() => pickContent(true)} disabled={loading}>
-            <span aria-hidden="true">💎</span> Hidden Gem
+      {/* Hidden during an active couple session — the pick is generated
+          automatically once both partners lock in, and re-picks come from the
+          shared result card's "Try another". */}
+      {!coupleSession && (
+        <div className="btn-row">
+          <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
+            {loading ? 'Finding...' : 'Find something for us →'}
           </button>
-        )}
-      </div>
+          {mode !== 'theater' && (
+            <button className="hidden-gem-btn" onClick={() => pickContent(true)} disabled={loading}>
+              <span aria-hidden="true">💎</span> Hidden Gem
+            </button>
+          )}
+        </div>
+      )}
 
       {loading && (
         <div className="skeleton-card">
@@ -3273,9 +3475,19 @@ function App() {
               )}
               <div className="desc">{result.description}</div>
               <div className="act-row">
-                <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
-                  Try another
-                </button>
+                {coupleSession ? (
+                  // During a session only the initiator drives re-picks (the
+                  // partner waits for the new broadcast).
+                  sessionRole === 'initiator' && (
+                    <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); handleSessionTryAnother(); }}>
+                      Try another
+                    </button>
+                  )
+                ) : (
+                  <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
+                    Try another
+                  </button>
+                )}
                 {mode === 'couple' ? (
                   <button
                     className="act primary ballot-trigger"

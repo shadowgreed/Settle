@@ -1,0 +1,139 @@
+/* CoupleSessionSelect — two-device couple session "selecting" phase.
+   Reuses .mood-grid / .mood-btn / .chip / .show-genres-toggle from App.css. */
+
+.csess {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 4px 0 8px;
+}
+
+.csess-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #f0f0f0;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.csess-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e50914;
+  animation: csessPulse 1.6s ease-out infinite;
+}
+@keyframes csessPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(229,9,20,0.5); }
+  70%  { box-shadow: 0 0 0 7px rgba(229,9,20,0); }
+  100% { box-shadow: 0 0 0 0 rgba(229,9,20,0); }
+}
+
+.csess-cancel {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #777;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+}
+.csess-cancel:hover { color: #aaa; }
+
+/* Partner status chip */
+.csess-partner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #bbb;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+.csess-partner.ready { color: #4ade80; border-color: rgba(74,222,128,0.3); }
+
+.csess-partner-spin {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.2);
+  border-top-color: #999;
+  animation: csessSpin 0.8s linear infinite;
+}
+@keyframes csessSpin { to { transform: rotate(360deg); } }
+
+.csess-cue {
+  font-size: 13.5px;
+  color: #ccc;
+  margin: 2px 0 0;
+}
+
+/* Lock-in button */
+.csess-lockin {
+  margin-top: 4px;
+  width: 100%;
+  padding: 13px;
+  border-radius: 10px;
+  border: none;
+  background: #e50914;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.csess-lockin:hover:not(:disabled) { opacity: 0.9; }
+.csess-lockin:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Waiting (I'm locked in) */
+.csess-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 0 8px;
+  text-align: center;
+}
+.csess-locked { font-size: 14px; font-weight: 600; color: #f0f0f0; }
+.csess-waiting-text { font-size: 13px; color: #999; margin: 0; }
+.csess-change {
+  background: rgba(255,255,255,0.06);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  color: #d0d0d0;
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.csess-change:hover { background: rgba(255,255,255,0.1); }
+
+/* Finding pick (both locked in) */
+.csess-finding {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 28px 0;
+}
+.csess-finding-dots { display: flex; gap: 9px; }
+.csess-finding-dots span {
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #e50914;
+  animation: csessDot 1.2s ease-in-out infinite;
+}
+.csess-finding-dots span:nth-child(2) { animation-delay: 0.18s; }
+.csess-finding-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes csessDot {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+.csess-finding-text { font-size: 14px; color: #ccc; margin: 0; }

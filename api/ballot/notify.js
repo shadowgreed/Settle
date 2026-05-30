@@ -41,6 +41,12 @@ const MESSAGES = {
     tag:   'settle-ballot-match',
     url:   '/',
   }),
+  session_started: (sender) => ({
+    title: 'Settle',
+    body:  `${sender} started a couple session — pick your moods together`,
+    tag:   'settle-session',
+    url:   '/',
+  }),
 };
 
 function readBody(req) {

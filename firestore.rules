@@ -76,6 +76,33 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Collaborative couple sessions (two-device mood → pick).
+    //   - Create: only the initiator, naming a different partner.
+    //   - Read: either party.
+    //   - Update: either party while the session is still open (not 'closed') —
+    //     each writes their own genres/ready; the initiator writes the result.
+    //   - Delete: nobody.
+    match /coupleSessions/{sessionId} {
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.initiatorUid
+                    && request.resource.data.partnerUid is string
+                    && request.resource.data.partnerUid != request.auth.uid;
+
+      allow read: if request.auth != null && (
+        request.auth.uid == resource.data.initiatorUid ||
+        request.auth.uid == resource.data.partnerUid
+      );
+
+      allow update: if request.auth != null
+                    && resource.data.status != 'closed'
+                    && (
+                      request.auth.uid == resource.data.initiatorUid ||
+                      request.auth.uid == resource.data.partnerUid
+                    );
+
+      allow delete: if false;
+    }
+
     // Default deny — anything not explicitly matched above is forbidden.
     match /{document=**} {
       allow read, write: if false;

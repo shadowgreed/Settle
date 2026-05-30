@@ -2933,11 +2933,48 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.9rem;
 }
 
-/* "Send to partner" button on result card */
-.async-ballot-send-btn {
-  font-size: 0.82rem;
-  white-space: nowrap;
+/* Start a couple session button */
+.start-session-btn {
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 0.5px solid rgba(229,9,20,0.4);
+  background: rgba(229,9,20,0.1);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
 }
+.start-session-btn:hover { background: rgba(229,9,20,0.18); }
+
+/* Couple session "result" banner (shown above the shared pick card) */
+.csess-resultbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 0.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  color: #ddd;
+  font-weight: 600;
+}
+.csess-resultbar .csess-cancel {
+  margin-left: 0;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: underline;
+  font-family: inherit;
+}
+.csess-resultbar .csess-cancel:hover { color: #bbb; }
 
 /* ─────────────────────────────────────────────────────────────
    Couples streak counter (inside history panel)
