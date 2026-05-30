@@ -1,0 +1,214 @@
+/* LiveBallot — real-time two-device secret vote overlay */
+
+.liveballot-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+  box-sizing: border-box;
+  animation: fadeIn 0.25s ease;
+}
+
+.liveballot-modal {
+  background: #111;
+  border: 0.5px solid #222;
+  border-radius: 18px;
+  padding: 22px 20px 20px;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.6);
+  animation: cinemaCardIn 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* Eyebrow + live dot */
+.liveballot-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.liveballot-lock { font-size: 13px; }
+
+.liveballot-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e50914;
+  box-shadow: 0 0 0 0 rgba(229,9,20,0.6);
+  animation: livePulse 1.6s ease-out infinite;
+}
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(229,9,20,0.5); }
+  70%  { box-shadow: 0 0 0 7px rgba(229,9,20,0); }
+  100% { box-shadow: 0 0 0 0 rgba(229,9,20,0); }
+}
+
+/* Title card */
+.liveballot-card {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: #161616;
+  border: 0.5px solid #1e1e1e;
+  border-radius: 10px;
+  padding: 10px;
+}
+.liveballot-poster {
+  width: 56px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: #1a1a1a;
+}
+.liveballot-poster-ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+.liveballot-info { flex: 1; min-width: 0; padding-top: 2px; }
+.liveballot-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f5f5f5;
+  line-height: 1.3;
+}
+.liveballot-meta { font-size: 12px; color: #999; margin-top: 4px; }
+.liveballot-rating { font-size: 12px; color: #f5c518; margin-top: 3px; }
+
+/* Cue */
+.liveballot-cue {
+  font-size: 14px;
+  color: #e8e8e8;
+  text-align: center;
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Vote buttons */
+.liveballot-votes { display: flex; gap: 12px; }
+.liveballot-vote {
+  flex: 1;
+  font-size: 30px;
+  background: #161616;
+  border: 0.5px solid #222;
+  border-radius: 12px;
+  padding: 16px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  line-height: 1;
+}
+.liveballot-vote:active:not(:disabled) { transform: scale(0.94); }
+.liveballot-vote:disabled { opacity: 0.4; cursor: not-allowed; }
+.liveballot-vote.yes:hover:not(:disabled) { border-color: #4ade80; background: rgba(74,222,128,0.14); }
+.liveballot-vote.no:hover:not(:disabled)  { border-color: #ef4444; background: rgba(239,68,68,0.14); }
+
+/* Waiting */
+.liveballot-waiting {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+.liveballot-dots { display: flex; gap: 8px; }
+.liveballot-dots span {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: #e50914;
+  animation: liveDot 1.2s ease-in-out infinite;
+}
+.liveballot-dots span:nth-child(2) { animation-delay: 0.18s; }
+.liveballot-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes liveDot {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+.liveballot-waiting-text { font-size: 13.5px; color: #bbb; margin: 0; text-align: center; }
+.liveballot-waiting-text strong { color: #f0f0f0; }
+
+/* Pass-the-phone + cancel links */
+.liveballot-passphone {
+  background: rgba(255,255,255,0.05);
+  border: 0.5px solid rgba(255,255,255,0.12);
+  color: #d0d0d0;
+  border-radius: 9px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+.liveballot-passphone:hover:not(:disabled) { background: rgba(255,255,255,0.1); }
+
+.liveballot-close-link {
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+  text-decoration: underline;
+  align-self: center;
+  padding: 2px 8px;
+}
+.liveballot-close-link:hover { color: #999; }
+
+/* Reveal */
+.liveballot-reveal {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding: 4px 0 2px;
+}
+.liveballot-reveal-votes {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 4px;
+}
+.liveballot-reveal-person { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.liveballot-reveal-name { font-size: 12px; color: #aaa; font-weight: 600; }
+.liveballot-reveal-emoji {
+  font-size: 32px;
+  width: 56px; height: 56px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 1px solid #222;
+}
+.liveballot-reveal-emoji.yes { background: rgba(74,222,128,0.12); border-color: #4ade80; }
+.liveballot-reveal-emoji.no  { background: rgba(239,68,68,0.12); border-color: #ef4444; }
+.liveballot-reveal-vs { font-size: 12px; color: #666; font-style: italic; }
+
+.liveballot-outcome-icon { font-size: 38px; line-height: 1; margin-top: 4px; }
+.liveballot-outcome-title { font-size: 19px; font-weight: 800; color: #f5f5f5; }
+.liveballot-outcome-sub { font-size: 13.5px; color: #aaa; line-height: 1.4; max-width: 280px; }
+
+.liveballot-action {
+  margin-top: 8px;
+  padding: 12px 30px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.liveballot-action.primary { background: #e50914; color: #fff; }
+.liveballot-action.primary:hover { opacity: 0.88; }

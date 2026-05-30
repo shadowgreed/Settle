@@ -33,10 +33,10 @@ import { authHeader } from './services/authHeader';
 import {
   savePartnerLink, clearPartnerLink,
   generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
-  createBallot, subscribeToIncomingBallot, voteBallot, dismissBallot,
+  createLiveBallot, subscribeToIncomingBallot, subscribeBallot, castVote, dismissBallot,
 } from './services/couple';
 import CoupleLink from './components/CoupleLink';
-import AsyncBallot from './components/AsyncBallot';
+import LiveBallot from './components/LiveBallot';
 import WatchLoop from './components/WatchLoop';
 import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
@@ -272,15 +272,20 @@ function App() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushSubscribed, setPushSubscribed] = useState(false);
 
-  // ── Couple retention (async ballot + partner linking) ─────────────────────
+  // ── Couple retention (live two-device ballot + partner linking) ───────────
   // partnerUid / partnerName come from the linked user doc once the couple link
-  // is established. partnerSaved is the partner's savedForLater — loaded lazily
-  // and shown in the Saved tab. incomingBallot is the live Firestore ballot P2
-  // is waiting to vote on; null when there's nothing pending.
+  // is established. partnerSaved is the partner's savedForLater — shown in the
+  // Saved tab.
+  //
+  // Live ballot state: when a two-device secret vote is active, liveBallotId is
+  // the Firestore doc id, liveBallot is its live snapshot, and liveRole is which
+  // side THIS device is voting as ('initiator' = started it, 'partner' = joined).
   const [partnerUid, setPartnerUid]       = useState(null);
   const [partnerName, setPartnerName]     = useState(null);
   const [partnerSaved, setPartnerSaved]   = useState([]);
-  const [incomingBallot, setIncomingBallot] = useState(null);
+  const [liveBallotId, setLiveBallotId]   = useState(null);
+  const [liveBallot, setLiveBallot]       = useState(null);
+  const [liveRole, setLiveRole]           = useState(null);
   // Runtime metadata for the result card (P2.2):
   //   movie  → { runtimeMin: 102 }
   //   series → { episodes: 8, avgEpisodeMin: 45 }
@@ -480,7 +485,9 @@ function App() {
     setPartnerUid(null);
     setPartnerName(null);
     setPartnerSaved([]);
-    setIncomingBallot(null);
+    setLiveBallotId(null);
+    setLiveBallot(null);
+    setLiveRole(null);
     USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     try { await signOut(); } catch (e) { console.warn('[Auth] signOut failed:', e.message); }
   };
@@ -1251,7 +1258,6 @@ function App() {
     if (!partnerUid) {
       setPartnerName(null);
       setPartnerSaved([]);
-      setIncomingBallot(null);
       return;
     }
     // Load partner's display name + saved items.
@@ -1272,12 +1278,45 @@ function App() {
     });
   }, [partnerUid]);
 
-  // Incoming ballot listener — only while we have a partner and are signed in.
+  // Ref mirror of the active ballot id so the snapshot callback below can guard
+  // against re-opening while a vote is already in progress (closures see stale
+  // state otherwise).
+  const liveBallotIdRef = useRef(null);
+  useEffect(() => { liveBallotIdRef.current = liveBallotId; }, [liveBallotId]);
+
+  // P2 discovery — listen for a live ballot where this user is the partner.
+  // When one arrives and we're not already in a ballot, join it as 'partner'.
+  // The query filters status=='pending', so it stops matching once the ballot
+  // resolves — that's fine, the dedicated doc subscription below takes over and
+  // carries us through the reveal.
   useEffect(() => {
     if (!user?.uid || !partnerUid) return;
-    const unsub = subscribeToIncomingBallot(user.uid, setIncomingBallot);
+    const unsub = subscribeToIncomingBallot(user.uid, (incoming) => {
+      if (incoming && !liveBallotIdRef.current) {
+        setLiveRole('partner');
+        setLiveBallotId(incoming.id);
+      }
+    });
     return unsub;
   }, [user?.uid, partnerUid]);
+
+  // Direct doc subscription for whichever ballot we're engaged in (either side).
+  // Unlike the query listener, this keeps firing through the status change to
+  // matched/missed, so both devices see the reveal. Clears state if the doc is
+  // deleted.
+  useEffect(() => {
+    if (!liveBallotId) { setLiveBallot(null); return; }
+    const unsub = subscribeBallot(liveBallotId, (docData) => {
+      if (!docData) {
+        setLiveBallot(null);
+        setLiveBallotId(null);
+        setLiveRole(null);
+      } else {
+        setLiveBallot(docData);
+      }
+    });
+    return unsub;
+  }, [liveBallotId]);
 
   // On app open (after sign-in), check if P1's partner has accepted the code
   // while P1 was away. Claims the pending-link and writes the partner uid.
@@ -1323,38 +1362,60 @@ function App() {
     setPartnerUid(null);
     setPartnerName(null);
     setPartnerSaved([]);
-    setIncomingBallot(null);
+    closeLiveBallot();
   };
 
-  // Send an async ballot to the partner (P1 sends to P2).
-  const handleSendAsyncBallot = async () => {
-    if (!result || !partnerUid || !user?.uid) return;
-    try {
-      await createBallot({
-        initiatorUid:  user.uid,
-        partnerUid,
-        initiatorName: playerNames?.p1 || 'Your partner',
-        partnerName:   partnerName    || 'Your partner',
-        title:         result,
-        initiatorVote: 'up', // P1 is sending because they want to watch it
-      });
-    } catch (e) {
-      console.warn('[Ballot] Failed to send:', e.message);
+  // ── Live two-device ballot handlers ────────────────────────────────────────
+
+  // Tear down the live ballot on this device. If we started it and it's still
+  // unresolved, expire the doc so the partner's device closes too.
+  const closeLiveBallot = ({ expire = false } = {}) => {
+    const id = liveBallotId;
+    const unresolved = liveBallot && liveBallot.status === 'pending';
+    if (id && (expire || (liveRole === 'initiator' && unresolved))) {
+      dismissBallot(id);
     }
+    setLiveBallotId(null);
+    setLiveBallot(null);
+    setLiveRole(null);
   };
 
-  // P2 votes on an incoming ballot.
-  const handleVoteIncomingBallot = async (vote) => {
-    if (!incomingBallot) return 'missed';
-    const outcome = await voteBallot(incomingBallot.id, incomingBallot, vote);
-    return outcome;
+  // Cast THIS device's secret vote.
+  const handleCastLiveVote = async (vote) => {
+    if (!liveBallotId || !liveRole) return;
+    try { await castVote(liveBallotId, liveRole, vote); }
+    catch (e) { console.warn('[LiveBallot] vote failed:', e.message); }
   };
 
-  // P2 dismisses (skips for now) an incoming ballot.
-  const handleDismissIncomingBallot = () => {
-    if (!incomingBallot) return;
-    dismissBallot(incomingBallot.id);
-    setIncomingBallot(null);
+  // Pass-the-phone fallback: the initiator casts the partner's vote on this
+  // device when the partner isn't there to use their own phone.
+  const handleCastPartnerVote = async (vote) => {
+    if (!liveBallotId) return;
+    try { await castVote(liveBallotId, 'partner', vote); }
+    catch (e) { console.warn('[LiveBallot] partner vote failed:', e.message); }
+  };
+
+  // Both voted yes — record the match on THIS device and open it full-screen.
+  const handleLiveMatch = () => {
+    const t = liveBallot?.title;
+    closeLiveBallot();
+    if (!t) return;
+    saveToHistory(t, { coupleAgreed: true, mode: 'couple' });
+    if (Array.isArray(t.genres) && t.genres.length) {
+      updateTasteProfile(t.genres, 'up', 'couple');
+    }
+    // Show the matched title full-screen via the replay path — works on both
+    // devices regardless of which one originally picked it.
+    setReplayResult(t);
+    setCinemaSource('history');
+    setCinemaMode(true);
+  };
+
+  // Miss — the initiator finds another pick (expiring the current ballot so the
+  // partner's view closes), then re-picks.
+  const handleLiveRetry = () => {
+    closeLiveBallot({ expire: true });
+    pickContent(false);
   };
 
   // Memoised compatibility banner copy. Reads `compatScore` + `overlapGenres`
@@ -1516,11 +1577,37 @@ function App() {
     setShowOnboarding(false);
   };
 
-  const openBallot = () => {
+  // Single-device pass-the-phone ballot (original behaviour) — used when the
+  // user isn't linked with a partner.
+  const openSingleDeviceBallot = () => {
     setBallotStep('p1');
     setP1Vote(null);
     setP2Vote(null);
     setShowBallot(true);
+  };
+
+  // Secret Vote entry point. When linked with a partner, start a LIVE
+  // two-device ballot: it appears on the partner's phone in real time and each
+  // votes on their own device. Otherwise fall back to the single-device ballot.
+  const openBallot = async () => {
+    if (partnerUid && result && user?.uid) {
+      try {
+        const id = await createLiveBallot({
+          initiatorUid:  user.uid,
+          partnerUid,
+          initiatorName: user.displayName || user.email?.split('@')[0] || playerNames?.p1 || 'Your partner',
+          partnerName:   partnerName || 'Your partner',
+          title:         result,
+        });
+        setLiveRole('initiator');
+        setLiveBallotId(id);
+        return;
+      } catch (e) {
+        console.warn('[LiveBallot] start failed, falling back to single device:', e.message);
+        // fall through to single-device ballot
+      }
+    }
+    openSingleDeviceBallot();
   };
 
   const handleBallotVote = (vote) => {
@@ -2087,7 +2174,7 @@ function App() {
     return links[service] || null;
   };
 
-  const saveToHistory = (item, { coupleAgreed = false } = {}) => {
+  const saveToHistory = (item, { coupleAgreed = false, mode: modeOverride } = {}) => {
     // Capture whether the trailer signal was applied — handleVote uses this
     // when the user later rates the title to reverse the +0.5 before applying
     // the explicit vote. Persists across sessions with the history entry.
@@ -2102,7 +2189,10 @@ function App() {
       type: item.type,
       genres: item.genres || [],
       watchedAt: new Date().toISOString(),
-      mode,
+      // modeOverride lets the live two-device match record 'couple' on BOTH
+      // devices even though the partner's local mode might be 'solo' — keeps
+      // the couple streak accurate for both people.
+      mode: modeOverride || mode,
       coupleAgreed,
       rated: null,
       trailerCredited,
@@ -2512,13 +2602,18 @@ function App() {
         />
       )}
 
-      {/* Async ballot overlay — shown to P2 when a partner has sent a ballot.
-          P1's vote is locked; P2 casts theirs and sees the reveal. */}
-      {incomingBallot && (
-        <AsyncBallot
-          ballot={incomingBallot}
-          onVote={handleVoteIncomingBallot}
-          onDismiss={handleDismissIncomingBallot}
+      {/* Live two-device secret vote — same component on both phones, driven by
+          the live Firestore ballot doc. Renders for the initiator and the
+          partner alike; the view advances as votes land. */}
+      {liveBallot && (
+        <LiveBallot
+          ballot={liveBallot}
+          role={liveRole}
+          onCastVote={handleCastLiveVote}
+          onCastPartnerVote={handleCastPartnerVote}
+          onMatch={handleLiveMatch}
+          onRetry={handleLiveRetry}
+          onClose={closeLiveBallot}
           getPosterUrl={(path, size) => tmdbService.getPosterUrl(path, size)}
           getServiceColor={(svc) => serviceByName.get(svc)?.color || '#999'}
         />
@@ -3182,21 +3277,15 @@ function App() {
                   Try another
                 </button>
                 {mode === 'couple' ? (
-                  <>
-                    <button className="act primary ballot-trigger" onClick={openBallot}>
-                      <span aria-hidden="true">🗳️</span> Secret Vote
-                    </button>
-                    {partnerUid && (
-                      <button
-                        className="act async-ballot-send-btn"
-                        onClick={handleSendAsyncBallot}
-                        aria-label={`Send to ${partnerName || 'partner'} to vote later`}
-                        title={`Send to ${partnerName || 'your partner'} — they'll vote when they open the app`}
-                      >
-                        <span aria-hidden="true">📨</span> {partnerName ? `Send to ${partnerName}` : 'Send to partner'}
-                      </button>
-                    )}
-                  </>
+                  <button
+                    className="act primary ballot-trigger"
+                    onClick={openBallot}
+                    title={partnerUid
+                      ? `Vote on this pick — it appears live on ${(partnerName || 'your partner').split(' ')[0]}'s phone`
+                      : 'Both vote in secret on this device'}
+                  >
+                    <span aria-hidden="true">🗳️</span> Secret Vote
+                  </button>
                 ) : (
                   <button className="act primary" onClick={() => { setTryAnotherCount(0); setCinemaSource('pick'); setCinemaMode(true); saveToHistory(result); }}>
                     Watching this <span aria-hidden="true">✓</span>
@@ -3473,7 +3562,7 @@ function App() {
               <div className="partner-saved-section">
                 <div className="partner-saved-header">
                   <span className="partner-saved-icon" aria-hidden="true">💑</span>
-                  {partnerName ? `${partnerName} wants to watch` : 'Your partner saved these'}
+                  {partnerName ? `${partnerName.split(' ')[0]} wants to watch` : 'Your partner saved these'}
                 </div>
                 <div className="history-list">
                   {partnerSaved.map(entry => (

@@ -21,7 +21,7 @@
 import {
   doc, setDoc, updateDoc, getDoc,
   collection, query, where, orderBy, limit,
-  onSnapshot, Timestamp, addDoc,
+  onSnapshot, Timestamp, addDoc, runTransaction,
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { authHeader } from './authHeader';
@@ -109,19 +109,26 @@ export async function readPartnerDoc(partnerUid) {
   }
 }
 
-// ── Async ballot ──────────────────────────────────────────────────────────────
+// ── Live two-device ballot ─────────────────────────────────────────────────────
+//
+// Both partners are linked and (usually) together. P1 starts a ballot on a
+// pick; it appears live on P2's device via onSnapshot. Each casts a HIDDEN vote
+// on their own phone — neither vote is shown until both are in, then both
+// devices reveal together. Status stays 'pending' through the voting phase
+// (so the existing Firestore rules apply unchanged), flipping to
+// 'matched' / 'missed' only when the second vote lands.
 
 /**
- * P1 creates an async ballot for a specific title and sends a push notification
- * to P2. Returns the new ballot document ID.
+ * P1 starts a LIVE two-device secret ballot for a specific title. Both votes
+ * begin null — each partner casts their own hidden vote on their own device.
+ * Sends a push to wake P2. Returns the new ballot document ID.
  */
-export async function createBallot({
+export async function createLiveBallot({
   initiatorUid,
   partnerUid,
   initiatorName,
   partnerName,
   title,
-  initiatorVote,
 }) {
   const now = Timestamp.now();
   const expiresAt = Timestamp.fromMillis(Date.now() + BALLOT_TTL_MS);
@@ -130,7 +137,7 @@ export async function createBallot({
     initiatorUid,
     partnerUid,
     initiatorName: initiatorName || 'Your partner',
-    partnerName:   partnerName   || 'You',
+    partnerName:   partnerName   || 'Your partner',
     title: {
       id:         title.id,
       title:      title.title,
@@ -141,10 +148,10 @@ export async function createBallot({
       rating:     title.rating    || null,
       genres:     title.genres    || [],
     },
-    initiatorVote,
-    partnerVote:  null,
-    status:       'pending',
-    createdAt:    now,
+    initiatorVote: null,
+    partnerVote:   null,
+    status:        'pending',
+    createdAt:     now,
     expiresAt,
   });
 
@@ -188,28 +195,71 @@ export function subscribeToIncomingBallot(uid, onBallot) {
 }
 
 /**
- * P2 casts their vote on an incoming ballot.
- * Returns the outcome: 'matched' | 'missed'.
+ * Subscribe to a SPECIFIC ballot document by id. Both partners use this once
+ * they're engaged in a live ballot — unlike the query listener above, a direct
+ * doc listener keeps firing through the status change to matched/missed, so the
+ * reveal isn't lost when the doc drops out of the 'pending' query.
+ * Calls `onBallot(ballotDoc | null)`. Returns an unsubscribe function.
  */
-export async function voteBallot(ballotId, ballotData, partnerVote) {
-  const outcome = ballotData.initiatorVote === 'up' && partnerVote === 'up'
-    ? 'matched' : 'missed';
+export function subscribeBallot(ballotId, onBallot) {
+  return onSnapshot(
+    doc(db, 'pendingBallots', ballotId),
+    (snap) => onBallot(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    () => onBallot(null),
+  );
+}
 
-  await updateDoc(doc(db, 'pendingBallots', ballotId), {
-    partnerVote,
-    status: outcome,
+/**
+ * Cast this device's secret vote in a live ballot.
+ *   role: 'initiator' | 'partner'  — which side this device is voting as.
+ *   vote: 'up' | 'down'
+ *
+ * Runs in a transaction so two near-simultaneous votes can't lose an update.
+ * When this vote completes the pair, the same write flips status to the outcome.
+ * Returns 'matched' | 'missed' if this vote resolved the ballot, else null
+ * (partner hasn't voted yet — UI shows a waiting state, driven by the snapshot).
+ */
+export async function castVote(ballotId, role, vote) {
+  const ref = doc(db, 'pendingBallots', ballotId);
+  let outcome = null;
+  let snapshotData = null;
+
+  await runTransaction(db, async (tx) => {
+    // reset per-attempt (transactions can retry)
+    outcome = null;
+    const snap = await tx.get(ref);
+    if (!snap.exists()) throw new Error('ballot no longer exists');
+    const data = snap.data();
+    snapshotData = data;
+    if (data.status !== 'pending') return; // already resolved/expired — no-op
+
+    const myField = role === 'initiator' ? 'initiatorVote' : 'partnerVote';
+    const iv = role === 'initiator' ? vote : data.initiatorVote;
+    const pv = role === 'partner'   ? vote : data.partnerVote;
+
+    const update = { [myField]: vote };
+    if (iv != null && pv != null) {
+      outcome = iv === 'up' && pv === 'up' ? 'matched' : 'missed';
+      update.status = outcome;
+    }
+    tx.update(ref, update);
   });
 
-  // If matched: push P1 (best-effort).
-  if (outcome === 'matched') {
+  // On match, best-effort push to the OTHER party in case their app is
+  // backgrounded. The reveal itself is driven live by the snapshot.
+  if (outcome === 'matched' && snapshotData) {
+    const otherUid =
+      role === 'initiator' ? snapshotData.partnerUid : snapshotData.initiatorUid;
+    const myName =
+      role === 'initiator' ? snapshotData.initiatorName : snapshotData.partnerName;
     fetch('/api/ballot/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await authHeader()) },
       body: JSON.stringify({
-        partnerUid: ballotData.initiatorUid,
+        partnerUid: otherUid,
         eventType:  'ballot_match',
-        titleName:  ballotData.title?.title || 'the pick',
-        senderName: ballotData.partnerName  || 'Your partner',
+        titleName:  snapshotData.title?.title || 'the pick',
+        senderName: myName || 'Your partner',
         ballotId,
       }),
     }).catch(() => {});
