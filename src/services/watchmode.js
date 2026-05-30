@@ -6,17 +6,16 @@ const WATCHMODE_BASE_URL = '/api/watchmode';
 const CACHE_KEY_PREFIX = 'wm_';
 const CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-// Try multiple name variants — Max rebranded from HBO Max, Watchmode may use either
+// Map each of the app's services to the name(s) Watchmode uses for it. We try
+// each variant because providers rebrand (HBO Max → Max) and ship ad tiers that
+// Watchmode lists under slightly different names. All variants point at the same
+// title page, so any match gives the correct direct deep link (web_url).
 const SERVICE_NAME_VARIANTS = {
-  'Disney+':   ['Disney+'],
-  'Max':       ['Max', 'HBO Max', 'Max Amazon Channel'],
-  'Apple TV':  ['Apple TV Plus', 'Apple TV+', 'Apple TV'],
-};
-
-// Direct URL fallbacks if Watchmode returns nothing
-const DIRECT_FALLBACKS = {
-  'Max':       (title) => `https://www.max.com/search?q=${encodeURIComponent(title)}`,
-  'Apple TV':  (title) => `https://tv.apple.com/search?term=${encodeURIComponent(title)}`,
+  'Netflix':     ['Netflix', 'Netflix basic with Ads', 'Netflix Standard with Ads'],
+  'Disney+':     ['Disney+'],
+  'Max':         ['Max', 'HBO Max', 'Max Amazon Channel'],
+  'Apple TV':    ['Apple TV+', 'Apple TV Plus', 'Apple TV'],
+  'Prime Video': ['Amazon Prime Video', 'Amazon Prime Video with Ads', 'Prime Video'],
 };
 
 class WatchmodeService {
@@ -86,29 +85,27 @@ class WatchmodeService {
     }
   }
 
-  // Public — return direct web_url for a given service, or fallback URL, or null
+  // Public — return the DIRECT title deep link (web_url) for the given service,
+  // or null if Watchmode has no direct URL. The caller falls back to a platform
+  // search page only when this returns null, so the search URL is a true
+  // last resort rather than the default.
   async getServiceUrl(tmdbId, type, service, title = '') {
     const variants = SERVICE_NAME_VARIANTS[service];
     if (!variants) return null;
 
     const watchmodeId = await this._resolveWatchmodeId(tmdbId, type);
+    if (!watchmodeId) return null;
 
-    if (watchmodeId) {
-      const sources = await this._fetchSources(watchmodeId);
-      // Log available source names in dev so we can verify exact naming
-      if (process.env.NODE_ENV === 'development') {
-        console.log(`[Watchmode] Sources for ${title}:`, sources.map(s => s.name));
-      }
-      // Try each name variant for the service
-      for (const name of variants) {
-        const match = sources.find(s => s.name === name);
-        if (match?.web_url) return match.web_url;
-      }
+    const sources = await this._fetchSources(watchmodeId);
+    if (process.env.NODE_ENV === 'development') {
+      console.log(`[Watchmode] Sources for ${title}:`, sources.map(s => `${s.name} (${s.type})`));
     }
-
-    // Fallback — use direct search URL if Watchmode didn't return a match
-    const fallback = DIRECT_FALLBACKS[service];
-    return fallback ? fallback(title) : null;
+    // First sub/free source matching the selected service that has a web_url.
+    for (const name of variants) {
+      const match = sources.find(s => s.name === name && s.web_url);
+      if (match) return match.web_url;
+    }
+    return null;
   }
 }
 

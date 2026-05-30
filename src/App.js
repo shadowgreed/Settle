@@ -762,7 +762,6 @@ function App() {
   useEffect(() => {
     setCollection(null);
     setShowCollection(false);
-    setWatchLink(null);
     setTheaterReleaseInfo(null);
     setTrailer(null);
     setShowTrailer(false);
@@ -781,12 +780,8 @@ function App() {
         .then(info => { if (!cancelled) setTheaterReleaseInfo(info); })
         .catch(() => {});
     }
-    // Use Watchmode for Disney+ and Apple TV to get direct title deep links
-    if (result.service === 'Disney+' || result.service === 'Apple TV') {
-      watchmodeService.getServiceUrl(result.id, result.type, result.service, result.title)
-        .then(url => { if (!cancelled) setWatchLink(url); })
-        .catch(() => {});
-    }
+    // (Direct watch-link resolution lives in its own effect below so it covers
+    //  every service AND history replays, not just fresh Disney+/Apple TV picks.)
     // Pre-fetch the YouTube trailer so the "Watch trailer" button can appear
     // as soon as the result card renders. If TMDB has no trailer for this
     // title, `trailer` stays null and the button is hidden silently.
@@ -802,6 +797,24 @@ function App() {
 
     return () => { cancelled = true; };
   }, [result]);
+
+  // ── Direct watch link (Watchmode web_url) ──────────────────────────────────
+  // Resolves a DIRECT title deep link for whatever title is in (or headed to)
+  // cinema mode — the fresh pick OR a history replay — for ALL streaming
+  // services. Previously only Disney+/Apple TV picks got a direct link and
+  // everything else fell straight to a platform SEARCH page; now search is only
+  // the fallback when Watchmode has no direct URL. Mirrors the `cinemaItem`
+  // logic in the render so `watchLink` always matches the title being shown.
+  useEffect(() => {
+    const item = cinemaSource === 'history' ? replayResult : result;
+    setWatchLink(null);
+    if (!item || item.service === 'In Theaters') return;
+    let cancelled = false;
+    watchmodeService.getServiceUrl(item.id, item.type, item.service, item.title)
+      .then(url => { if (!cancelled) setWatchLink(url); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [result, replayResult, cinemaSource]);
 
   // `isRetry` flag avoids reading state from a closure (which would be stale
   // because this function is called from a [] -deps effect on mount). Instead
@@ -4023,12 +4036,10 @@ function App() {
                   </div>
                 );
               }
-              const useWatchmode = cinemaSource === 'pick' && (cinemaItem.service === 'Disney+' || cinemaItem.service === 'Apple TV');
-              // Prefer Watchmode's direct title deep-link when we have it;
-              // otherwise fall through to the platform's search-page URL so
-              // Disney+ / Apple TV picks never end up with a missing "Open
-              // on X" button when Watchmode fails to resolve the title.
-              const href = (useWatchmode && watchLink) || getPlatformLink(cinemaItem.service, cinemaItem.title);
+              // Prefer Watchmode's direct title deep-link (resolved into
+              // watchLink for the current cinema item, any service); fall back
+              // to the platform's search page only when there's no direct URL.
+              const href = watchLink || getPlatformLink(cinemaItem.service, cinemaItem.title);
               return href ? (
                 <div className="cinema-actions">
                   <a
