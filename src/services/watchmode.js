@@ -18,6 +18,18 @@ const SERVICE_NAME_VARIANTS = {
   'Prime Video': ['Amazon Prime Video', 'Amazon Prime Video with Ads', 'Prime Video'],
 };
 
+// Secondary, fuzzy match — used when none of the exact variants above hit.
+// Watchmode renames sources over time (HBO Max → Max, ad tiers, channel
+// add-ons), so a substring match on a distinctive keyword stops a single
+// naming change from silently dropping us to a search-page fallback.
+const SERVICE_KEYWORDS = {
+  'Netflix':     ['netflix'],
+  'Disney+':     ['disney'],
+  'Max':         ['max', 'hbo'],
+  'Apple TV':    ['apple tv'],
+  'Prime Video': ['prime video', 'amazon prime', 'amazon video'],
+};
+
 class WatchmodeService {
   _getCached(key) {
     try {
@@ -100,9 +112,17 @@ class WatchmodeService {
     if (process.env.NODE_ENV === 'development') {
       console.log(`[Watchmode] Sources for ${title}:`, sources.map(s => `${s.name} (${s.type})`));
     }
-    // First sub/free source matching the selected service that has a web_url.
+    // 1) Exact name match (most precise).
     for (const name of variants) {
       const match = sources.find(s => s.name === name && s.web_url);
+      if (match) return match.web_url;
+    }
+    // 2) Fuzzy keyword match — catches Watchmode naming drift (e.g. Max/HBO).
+    const keywords = SERVICE_KEYWORDS[service] || [];
+    if (keywords.length) {
+      const match = sources.find(s =>
+        s.web_url && keywords.some(k => (s.name || '').toLowerCase().includes(k))
+      );
       if (match) return match.web_url;
     }
     return null;

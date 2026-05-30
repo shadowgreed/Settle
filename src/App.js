@@ -2445,7 +2445,10 @@ function App() {
     const q = encodeURIComponent(title);
     const links = {
       'Netflix':      `https://www.netflix.com/search?q=${q}`,
-      'Max':          `https://www.max.com/search?q=${q}`,
+      // Max has no reliable public search-deep-link (the old www.max.com/search
+      // path 404s), so fall back to the Max app home rather than a broken page.
+      // The Watchmode direct title link is the real path and covers most cases.
+      'Max':          `https://play.max.com`,
       'Disney+':      `https://www.disneyplus.com/search?q=${q}`,
       'Apple TV':     `https://tv.apple.com/search?term=${q}`,
       'Prime Video':  `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${q}`,
