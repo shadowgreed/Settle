@@ -1754,15 +1754,30 @@ function App() {
   // story is "sign in on the other device".
 
   // ── Couples streak ─────────────────────────────────────────────────────────
-  // Length of the current "agreed" streak (consecutive couple-mode history
-  // entries where coupleAgreed === true), or null if streak < 2. Memoised
-  // because it's read from JSX in 3 places per render.
+  // Number of consecutive NIGHTS (distinct calendar days) on which the couple
+  // agreed on a pick — NOT the raw number of agreed entries. Multiple "Let's
+  // watch" matches in a single day count once. A gap day (no agreed watch)
+  // resets the streak. Returns null below 2 nights. Matches the day-grouped
+  // logic in StreakHistory.js so the chip and the modal always agree.
   const streakInfo = useMemo(() => {
-    const entries = watchHistory.filter(h => h.mode === 'couple');
-    if (entries.length < 2) return null;
-    let streak = 0;
-    for (const entry of entries) {
-      if (entry.coupleAgreed) streak++;
+    const DAY = 24 * 60 * 60 * 1000;
+    // Distinct local days that had at least one couple-agreed watch.
+    const hitDays = new Set();
+    for (const h of watchHistory) {
+      if (h.mode !== 'couple' || !h.coupleAgreed || !h.watchedAt) continue;
+      const d = new Date(h.watchedAt);
+      if (isNaN(d.getTime())) continue;
+      d.setHours(0, 0, 0, 0);
+      hitDays.add(d.getTime());
+    }
+    if (hitDays.size === 0) return null;
+
+    // Walk distinct hit-days newest→oldest, counting only back-to-back days.
+    // Math.round on the day delta keeps it DST-safe (23h/25h days → 1).
+    const sorted = [...hitDays].sort((a, b) => b - a);
+    let streak = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      if (Math.round((sorted[i - 1] - sorted[i]) / DAY) === 1) streak++;
       else break;
     }
     return streak >= 2 ? streak : null;
