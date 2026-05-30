@@ -1426,24 +1426,34 @@ function App() {
     setPartnerName(pName || 'Your partner');
   };
 
-  // Unlink — clears couplePartnerUid on this user's doc.
+  // Unlink — clears couplePartnerUid on this user's doc, and tears down any
+  // in-flight ballot / session / pending link so nothing lingers.
   const handleUnlinkPartner = async () => {
     if (!user?.uid) return;
     await clearPartnerLink(user.uid);
     setPartnerUid(null);
     setPartnerName(null);
     setPartnerSaved([]);
+    setAwaitingLink(false);
     closeLiveBallot();
+    if (coupleSessionId) closeCoupleSession(coupleSessionId);
+    setCoupleSessionId(null);
+    setCoupleSession(null);
+    setSessionRole(null);
   };
 
   // ── Live two-device ballot handlers ────────────────────────────────────────
 
-  // Tear down the live ballot on this device. If we started it and it's still
-  // unresolved, expire the doc so the partner's device closes too.
+  // Tear down the live ballot on this device. Expire the doc whenever it's
+  // still pending — for EITHER party. Previously only the initiator expired it,
+  // so when the partner dismissed/skipped, the ballot stayed 'pending' in
+  // Firestore and the discovery listener re-opened it on every refresh. A
+  // resolved (matched/missed) ballot is left untouched — closing the reveal
+  // shouldn't rewrite its outcome.
   const closeLiveBallot = ({ expire = false } = {}) => {
     const id = liveBallotId;
     const unresolved = liveBallot && liveBallot.status === 'pending';
-    if (id && (expire || (liveRole === 'initiator' && unresolved))) {
+    if (id && (expire || unresolved)) {
       dismissBallot(id);
     }
     setLiveBallotId(null);

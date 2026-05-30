@@ -181,14 +181,21 @@ export function subscribeToIncomingBallot(uid, onBallot) {
   // second `where('status'...)` with `orderBy('createdAt')` would require a
   // Firestore COMPOSITE INDEX (not auto-created), and the listener would throw
   // until it's built — so the partner would never discover the ballot. We do the
-  // status filter + newest-first selection client-side instead.
+  // status + freshness filter and newest-first selection client-side instead.
+  //
+  // FRESHNESS: a live secret vote is meant to be acted on immediately. We only
+  // surface ballots created in the last 15 min, so an abandoned 'pending' ballot
+  // (partner closed the app, or an old test ballot) can't keep re-popping on
+  // every refresh. Combined with expiring on dismiss, stale votes don't haunt.
+  const FRESH_MS = 15 * 60 * 1000;
   const q = query(ballotsRef(), where('partnerUid', '==', uid));
   return onSnapshot(
     q,
     (snap) => {
+      const cutoff = Date.now() - FRESH_MS;
       const open = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(b => b.status === 'pending')
+        .filter(b => b.status === 'pending' && (b.createdAt?.toMillis?.() || 0) > cutoff)
         .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
       onBallot(open[0] || null);
     },
