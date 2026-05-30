@@ -20,7 +20,7 @@
 
 import {
   doc, setDoc, updateDoc, getDoc,
-  collection, query, where, orderBy, limit,
+  collection, query, where,
   onSnapshot, Timestamp, addDoc, runTransaction,
 } from 'firebase/firestore';
 import { db } from './firebase';
@@ -177,21 +177,23 @@ export async function createLiveBallot({
  * Returns an unsubscribe function.
  */
 export function subscribeToIncomingBallot(uid, onBallot) {
-  const q = query(
-    ballotsRef(),
-    where('partnerUid', '==', uid),
-    where('status', '==', 'pending'),
-    orderBy('createdAt', 'desc'),
-    limit(1),
+  // IMPORTANT: a single equality filter only — `partnerUid == uid`. Combining a
+  // second `where('status'...)` with `orderBy('createdAt')` would require a
+  // Firestore COMPOSITE INDEX (not auto-created), and the listener would throw
+  // until it's built — so the partner would never discover the ballot. We do the
+  // status filter + newest-first selection client-side instead.
+  const q = query(ballotsRef(), where('partnerUid', '==', uid));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const open = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(b => b.status === 'pending')
+        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      onBallot(open[0] || null);
+    },
+    (err) => { console.warn('[couple] ballot listen error:', err?.code || err?.message); onBallot(null); },
   );
-  return onSnapshot(q, (snap) => {
-    if (snap.empty) {
-      onBallot(null);
-    } else {
-      const docSnap = snap.docs[0];
-      onBallot({ id: docSnap.id, ...docSnap.data() });
-    }
-  }, () => onBallot(null));
 }
 
 /**
@@ -332,17 +334,20 @@ export async function createCoupleSession({ initiatorUid, partnerUid, initiatorN
 
 /** Partner discovery — a session where this user is the partner and selecting. */
 export function subscribeIncomingSession(uid, cb) {
-  const q = query(
-    sessionsRef(),
-    where('partnerUid', '==', uid),
-    where('status', '==', 'selecting'),
-    orderBy('createdAt', 'desc'),
-    limit(1),
-  );
+  // Single equality filter only (see subscribeToIncomingBallot) — a multi-field
+  // query + orderBy needs a composite index that isn't auto-created, which would
+  // make the listener throw and the partner would never discover the session.
+  const q = query(sessionsRef(), where('partnerUid', '==', uid));
   return onSnapshot(
     q,
-    (snap) => cb(snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() }),
-    () => cb(null),
+    (snap) => {
+      const open = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .filter(s => s.status === 'selecting')
+        .sort((a, b) => (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0));
+      cb(open[0] || null);
+    },
+    (err) => { console.warn('[couple] session listen error:', err?.code || err?.message); cb(null); },
   );
 }
 
