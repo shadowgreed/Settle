@@ -40,6 +40,7 @@ import {
 import CoupleLink from './components/CoupleLink';
 import LiveBallot from './components/LiveBallot';
 import CoupleSessionSelect from './components/CoupleSessionSelect';
+import CoupleSessionIntro from './components/CoupleSessionIntro';
 import WatchLoop from './components/WatchLoop';
 import useFocusTrap from './hooks/useFocusTrap';
 import './App.css';
@@ -299,6 +300,7 @@ function App() {
   const [coupleSession, setCoupleSession]     = useState(null);
   const [sessionRole, setSessionRole]         = useState(null);
   const [sessionError, setSessionError]       = useState(null); // visible start-failure message
+  const [showSessionIntro, setShowSessionIntro] = useState(false); // "needs 2 phones" explainer
   const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
   const coupleSessionIdRef  = useRef(null);
   const sessionGenreSyncRef = useRef(null); // debounce timer for live genre sync
@@ -569,6 +571,7 @@ function App() {
       if (locationPrompt)     { setLocationPrompt(null); return; }
       if (showShowtimes)      { setShowShowtimes(false); return; }
       if (showStreakHistory)  { setShowStreakHistory(false); return; }
+      if (showSessionIntro)   { setShowSessionIntro(false); return; }
       if (showSettings)       { setShowSettings(false); return; }
       if (showShareModal) { closeShareModal(); return; }
       if (showPrivacy)    { setShowPrivacy(false); return; }
@@ -581,7 +584,7 @@ function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer, showStreakHistory, showShowtimes, locationPrompt]);
+  }, [showShareModal, showPrivacy, showTerms, showHistory, ratingPopup, cinemaMode, showBallot, showSettings, showTrailer, showStreakHistory, showShowtimes, locationPrompt, showSessionIntro]);
 
   // Lock body scroll while any modal is open — prevents the underlying app from
   // scrolling on iOS when the user drags inside the overlay. Restores the prior
@@ -591,7 +594,7 @@ function App() {
       showOnboarding || showHistory || showShareModal || showPrivacy ||
       showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings ||
       showTrailer || showStreakHistory || showShowtimes || !!locationPrompt ||
-      !!liveBallot;
+      !!liveBallot || showSessionIntro;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
@@ -599,7 +602,7 @@ function App() {
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
       showBallot, cinemaMode, ratingPopup, showSettings, showTrailer, showStreakHistory,
-      showShowtimes, locationPrompt, liveBallot]);
+      showShowtimes, locationPrompt, liveBallot, showSessionIntro]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -2805,6 +2808,19 @@ function App() {
         />
       )}
 
+      {/* Couple session intro — shown when an unlinked user taps the session
+          button. Explains the two-phone flow + walks them into linking. */}
+      {showSessionIntro && (
+        <CoupleSessionIntro
+          partnerName={partnerName}
+          onGenerateCode={handleGenerateCode}
+          onVerifyCode={handleVerifyCode}
+          onUnlink={handleUnlinkPartner}
+          onStart={() => { setShowSessionIntro(false); handleStartSession(); }}
+          onClose={() => setShowSessionIntro(false)}
+        />
+      )}
+
       {/* YouTube trailer overlay — full-screen iframe player. Hidden silently
           when there's no trailer available for the current pick. */}
       {showTrailer && trailer?.key && (() => {
@@ -3193,15 +3209,17 @@ function App() {
             </div>
           )}
 
-          {partnerUid && (
-            <>
-              <button className="start-session-btn" onClick={handleStartSession}>
-                <span aria-hidden="true">🎬</span> Start a couple session with {(partnerName || 'your partner').split(' ')[0]}
-              </button>
-              {sessionError && (
-                <p className="start-session-error" role="alert">{sessionError}</p>
-              )}
-            </>
+          <button
+            className="start-session-btn"
+            onClick={partnerUid ? handleStartSession : () => setShowSessionIntro(true)}
+          >
+            <span aria-hidden="true">🎬</span>{' '}
+            {partnerUid
+              ? `Start a couple session with ${(partnerName || 'your partner').split(' ')[0]}`
+              : 'Couple session — watch on two phones'}
+          </button>
+          {sessionError && (
+            <p className="start-session-error" role="alert">{sessionError}</p>
           )}
           </>
           )}

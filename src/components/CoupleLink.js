@@ -144,7 +144,7 @@ export default function CoupleLink({
   return (
     <div className="couplelink-idle">
       <p className="couplelink-description">
-        Link with your partner for async voting and shared picks.
+        Link with your partner to watch together on two phones.
       </p>
       {error && <p className="couplelink-error" role="alert">{error}</p>}
       <div className="couplelink-actions">
