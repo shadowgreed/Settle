@@ -301,6 +301,7 @@ function App() {
   const [sessionRole, setSessionRole]         = useState(null);
   const [sessionError, setSessionError]       = useState(null); // visible start-failure message
   const [showSessionIntro, setShowSessionIntro] = useState(false); // "needs 2 phones" explainer
+  const [awaitingLink, setAwaitingLink]         = useState(false); // P1 is showing a code, waiting for P2
   const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
   const coupleSessionIdRef  = useRef(null);
   const sessionGenreSyncRef = useRef(null); // debounce timer for live genre sync
@@ -1374,6 +1375,31 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.uid]);
 
+  // While P1 is showing an invite code, poll for the partner having entered it
+  // so the link completes LIVE — no manual refresh. /api/couple/pending is
+  // claim-once, so the first poll that lands after P2 verifies wins. Once
+  // partnerUid is set, CoupleLink re-renders into its "Linked with…" state and
+  // the session intro shows its "Start the session" CTA automatically.
+  useEffect(() => {
+    if (!awaitingLink || partnerUid || !user?.uid) return;
+    const iv = setInterval(async () => {
+      try {
+        const { partnerUid: pUid } = await checkPendingLink();
+        if (pUid) {
+          await savePartnerLink(user.uid, pUid);
+          setPartnerUid(pUid);
+          setAwaitingLink(false);
+        }
+      } catch { /* keep polling */ }
+    }, 4000);
+    return () => clearInterval(iv);
+  }, [awaitingLink, partnerUid, user?.uid]);
+
+  // Stop waiting once the linking UI (intro modal or Settings) is closed.
+  useEffect(() => {
+    if (!showSessionIntro && !showSettings) setAwaitingLink(false);
+  }, [showSessionIntro, showSettings]);
+
   // Generate a code (P1 side). Called by CoupleLink.
   const handleGenerateCode = async () => {
     // Use the Firebase Auth identity (Google display name or email prefix) — not
@@ -1386,6 +1412,9 @@ function App() {
       playerNames?.p1 ||
       'Your partner';
     const code = await generateInviteCode(displayName);
+    // Start watching for the partner to enter it — completes the link live so
+    // P1 doesn't have to refresh (see the polling effect below).
+    setAwaitingLink(true);
     return code;
   };
 
