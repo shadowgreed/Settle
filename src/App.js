@@ -298,6 +298,7 @@ function App() {
   const [coupleSessionId, setCoupleSessionId] = useState(null);
   const [coupleSession, setCoupleSession]     = useState(null);
   const [sessionRole, setSessionRole]         = useState(null);
+  const [sessionError, setSessionError]       = useState(null); // visible start-failure message
   const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
   const coupleSessionIdRef  = useRef(null);
   // Runtime metadata for the result card (P2.2):
@@ -1524,6 +1525,7 @@ function App() {
   // Start a session (initiator).
   const handleStartSession = async () => {
     if (!partnerUid || !user?.uid) return;
+    setSessionError(null);
     setSelectedGenres(g => ({ ...g, session: [] }));
     setResult(null);
     setHasSearched(false);
@@ -1537,7 +1539,14 @@ function App() {
       setSessionRole('initiator');
       setCoupleSessionId(id);
     } catch (e) {
-      console.warn('[CoupleSession] start failed:', e.message);
+      // Surface the failure instead of dying silently. The usual cause is the
+      // coupleSessions Firestore rules not being deployed (permission-denied).
+      console.error('[CoupleSession] start failed:', e?.code || '', e?.message);
+      setSessionError(
+        e?.code === 'permission-denied'
+          ? "Couldn't start the session — the couples feature isn't fully enabled on the server yet."
+          : "Couldn't start the session. Check your connection and try again."
+      );
     }
   };
 
@@ -3136,9 +3145,14 @@ function App() {
           )}
 
           {partnerUid && (
-            <button className="start-session-btn" onClick={handleStartSession}>
-              <span aria-hidden="true">🎬</span> Start a couple session with {(partnerName || 'your partner').split(' ')[0]}
-            </button>
+            <>
+              <button className="start-session-btn" onClick={handleStartSession}>
+                <span aria-hidden="true">🎬</span> Start a couple session with {(partnerName || 'your partner').split(' ')[0]}
+              </button>
+              {sessionError && (
+                <p className="start-session-error" role="alert">{sessionError}</p>
+              )}
+            </>
           )}
           </>
           )}

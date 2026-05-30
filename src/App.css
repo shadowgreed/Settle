@@ -2953,6 +2953,14 @@ input[type="range"]::-moz-range-thumb {
 }
 .start-session-btn:hover { background: rgba(229,9,20,0.18); }
 
+.start-session-error {
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: #ff6b6b;
+  text-align: center;
+  line-height: 1.4;
+}
+
 /* Couple session "result" banner (shown above the shared pick card) */
 .csess-resultbar {
   display: flex;
