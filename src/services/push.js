@@ -70,6 +70,9 @@ function cleanTargeting(targeting = {}) {
   return {
     topGenres: Array.isArray(targeting.topGenres) ? targeting.topGenres : [],
     services: Array.isArray(targeting.services) ? targeting.services : [],
+    // The user's linked-partner uid (or null). Lets the server gate
+    // /api/ballot/notify so only a real partner can push this user.
+    partnerUid: typeof targeting.partnerUid === 'string' ? targeting.partnerUid : null,
   };
 }
 

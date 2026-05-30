@@ -588,7 +588,8 @@ function App() {
     const anyOpen =
       showOnboarding || showHistory || showShareModal || showPrivacy ||
       showTerms || showBallot || cinemaMode || !!ratingPopup || showSettings ||
-      showTrailer || showStreakHistory || showShowtimes || !!locationPrompt;
+      showTrailer || showStreakHistory || showShowtimes || !!locationPrompt ||
+      !!liveBallot;
     if (anyOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
@@ -596,7 +597,7 @@ function App() {
     }
   }, [showOnboarding, showHistory, showShareModal, showPrivacy, showTerms,
       showBallot, cinemaMode, ratingPopup, showSettings, showTrailer, showStreakHistory,
-      showShowtimes, locationPrompt]);
+      showShowtimes, locationPrompt, liveBallot]);
 
   // Multi-signal share-modal cleanup.
   // sessionStorage flag 'settle_sharing' is written before navigator.share()
@@ -1176,8 +1177,9 @@ function App() {
     syncPushProfile(user.uid, {
       topGenres: topSoloIdsKey ? topSoloIdsKey.split(',').map(Number).filter(Number.isFinite) : [],
       services: servicesKey ? servicesKey.split(',') : [],
+      partnerUid: partnerUid || null,
     });
-  }, [user?.uid, pushSubscribed, topSoloIdsKey, servicesKey]);
+  }, [user?.uid, pushSubscribed, topSoloIdsKey, servicesKey, partnerUid]);
 
   // Fire the analytics "prompt shown" event the first time the banner
   // becomes visible. Tracked separately from "accepted/denied" so the funnel
@@ -1200,6 +1202,7 @@ function App() {
   const pushTargeting = () => ({
     topGenres: (topGenresByPlayer.solo || []).map(g => g.id).filter(Boolean),
     services: selectedServices,
+    partnerUid: partnerUid || null,
   });
 
   const handlePushAccept = async () => {

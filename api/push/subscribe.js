@@ -63,6 +63,12 @@ module.exports = async function handler(req, res) {
   const services = Array.isArray(body.services)
     ? body.services.filter((s) => typeof s === 'string' && s.length <= 40).slice(0, 20)
     : [];
+  // The caller's linked-partner uid (or null). Used server-side only to gate
+  // /api/ballot/notify — never trusted for anything else.
+  const partnerUid =
+    typeof body.partnerUid === 'string' && body.partnerUid.length <= 128
+      ? body.partnerUid
+      : null;
 
   // Persist only the fields web-push needs.
   const subscription = {
@@ -72,7 +78,7 @@ module.exports = async function handler(req, res) {
   };
 
   try {
-    await saveSubscription(uid, { subscription, topGenres, services });
+    await saveSubscription(uid, { subscription, topGenres, services, partnerUid });
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('[push/subscribe]', err.message);

@@ -97,14 +97,21 @@ function mergeIdSet(cloudArr, localArr, cap) {
   return out.slice(-cap);
 }
 
+// Drop the transient `session` genre slot before persisting — it only holds a
+// device's in-progress picks during a live couple session.
+const stripSessionSlot = (genres) => {
+  if (!genres || typeof genres !== 'object') return genres;
+  const { session, ...rest } = genres;
+  return rest;
+};
+
 // ── Payload builder ───────────────────────────────────────────────────────────
 // Shapes current app state into the Firestore document structure.
 //
-// Note: `pushSubscriptions` is intentionally NOT written by buildPayload.
-// Push subscriptions are managed by src/services/push.js via arrayUnion /
-// arrayRemove on the user doc, and a regular merge:true write here would
-// preserve them. Don't ever add them to this payload — would race with
-// per-device subscribe/unsubscribe operations.
+// Note: push subscriptions are NOT stored in Firestore at all — they live in
+// Upstash (see lib/pushStore.js, written via /api/push/subscribe). Likewise
+// `couplePartnerUid` is written directly by src/services/couple.js, not here.
+// buildPayload only owns the taste/prefs/history portion of the user doc.
 export const buildPayload = (state) => ({
   tasteProfile:  state.tasteProfile,
   recentPicks:   state.recentPicks,
@@ -120,7 +127,9 @@ export const buildPayload = (state) => ({
   prefs: {
     mode:             state.mode,
     services:         state.selectedServices,
-    genres:           state.selectedGenres,
+    // Strip the transient `session` slot — it only holds this device's picks
+    // during an active couple session and must never persist to the cloud.
+    genres:           stripSessionSlot(state.selectedGenres),
     formats:          state.selectedFormats,
     minRating:        state.minRating,
     maxCertification: state.maxCertification ?? null,

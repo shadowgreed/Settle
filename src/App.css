@@ -2933,6 +2933,9 @@ input[type="range"]::-moz-range-thumb {
   font-size: 0.9rem;
 }
 
+/* (Removed: .async-ballot-send-btn — the async "Send to partner" button was
+   replaced by the live two-device Secret Vote.) */
+
 /* Start a couple session button */
 .start-session-btn {
   width: 100%;

@@ -90,12 +90,20 @@ module.exports = async function handler(req, res) {
     process.env.VAPID_PRIVATE_KEY,
   );
 
-  // Find the partner's push subscriptions from Upstash.
+  // Find the recipient's push profile in Upstash.
   let profiles;
   try { profiles = await listProfiles(); } catch { profiles = []; }
   const partnerProfile = profiles.find(p => p.uid === partnerUid);
   if (!partnerProfile?.subs?.length) {
     return res.status(200).json({ ok: true, skipped: 'no_subscription' });
+  }
+
+  // AUTHORISATION: only a real partner may push this user. The recipient's
+  // profile records *their* linked partner (partnerUid, written on every app
+  // open). We require it to equal the authenticated sender. Without this, any
+  // signed-in user who learned another uid could spam push notifications.
+  if (partnerProfile.partnerUid !== uid) {
+    return res.status(200).json({ ok: true, skipped: 'not_linked' });
   }
 
   const msgFn = MESSAGES[eventType];
