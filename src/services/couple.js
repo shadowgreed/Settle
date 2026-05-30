@@ -109,6 +109,20 @@ export async function readPartnerDoc(partnerUid) {
   }
 }
 
+/**
+ * Live subscription to the partner's user doc. Surfaces their display name +
+ * savedForLater in real time, and — crucially — their `couplePartnerUid`, which
+ * the caller uses to detect a bidirectional unlink (if the partner no longer
+ * points back at us, they unlinked, so we unlink too). cb(data | null).
+ */
+export function subscribePartnerDoc(partnerUid, cb) {
+  return onSnapshot(
+    userRef(partnerUid),
+    (snap) => cb(snap.exists() ? snap.data() : null),
+    (err) => { console.warn('[couple] partner doc listen error:', err?.code || err?.message); },
+  );
+}
+
 // ── Live two-device ballot ─────────────────────────────────────────────────────
 //
 // Both partners are linked and (usually) together. P1 starts a ballot on a

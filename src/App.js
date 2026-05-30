@@ -32,7 +32,7 @@ import { migrateLocalToCloud, pushUserData, pushUserDataAuthoritative, buildPayl
 import { authHeader } from './services/authHeader';
 import {
   savePartnerLink, clearPartnerLink,
-  generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
+  generateInviteCode, verifyInviteCode, checkPendingLink, subscribePartnerDoc,
   createLiveBallot, subscribeToIncomingBallot, subscribeBallot, castVote, dismissBallot,
   createCoupleSession, subscribeIncomingSession, subscribeCoupleSession,
   setSessionReady, updateSessionGenres, broadcastSessionResult, closeCoupleSession,
@@ -1308,31 +1308,65 @@ function App() {
 
   // ── Couple linking effects + handlers ──────────────────────────────────────
 
-  // When partnerUid is set, load their display name + saved list. Also subscribe
-  // to incoming ballots so P2 sees the vote banner without needing to refresh.
+  // Live subscription to the partner's doc: keeps their name + saved list fresh
+  // AND drives bidirectional unlink. If their doc stops pointing back at us
+  // (they unlinked, or deleted their account), we unlink on this device too —
+  // which also stops the ballot/session discovery listeners, so the old Secret
+  // Vote popups can't keep reappearing after an unlink.
+  //
+  // The grace timer avoids a false unlink during the brief LINK-ESTABLISHMENT
+  // window: when we enter a code, our doc points at them immediately but theirs
+  // only points back once they claim the pending link (a few seconds). We only
+  // treat "not mutual" as a real unlink once it's been confirmed mutual, or
+  // after a short grace has passed without it becoming mutual.
   useEffect(() => {
     if (!partnerUid) {
       setPartnerName(null);
       setPartnerSaved([]);
       return;
     }
-    // Load partner's display name + saved items.
-    readPartnerDoc(partnerUid).then(data => {
+    let confirmed = false;
+    let graceTimer = null;
+
+    const performAutoUnlink = async () => {
+      try { if (user?.uid) await clearPartnerLink(user.uid); } catch {}
+      setPartnerUid(null);
+      setPartnerName(null);
+      setPartnerSaved([]);
+      setAwaitingLink(false);
+      setLiveBallotId(null);
+      setLiveBallot(null);
+      setLiveRole(null);
+      setCoupleSessionId(null);
+      setCoupleSession(null);
+      setSessionRole(null);
+    };
+
+    const unsub = subscribePartnerDoc(partnerUid, (data) => {
       if (data) {
-        // Prefer the Firebase Auth identity stored in displayName — that's the
-        // person's real name (e.g. "Sarah" from Google sign-in). Fall back to
-        // the ballot labels only if displayName hasn't synced yet (e.g. partner
-        // hasn't opened the app since this field was added).
         setPartnerName(
-          data.displayName ||
-          data.playerNames?.p1 ||
-          data.playerNames?.p2 ||
-          'Your partner'
+          data.displayName || data.playerNames?.p1 || data.playerNames?.p2 || 'Your partner'
         );
         setPartnerSaved(Array.isArray(data.savedForLater) ? data.savedForLater : []);
       }
+      const mutual = !!data && data.couplePartnerUid === user?.uid;
+      if (mutual) {
+        confirmed = true;
+        if (graceTimer) { clearTimeout(graceTimer); graceTimer = null; }
+      } else if (confirmed) {
+        // Was a confirmed link, now broken → the partner unlinked. Unlink now.
+        performAutoUnlink();
+      } else if (!graceTimer) {
+        // Not yet confirmed — could be a link still establishing. Give it a
+        // short grace, then unlink if it's still one-sided (e.g. a stale link
+        // the partner already severed).
+        graceTimer = setTimeout(() => { if (!confirmed) performAutoUnlink(); }, 15000);
+      }
     });
-  }, [partnerUid]);
+
+    return () => { if (graceTimer) clearTimeout(graceTimer); unsub(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [partnerUid, user?.uid]);
 
   // Ref mirror of the active ballot id so the snapshot callback below can guard
   // against re-opening while a vote is already in progress (closures see stale
