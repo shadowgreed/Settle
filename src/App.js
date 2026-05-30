@@ -2450,7 +2450,10 @@ function App() {
       // The Watchmode direct title link is the real path and covers most cases.
       'Max':          `https://play.max.com`,
       'Disney+':      `https://www.disneyplus.com/search?q=${q}`,
-      'Apple TV':     `https://tv.apple.com/search?term=${q}`,
+      // Apple TV's tv.apple.com/search?term= just dumps users on an empty
+      // search bar. With no reliable web search-deep-link, fall back to the
+      // Apple TV app home; the Watchmode direct title link is the real path.
+      'Apple TV':     `https://tv.apple.com`,
       'Prime Video':  `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${q}`,
       'In Theaters':  `https://www.google.com/search?q=${q}+movie+showtimes`,
     };

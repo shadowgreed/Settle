@@ -110,7 +110,8 @@ class WatchmodeService {
 
     const sources = await this._fetchSources(watchmodeId);
     if (process.env.NODE_ENV === 'development') {
-      console.log(`[Watchmode] Sources for ${title}:`, sources.map(s => `${s.name} (${s.type})`));
+      console.log(`[Watchmode] Sources for ${title}:`,
+        sources.map(s => `${s.name} [${s.type}] ${s.web_url ? 'web✓' : 'web✗'}`));
     }
     // 1) Exact name match (most precise).
     for (const name of variants) {
