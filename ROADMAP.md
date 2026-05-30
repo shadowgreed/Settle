@@ -3,11 +3,50 @@
 Living list of deferred work captured from audits, code reviews, and PD/PM
 sessions. Items move from this file into commits as they're completed.
 
-Last updated: 2026-05-20 (Theater Mode 2.0 M2+M3 shipped, AMC vendor key blocked)
+Last updated: 2026-05-30 (couples two-device suite shipped; watch-loop pile-up parked)
 
 ---
 
 ## Deferred / parked
+
+### Watch-loop "Did you watch it?" pile-up after couple sessions
+**Symptom:** after running several couple sessions, one device gets "haunted" —
+the "Did you watch it? / How was it?" popup (WatchLoop) reappears on every
+refresh, cycling through every movie matched while linked, even after
+dismissing repeatedly. Clearing watch history makes it stop.
+
+**This is NOT the ballot/session discovery bug** (that was fixed separately:
+close-expires + 15-min freshness window + bidirectional unlink). This one is
+driven entirely by `watchHistory`, which is why clearing history fixes it.
+
+**Root cause:** the WatchLoop mount effect (`src/App.js`) surfaces the *first*
+`watchHistory` entry with `rated === null` that's ≥30 min old, one per app
+open. Every couple-session match calls
+`saveToHistory(t, { coupleAgreed: true, mode: 'couple' })` with `rated: null`.
+So a rapid testing session (or any night with several matches that weren't
+actually watched) leaves a backlog of unrated entries. Each dismissal marks
+one `rated: 'skip'`, but the next open surfaces the next unrated one — so it
+*feels* endless. It's working as designed; the design just doesn't anticipate
+"agreed to watch ≠ watched" or a backlog.
+
+**Candidate fixes (when we revisit):**
+  - **Per-session frequency cap (quickest):** show the WatchLoop at most once
+    per app session (a `sessionStorage` flag), regardless of how many unrated
+    entries exist. Stops the cycle immediately without changing data model.
+  - **Auto-expire stale unrated entries:** if an entry is still `rated: null`
+    after N days (e.g. 7), silently treat it as skipped so it stops asking.
+  - **Decouple "couple match" from "needs rating":** a match means *we picked
+    this*, not *we watched it*. Either don't enqueue couple matches into the
+    rating loop until the user explicitly confirms a watch, or only enqueue the
+    single most-recent one per session rather than one per match.
+  - **Batch instead of cycle:** "You have 5 picks to rate" → one prompt that
+    lists them, instead of one popup per title per open.
+
+**Interim workaround:** clearing watch history (Settings/history panel) drains
+the backlog. Low user-facing risk to leave parked since real usage rarely
+produces a big backlog of *unwatched* matches — it mostly bites during rapid
+testing. Recommended first move when revisited: the per-session cap + auto-
+expire combo.
 
 ### Theater Mode 2.0 — affiliate revenue (M4/M5) parked
 AMC API is a dead end: their ecommerce/showtimes APIs require a signed
