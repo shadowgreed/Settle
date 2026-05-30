@@ -360,6 +360,18 @@ export function subscribeCoupleSession(id, cb) {
   );
 }
 
+/**
+ * Live-sync only this device's genre selection (without touching ready). Called
+ * as the user toggles moods so the partner's compatibility % updates in real
+ * time, mirroring the single-device meter.
+ */
+export async function updateSessionGenres(id, role, genres) {
+  const field = role === 'initiator' ? 'initiatorGenres' : 'partnerGenres';
+  await updateDoc(doc(db, 'coupleSessions', id), {
+    [field]: Array.isArray(genres) ? genres : [],
+  });
+}
+
 /** Write this device's genre selection + ready flag. */
 export async function setSessionReady(id, role, genres, ready) {
   const field = role === 'initiator' ? 'initiator' : 'partner';

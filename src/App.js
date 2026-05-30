@@ -35,7 +35,7 @@ import {
   generateInviteCode, verifyInviteCode, checkPendingLink, readPartnerDoc,
   createLiveBallot, subscribeToIncomingBallot, subscribeBallot, castVote, dismissBallot,
   createCoupleSession, subscribeIncomingSession, subscribeCoupleSession,
-  setSessionReady, broadcastSessionResult, closeCoupleSession,
+  setSessionReady, updateSessionGenres, broadcastSessionResult, closeCoupleSession,
 } from './services/couple';
 import CoupleLink from './components/CoupleLink';
 import LiveBallot from './components/LiveBallot';
@@ -301,6 +301,7 @@ function App() {
   const [sessionError, setSessionError]       = useState(null); // visible start-failure message
   const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
   const coupleSessionIdRef  = useRef(null);
+  const sessionGenreSyncRef = useRef(null); // debounce timer for live genre sync
   // Runtime metadata for the result card (P2.2):
   //   movie  → { runtimeMin: 102 }
   //   series → { episodes: 8, avgEpisodeMin: 45 }
@@ -945,23 +946,40 @@ function App() {
     return overlap.length > 0 ? overlap : [...new Set([...p1, ...p2])];
   }, [mode, selectedGenres]);
 
+  // The two genre sets that drive couple compatibility. In a LIVE session each
+  // partner picks on their own device, so we compare THIS device's live
+  // selection (selectedGenres.session) against the partner's (from the session
+  // doc, synced as they pick). Outside a session it's the single-device p1/p2
+  // tabs. Same maths either way — the % match works identically.
+  const couplePair = useMemo(() => {
+    if (mode !== 'couple') return { a: [], b: [] };
+    if (coupleSession && coupleSession.status !== 'closed') {
+      const mine = selectedGenres.session || [];
+      const theirs = (sessionRole === 'initiator'
+        ? coupleSession.partnerGenres
+        : coupleSession.initiatorGenres) || [];
+      return { a: mine, b: theirs };
+    }
+    return { a: selectedGenres.p1 || [], b: selectedGenres.p2 || [] };
+  }, [mode, selectedGenres, coupleSession, sessionRole]);
+
   const overlapGenres = useMemo(() => {
     if (mode !== 'couple') return [];
-    const p1 = selectedGenres.p1 || [];
-    const p2 = selectedGenres.p2 || [];
-    return p1.filter(g => p2.includes(g));
-  }, [mode, selectedGenres]);
+    return couplePair.a.filter(g => couplePair.b.includes(g));
+  }, [mode, couplePair]);
 
   const compatScore = useMemo(() => {
     if (mode !== 'couple') return null;
-    const p1 = selectedGenres.p1 || [];
-    const p2 = selectedGenres.p2 || [];
-    if (p1.length === 0 && p2.length === 0) return null;
-    if (p1.length === 0 || p2.length === 0) return 0;
-    const overlap = p1.filter(g => p2.includes(g));
-    const union = [...new Set([...p1, ...p2])];
+    const { a, b } = couplePair;
+    const inSession = !!(coupleSession && coupleSession.status !== 'closed');
+    if (a.length === 0 && b.length === 0) return null;
+    // In a session, hide the score until BOTH have picked — otherwise it would
+    // flash "0% match" before the partner has chosen anything.
+    if (a.length === 0 || b.length === 0) return inSession ? null : 0;
+    const overlap = a.filter(g => b.includes(g));
+    const union = [...new Set([...a, ...b])];
     return Math.round((overlap.length / union.length) * 100);
-  }, [mode, selectedGenres]);
+  }, [mode, couplePair, coupleSession]);
 
   // O(1) lookups — replaces .find() inside .map() callsites that were O(n²).
   const genreById = useMemo(() => {
@@ -1483,6 +1501,22 @@ function App() {
     });
     return unsub;
   }, [coupleSessionId]);
+
+  // Live-sync this device's mood selection to the session doc (debounced) while
+  // selecting, so the partner's compatibility % updates as each person picks —
+  // mirroring the single-device meter. Keyed on a stringified id list to avoid
+  // firing on every array-identity change.
+  const sessionGenresKey = (selectedGenres.session || []).join(',');
+  useEffect(() => {
+    if (!coupleSessionId || !sessionRole) return;
+    if (!coupleSession || coupleSession.status !== 'selecting') return;
+    if (sessionGenreSyncRef.current) clearTimeout(sessionGenreSyncRef.current);
+    sessionGenreSyncRef.current = setTimeout(() => {
+      updateSessionGenres(coupleSessionId, sessionRole, selectedGenres.session || []).catch(() => {});
+    }, 500);
+    return () => { if (sessionGenreSyncRef.current) clearTimeout(sessionGenreSyncRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [coupleSessionId, sessionRole, coupleSession?.status, sessionGenresKey]);
 
   // Both locked in → the INITIATOR runs the pick once and broadcasts it.
   useEffect(() => {
