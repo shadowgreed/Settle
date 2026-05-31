@@ -1,0 +1,20 @@
+{
+  "appId": "app.trysettle.settle",
+  "appName": "Settle",
+  "webDir": "build",
+  "backgroundColor": "#0a0a0a",
+  "ios": {
+    "backgroundColor": "#0a0a0a",
+    "contentInset": "always"
+  },
+  "android": {
+    "backgroundColor": "#0a0a0a"
+  },
+  "plugins": {
+    "SplashScreen": {
+      "backgroundColor": "#0a0a0a",
+      "showSpinner": false,
+      "launchAutoHide": true
+    }
+  }
+}

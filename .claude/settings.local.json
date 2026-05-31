@@ -33,7 +33,10 @@
       "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\dexscreener.js\")",
       "Bash(del \"C:\\\\Users\\\\andra\\\\Downloads\\\\meme-radar\\\\server\\\\adapters\\\\pumpfun.js\")",
       "mcp__Claude_in_Chrome__read_network_requests",
-      "mcp__Claude_in_Chrome__computer"
+      "mcp__Claude_in_Chrome__computer",
+      "Bash(npm run *)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(npx cap *)"
     ]
   }
 }
