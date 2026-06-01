@@ -44,7 +44,7 @@
   border: none;
   outline: none;
   color: #f5f5f5;
-  font-size: 15px; /* >=16 avoids iOS zoom-on-focus on small screens; 15 is fine on most */
+  font-size: 16px; /* MUST be >=16px — iOS Safari auto-zooms the page on focus below this */
   padding: 11px 8px 11px 4px;
 }
 
@@ -102,7 +102,7 @@
   border: 0.5px solid #2a2a2a;
   border-radius: 8px;
   color: #f5f5f5;
-  font-size: 15px;
+  font-size: 16px; /* >=16px — prevents iOS Safari zoom-on-focus */
   padding: 9px 11px;
   outline: none;
 }
