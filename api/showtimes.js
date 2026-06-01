@@ -157,8 +157,15 @@ module.exports = async function handler(req, res) {
   // Rate-limit BEFORE any paid upstream work (reverse-geocode + SerpAPI).
   // Two-tier: tight per-user (verified Firebase uid) + loose per-IP backstop;
   // fail-open if Upstash is unreachable. See lib/rateLimit.js.
+  //
+  // Headroom note: the In Theaters tab verifies one lookup per film (a batch of
+  // ~10) to confirm a title is actually playing near you, and re-verifies on a
+  // ZIP change. A load + a couple of ZIP changes legitimately needs more than a
+  // handful of requests/min, so the per-user cap is sized for that. Cached
+  // (movie+location) responses are served from the CDN edge and never reach
+  // this function, so the real upstream spend is far below these ceilings.
   const gate = await enforceRateLimit(req, {
-    endpoint: 'showtimes', userMax: 20, ipMax: 80, window: '60 s',
+    endpoint: 'showtimes', userMax: 45, ipMax: 120, window: '60 s',
   });
   if (!gate.ok) {
     if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));

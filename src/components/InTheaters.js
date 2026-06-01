@@ -23,9 +23,11 @@ import './InTheaters.css';
 // affiliate tags) without touching the rest of the app.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const BATCH = 12;      // candidates verified per batch
-const CONCURRENCY = 4; // simultaneous showtimes lookups
-const AUTO_ADVANCE_CAP = 36; // stop auto-checking deeper than this without a tap
+const BATCH = 10;      // candidates verified per batch
+const CONCURRENCY = 3; // simultaneous showtimes lookups (gentler burst)
+const AUTO_ADVANCE_CAP = 30; // stop auto-checking deeper than this without a tap
+
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Run `worker` over `items` with at most `limit` in flight at once.
 async function runConcurrent(items, limit, worker) {
@@ -37,6 +39,29 @@ async function runConcurrent(items, limit, worker) {
     }
   });
   await Promise.all(runners);
+}
+
+// Verify a title against the selected area, returning 'playing' | 'none'.
+// Batch verification can momentarily brush the showtimes rate limit (e.g. when
+// the user changes ZIP and a fresh batch fires); a 429 is transient, NOT a
+// service outage, so we back off and retry a couple of times before giving up.
+async function verifyPlaying(title, loc) {
+  let delay = 700;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const theaters = await getShowtimes(title, loc);
+      return theaters.some(t => t.showtimes && t.showtimes.length > 0) ? 'playing' : 'none';
+    } catch (e) {
+      const rateLimited = e instanceof ShowtimesServiceError && e.status === 429;
+      if (rateLimited && attempt < 2) {
+        await sleep(delay + Math.random() * 250);
+        delay *= 2;
+        continue;
+      }
+      throw e;
+    }
+  }
+  return 'none';
 }
 
 export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSetLocation }) {
@@ -138,9 +163,8 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
       await runConcurrent(slice, CONCURRENCY, async (m) => {
         if (cancelled) return;
         try {
-          const theaters = await getShowtimes(m.title, { lat: loc.lat, lng: loc.lng, zip: loc.zip });
-          const playing = theaters.some(t => t.showtimes && t.showtimes.length > 0);
-          if (!cancelled) mark(m.id, playing ? 'playing' : 'none');
+          const status = await verifyPlaying(m.title, { lat: loc.lat, lng: loc.lng, zip: loc.zip });
+          if (!cancelled) mark(m.id, status);
         } catch (e) {
           sawError = true;
           // Fail CLOSED — never show an unverified title. Mark as error so it
