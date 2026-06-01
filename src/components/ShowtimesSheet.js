@@ -6,7 +6,8 @@ import {
   invalidateShowtimesCache,
 } from '../services/showtimes';
 import { trackShowtimesOpened } from '../services/analytics';
-import TicketBrowser from './TicketBrowser';
+import { isNative, openExternal } from '../native/bridge';
+import LeaveForTickets from './LeaveForTickets';
 import './ShowtimesSheet.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -20,8 +21,8 @@ import './ShowtimesSheet.css';
 // rather than re-ranking. The top 3 are shown by default; "Show more"
 // expands to up to 10.
 //
-// Showtime pills open the in-app TicketBrowser which routes to Fandango /
-// the chain's site for the actual purchase.
+// Showtime pills hand off to the purchase site: a native in-app browser on
+// the app, or (on web) a "leaving Settle" confirmation before a new tab.
 //
 // The LocationChanger header chip lets the user override the search
 // location at any time — primary recovery path when GPS fails (Safari)
@@ -45,8 +46,22 @@ export default function ShowtimesSheet({
   const [serviceDown,   setServiceDown]   = useState(false);
   const [theaters,      setTheaters]      = useState([]);
   const [expanded,      setExpanded]      = useState(false);
-  // { url, movie, theater, timeStr } — null when closed
-  const [ticketBrowser, setTicketBrowser] = useState(null);
+  // Web-only "leaving Settle" dialog payload — { url, movie, theater, timeStr }.
+  // null when closed. On native we open the in-app browser directly instead.
+  const [leaveInfo,     setLeaveInfo]     = useState(null);
+
+  // Ticket hand-off. Native gets a true in-app browser (SFSafariViewController /
+  // Custom Tab) — no awareness dialog, the user never actually leaves the app.
+  // Web can only open a new tab (ticketing sites block iframing), so confirm
+  // first via LeaveForTickets.
+  const handleBuy = (info) => {
+    if (!info?.url) return;
+    if (isNative()) {
+      openExternal(info.url);
+    } else {
+      setLeaveInfo(info);
+    }
+  };
 
   // Sort by distanceMi when available; otherwise preserve Google's proximity order.
   const visibleTheaters = useMemo(() => {
@@ -196,7 +211,7 @@ export default function ShowtimesSheet({
                   theater={theater}
                   movieTitle={result?.title}
                   onBuy={(showtime) =>
-                    setTicketBrowser({
+                    handleBuy({
                       url:      showtime.purchaseUrl,
                       movie:    result?.title,
                       theater:  theater.name,
@@ -220,14 +235,14 @@ export default function ShowtimesSheet({
         </div>
       </div>
 
-      {/* In-app ticket browser — slides in over the sheet */}
-      {ticketBrowser && (
-        <TicketBrowser
-          url={ticketBrowser.url}
-          movie={ticketBrowser.movie}
-          theater={ticketBrowser.theater}
-          timeStr={ticketBrowser.timeStr}
-          onClose={() => setTicketBrowser(null)}
+      {/* Web-only "you're leaving Settle" confirmation before the new tab. */}
+      {leaveInfo && (
+        <LeaveForTickets
+          url={leaveInfo.url}
+          movie={leaveInfo.movie}
+          theater={leaveInfo.theater}
+          timeStr={leaveInfo.timeStr}
+          onCancel={() => setLeaveInfo(null)}
         />
       )}
     </div>

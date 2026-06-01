@@ -1169,11 +1169,12 @@ function App() {
     setLocationPrompt(null);
   };
 
-  // ── Inline location change from ShowtimesSheet ─────────────────────────
-  // Called when the user taps the location chip inside the showtimes sheet
-  // and either enters a new ZIP or asks to re-try GPS. Throws on failure
-  // so the chip can surface a clean error to the user.
-  const handleLocationChange = async ({ mode, zip }) => {
+  // ── Inline location change from ShowtimesSheet / InTheaters ────────────
+  // Called when the user sets/changes their area (ZIP chip or "use my
+  // location"). Throws on failure so the caller can surface a clean error.
+  // `silent` skips analytics — used by the In Theaters auto-restore of a
+  // previously-saved ZIP, which isn't a fresh user action.
+  const handleLocationChange = async ({ mode, zip, silent = false }) => {
     if (mode === 'gps') {
       clearCachedCoords();
       const coords = await getCurrentCoords({ forceRefresh: true });
@@ -1195,7 +1196,7 @@ function App() {
       }
       const isFirstTime = !getStoredZip();
       setStoredZip(zip);
-      trackZipEntered({ firstTime: isFirstTime });
+      if (!silent) trackZipEntered({ firstTime: isFirstTime });
       setUserLocation({ ...coords, source: 'zip', zip });
       return;
     }

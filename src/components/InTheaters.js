@@ -1,147 +1,304 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import tmdbService from '../services/tmdb';
+import { getShowtimes, ShowtimesServiceError } from '../services/showtimes';
 import './InTheaters.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// InTheaters — the "In Theaters" tab, a browse-first storefront.
+// InTheaters — the "In Theaters" tab. A location-first storefront of films you
+// can actually go see *tonight, near you*.
 //
-// Cinema-goers already know what they want to see, so this skips the decision
-// engine: every film now playing in US theaters as a poster grid. Tap a poster
-// → showtimes + in-app tickets (handled by the parent via onPickMovie).
+// Design rules baked in here:
+//   • Location-first: nothing is shown until an area (ZIP / GPS) is set. The
+//     national TMDB "now playing" list is only a candidate pool.
+//   • Verified, no leakage: every poster shown has been confirmed to have real
+//     showtimes at the selected location (one cached showtimes lookup per
+//     title). A film is NEVER displayed before it's verified, so stale titles
+//     that have left local theaters can't slip through.
+//   • Best-first: candidates are ranked by rating (desc), then popularity.
+//   • Bounded cost: verification runs in batches of BATCH with a small
+//     concurrency cap; "Show more" verifies the next batch. Results are cached
+//     (in-memory + shared CDN) so popular areas are nearly free.
 //
-// Two find-it affordances sit above the grid:
-//   1. Search — filters the grid by title as the user types (the slate is
-//      national, so this is a fast client-side filter, no extra fetch).
-//   2. Area  — a ZIP / "use my location" control. The now-playing list is
-//      national, but the chosen area is what showtimes are pulled for, so
-//      setting it here means tapping a poster goes straight to local times.
-//
-// Intentionally self-contained so the tab can be reshaped later (featured
-// rails, premium-format filters, affiliate tags) without touching the app.
+// Self-contained on purpose — easy to reshape later (rails, format filters,
+// affiliate tags) without touching the rest of the app.
 // ─────────────────────────────────────────────────────────────────────────────
 
+const BATCH = 12;      // candidates verified per batch
+const CONCURRENCY = 4; // simultaneous showtimes lookups
+const AUTO_ADVANCE_CAP = 36; // stop auto-checking deeper than this without a tap
+
+// Run `worker` over `items` with at most `limit` in flight at once.
+async function runConcurrent(items, limit, worker) {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const idx = cursor++;
+      await worker(items[idx]);
+    }
+  });
+  await Promise.all(runners);
+}
+
 export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSetLocation }) {
-  const [movies,  setMovies]  = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [movies,  setMovies]  = useState([]);   // rating-sorted candidate pool
+  const [loading, setLoading] = useState(true); // now-playing fetch
   const [error,   setError]   = useState(false);
   const [query,   setQuery]   = useState('');
 
-  const load = () => {
+  // Verification: id -> 'playing' | 'none' | 'error'. A ref mirrors it so the
+  // verify effect can skip already-checked titles without re-running on every
+  // single result.
+  const [verified, setVerified] = useState({});
+  const verifiedRef = useRef({});
+  const [attempted, setAttempted] = useState(BATCH); // how many candidates we've tried
+  const [verifying, setVerifying] = useState(false);
+  const [serviceDown, setServiceDown] = useState(false);
+
+  const mark = (id, status) => {
+    verifiedRef.current = { ...verifiedRef.current, [id]: status };
+    setVerified(verifiedRef.current);
+  };
+
+  // ── Candidate pool (national now-playing, ranked best-first) ───────────────
+  const loadNowPlaying = () => {
     setLoading(true);
     setError(false);
     return tmdbService.getNowPlaying()
-      .then(list => { setMovies((list || []).filter(m => m.posterPath)); setLoading(false); })
+      .then(list => {
+        const ranked = (list || [])
+          .filter(m => m.posterPath)
+          .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.popularity || 0) - (a.popularity || 0));
+        setMovies(ranked);
+        setLoading(false);
+      })
       .catch(() => { setError(true); setLoading(false); });
   };
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setError(false);
     tmdbService.getNowPlaying()
       .then(list => {
         if (cancelled) return;
-        // Only films we have poster art for — a missing poster reads as broken
-        // in a grid. Order is TMDB's curated now-playing ranking.
-        setMovies((list || []).filter(m => m.posterPath));
+        const ranked = (list || [])
+          .filter(m => m.posterPath)
+          .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.popularity || 0) - (a.popularity || 0));
+        setMovies(ranked);
         setLoading(false);
       })
       .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
     return () => { cancelled = true; };
   }, []);
 
-  // Title filter — case/diacritic-insensitive, recomputed only when the slate
-  // or query changes.
-  const filtered = useMemo(() => {
+  // Restore a previously-used area on first mount so returning users skip the
+  // "set your area" gate. Silent → no analytics noise for an auto-restore.
+  useEffect(() => {
+    if (!userLocation && defaultZip && /^\d{5}$/.test(defaultZip) && onSetLocation) {
+      onSetLocation({ mode: 'zip', zip: defaultZip, silent: true }).catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const locationKey = userLocation
+    ? (userLocation.zip || `${userLocation.lat},${userLocation.lng}`)
+    : null;
+
+  // Title filter applies to the candidate pool (already rating-sorted).
+  const targets = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return movies;
     return movies.filter(m => (m.title || '').toLowerCase().includes(q));
   }, [movies, query]);
 
-  return (
-    <div className="intheaters">
-      <div className="intheaters-head">
-        <h2 className="intheaters-title">In theaters now</h2>
-        <p className="intheaters-sub">
-          Pick a movie — grab tickets without leaving the app.
-        </p>
-      </div>
+  // Changing area invalidates ALL prior verification — a film playing near the
+  // old ZIP says nothing about the new one. Wipe the map so nothing leaks
+  // across areas, and start over from the first batch.
+  useEffect(() => {
+    verifiedRef.current = {};
+    setVerified({});
+    setServiceDown(false);
+    setAttempted(BATCH);
+  }, [locationKey]);
 
-      <div className="intheaters-controls">
-        <div className="intheaters-search">
-          <span className="intheaters-search-icon" aria-hidden="true">🔍</span>
-          <input
-            type="search"
-            className="intheaters-search-input"
-            placeholder="Search movies in theaters"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            aria-label="Search movies in theaters by title"
-            enterKeyHint="search"
-          />
-          {query && (
-            <button
-              type="button"
-              className="intheaters-search-clear"
-              onClick={() => setQuery('')}
-              aria-label="Clear search"
-            >
-              ✕
-            </button>
-          )}
-        </div>
+  // A new search just re-scopes which titles to check; per-movie verification
+  // for the current area stays valid, so only the batch cursor resets.
+  useEffect(() => { setAttempted(BATCH); }, [query]);
 
-        {onSetLocation && (
-          <AreaControl
-            userLocation={userLocation}
-            defaultZip={defaultZip}
-            onSetLocation={onSetLocation}
-          />
+  // ── Verification driver ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!locationKey || movies.length === 0) return;
+    const loc = userLocation;
+    const slice = targets.slice(0, attempted).filter(m => !(m.id in verifiedRef.current));
+    if (slice.length === 0) return;
+
+    let cancelled = false;
+    setVerifying(true);
+    (async () => {
+      let sawError = false;
+      await runConcurrent(slice, CONCURRENCY, async (m) => {
+        if (cancelled) return;
+        try {
+          const theaters = await getShowtimes(m.title, { lat: loc.lat, lng: loc.lng, zip: loc.zip });
+          const playing = theaters.some(t => t.showtimes && t.showtimes.length > 0);
+          if (!cancelled) mark(m.id, playing ? 'playing' : 'none');
+        } catch (e) {
+          sawError = true;
+          // Fail CLOSED — never show an unverified title. Mark as error so it
+          // stays hidden; if the whole service is down we surface a banner.
+          if (e instanceof ShowtimesServiceError) setServiceDown(true);
+          if (!cancelled) mark(m.id, 'error');
+        }
+      });
+      if (!cancelled) {
+        if (!sawError) setServiceDown(false);
+        setVerifying(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // verifiedRef is read fresh; excluded from deps on purpose to avoid re-runs
+    // on every single result.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targets, attempted, locationKey, movies.length]);
+
+  // Films confirmed to be playing locally, in best-first order.
+  const showing = useMemo(
+    () => targets.filter(m => verified[m.id] === 'playing'),
+    [targets, verified]
+  );
+
+  // How far through the current target list we've resolved.
+  const resolvedCount = useMemo(
+    () => targets.slice(0, attempted).filter(m => m.id in verified).length,
+    [targets, attempted, verified]
+  );
+  const batchSettled = !verifying && resolvedCount >= Math.min(attempted, targets.length);
+  const moreToCheck  = attempted < targets.length;
+
+  // Gently check the next batch when the current one turned up nothing, so the
+  // user isn't forced to tap "Show more" repeatedly. Bounded to cap spend.
+  useEffect(() => {
+    if (batchSettled && !serviceDown && showing.length === 0 && moreToCheck && attempted < AUTO_ADVANCE_CAP) {
+      setAttempted(a => a + BATCH);
+    }
+  }, [batchSettled, serviceDown, showing.length, moreToCheck, attempted]);
+
+  const areaLabel = useMemo(() => {
+    if (userLocation?.source === 'gps') return 'your location';
+    if (userLocation?.zip) return userLocation.zip;
+    if (defaultZip) return defaultZip;
+    return 'your area';
+  }, [userLocation, defaultZip]);
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  const controls = (
+    <div className="intheaters-controls">
+      <div className="intheaters-search">
+        <span className="intheaters-search-icon" aria-hidden="true">🔍</span>
+        <input
+          type="search"
+          className="intheaters-search-input"
+          placeholder="Search movies in theaters"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          aria-label="Search movies in theaters by title"
+          enterKeyHint="search"
+          disabled={!locationKey}
+        />
+        {query && (
+          <button
+            type="button"
+            className="intheaters-search-clear"
+            onClick={() => setQuery('')}
+            aria-label="Clear search"
+          >
+            ✕
+          </button>
         )}
       </div>
 
-      {loading && (
-        <div className="intheaters-grid" aria-hidden="true">
-          {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="intheaters-card is-skeleton">
-              <div className="intheaters-poster intheaters-skel" />
-              <div className="intheaters-skel-line" />
-              <div className="intheaters-skel-line short" />
-            </div>
-          ))}
-        </div>
+      {onSetLocation && (
+        <AreaControl
+          userLocation={userLocation}
+          defaultZip={defaultZip}
+          onSetLocation={onSetLocation}
+        />
       )}
+    </div>
+  );
 
-      {!loading && error && (
+  // Gate: no area yet → ask for one (nothing unverified is ever shown).
+  if (!locationKey) {
+    return (
+      <div className="intheaters">
+        {controls}
+        <div className="intheaters-empty">
+          <div className="intheaters-empty-icon" aria-hidden="true">📍</div>
+          <p>Set your area to see what's playing near you — enter a ZIP or use your location above.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const loadingNow = loading || (showing.length === 0 && !batchSettled);
+
+  return (
+    <div className="intheaters">
+      {controls}
+
+      <div className="intheaters-status">
+        Playing near <strong>{areaLabel}</strong>
+      </div>
+
+      {error && !loading && (
         <div className="intheaters-empty">
           <div className="intheaters-empty-icon" aria-hidden="true">🎬</div>
           <p>Couldn't load what's playing. Check your connection and try again.</p>
-          <button type="button" className="intheaters-retry" onClick={load}>
-            Try again
-          </button>
+          <button type="button" className="intheaters-retry" onClick={loadNowPlaying}>Try again</button>
         </div>
       )}
 
-      {!loading && !error && movies.length === 0 && (
+      {!error && loadingNow && (
+        <>
+          <div className="intheaters-checking" role="status">
+            Finding films playing near {areaLabel}…
+          </div>
+          <div className="intheaters-grid" aria-hidden="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="intheaters-card is-skeleton">
+                <div className="intheaters-poster intheaters-skel" />
+                <div className="intheaters-skel-line" />
+                <div className="intheaters-skel-line short" />
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {!error && !loadingNow && showing.length === 0 && serviceDown && (
         <div className="intheaters-empty">
-          <div className="intheaters-empty-icon" aria-hidden="true">🍿</div>
-          <p>No films are listed as playing right now. Check back soon.</p>
+          <div className="intheaters-empty-icon" aria-hidden="true">🛠️</div>
+          <p>Showtimes are temporarily unavailable. Please try again in a bit.</p>
         </div>
       )}
 
-      {!loading && !error && movies.length > 0 && filtered.length === 0 && (
+      {!error && !loadingNow && showing.length === 0 && !serviceDown && (
         <div className="intheaters-empty">
-          <div className="intheaters-empty-icon" aria-hidden="true">🔍</div>
-          <p>No films in theaters match “{query.trim()}”.</p>
-          <button type="button" className="intheaters-retry" onClick={() => setQuery('')}>
-            Clear search
-          </button>
+          <div className="intheaters-empty-icon" aria-hidden="true">{query ? '🔍' : '🍿'}</div>
+          <p>
+            {query
+              ? `No films matching “${query.trim()}” are playing near ${areaLabel}.`
+              : `No films are playing near ${areaLabel} right now. Try a different ZIP above.`}
+          </p>
+          {query && (
+            <button type="button" className="intheaters-retry" onClick={() => setQuery('')}>Clear search</button>
+          )}
         </div>
       )}
 
-      {!loading && !error && filtered.length > 0 && (
+      {!error && showing.length > 0 && (
         <ul className="intheaters-grid">
-          {filtered.map(movie => {
+          {showing.map(movie => {
             const meta = [
               movie.year || null,
               movie.rating ? `★ ${movie.rating}` : null,
@@ -156,11 +313,7 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
                   aria-label={`Get tickets for ${movie.title}`}
                 >
                   <div className="intheaters-poster">
-                    <img
-                      src={tmdbService.getPosterUrl(movie.posterPath, 'w342')}
-                      alt=""
-                      loading="lazy"
-                    />
+                    <img src={tmdbService.getPosterUrl(movie.posterPath, 'w342')} alt="" loading="lazy" />
                     <span className="intheaters-tickets" aria-hidden="true">🎟️ Tickets</span>
                   </div>
                   <div className="intheaters-name" title={movie.title}>{movie.title}</div>
@@ -171,13 +324,24 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
           })}
         </ul>
       )}
+
+      {!error && !loadingNow && moreToCheck && (
+        <button
+          type="button"
+          className="intheaters-more"
+          onClick={() => setAttempted(a => a + BATCH)}
+          disabled={verifying}
+        >
+          {verifying ? 'Checking…' : 'Show more films'}
+        </button>
+      )}
     </div>
   );
 }
 
 // ── AreaControl ──────────────────────────────────────────────────────────────
-// Compact "where are you?" control. Sets the area showtimes are pulled for, so
-// a poster tap can skip the location prompt and go straight to local times.
+// Sets the area showtimes are pulled for. Also the source of truth for the grid
+// filter — change the ZIP and the whole grid re-verifies against the new area.
 
 function AreaControl({ userLocation, defaultZip, onSetLocation }) {
   const [editing,  setEditing]  = useState(false);
