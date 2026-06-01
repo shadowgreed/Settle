@@ -1,0 +1,193 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   InTheaters — browse-first poster grid for the "In Theaters" tab.
+   Dark / cinematic palette to match the rest of Settle (bg #0a0a0a,
+   surface #1a1a1a, text #f5f5f5, gold accent #d9b04a).
+   ──────────────────────────────────────────────────────────────────────────── */
+
+.intheaters {
+  margin-top: 4px;
+}
+
+.intheaters-head {
+  padding: 4px 2px 14px;
+}
+
+.intheaters-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+  color: #f5f5f5;
+}
+
+.intheaters-sub {
+  margin: 5px 0 0;
+  font-size: 13.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Grid ──────────────────────────────────────────────────────────────────── */
+.intheaters-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px 12px;
+}
+
+@media (max-width: 380px) {
+  .intheaters-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.intheaters-card {
+  min-width: 0;
+}
+
+.intheaters-card-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.intheaters-card-btn:focus-visible {
+  outline: 2px solid #d9b04a;
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+/* ── Poster ────────────────────────────────────────────────────────────────── */
+.intheaters-poster {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1a1a1a;
+  border: 0.5px solid #222;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.intheaters-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.intheaters-card-btn:hover .intheaters-poster,
+.intheaters-card-btn:active .intheaters-poster {
+  transform: translateY(-2px);
+  border-color: rgba(217, 176, 74, 0.55);
+}
+
+/* "Tickets" badge slides up on hover/focus — the affordance that this poster
+   is tappable straight to checkout, not just a thumbnail. */
+.intheaters-tickets {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 7px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-align: center;
+  color: #0c0c0c;
+  background: #d9b04a;
+  transform: translateY(101%);
+  transition: transform 0.18s ease;
+}
+
+.intheaters-card-btn:hover .intheaters-tickets,
+.intheaters-card-btn:focus-visible .intheaters-tickets,
+.intheaters-card-btn:active .intheaters-tickets {
+  transform: translateY(0);
+}
+
+/* ── Captions ──────────────────────────────────────────────────────────────── */
+.intheaters-name {
+  margin-top: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #f0f0f0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.intheaters-meta {
+  margin-top: 2px;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+/* ── Empty / error ─────────────────────────────────────────────────────────── */
+.intheaters-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.intheaters-empty-icon {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
+
+.intheaters-empty p {
+  margin: 0 auto 14px;
+  max-width: 280px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.intheaters-retry {
+  background: #d9b04a;
+  color: #0c0c0c;
+  border: none;
+  border-radius: 10px;
+  padding: 9px 18px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.intheaters-retry:hover { filter: brightness(1.05); }
+
+/* ── Skeletons ─────────────────────────────────────────────────────────────── */
+.intheaters-card.is-skeleton { pointer-events: none; }
+
+.intheaters-skel,
+.intheaters-skel-line {
+  background: linear-gradient(90deg, #1a1a1a 25%, #222 50%, #1a1a1a 75%);
+  background-size: 200% 100%;
+  animation: intheaters-shimmer 1.3s ease-in-out infinite;
+}
+
+.intheaters-skel-line {
+  height: 11px;
+  border-radius: 4px;
+  margin-top: 8px;
+}
+
+.intheaters-skel-line.short { width: 50%; }
+
+@keyframes intheaters-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intheaters-skel,
+  .intheaters-skel-line,
+  .intheaters-poster,
+  .intheaters-tickets { animation: none; transition: none; }
+}

@@ -24,6 +24,7 @@ import NewReleasesCard from './components/NewReleasesCard';
 import PushOptIn from './components/PushOptIn';
 import Settings from './components/Settings';
 import ShowtimesSheet from './components/ShowtimesSheet';
+import InTheaters from './components/InTheaters';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -253,6 +254,9 @@ function App() {
   const [showShowtimes, setShowShowtimes]   = useState(false);
   const [locationPrompt, setLocationPrompt] = useState(null);
   const [userLocation, setUserLocation]     = useState(null);
+  // The now-playing movie tapped in the "In Theaters" browse grid. Drives the
+  // ShowtimesSheet (which film to look up). Null when the sheet is closed.
+  const [theaterMovie, setTheaterMovie]     = useState(null);
 
   // "New in your genres" home-screen card (PM roadmap 3.2). Count is the
   // headline number from TMDB; dismissed flag is per-day in localStorage.
@@ -370,7 +374,11 @@ function App() {
   const [revealReady, setRevealReady] = useState(false);
 
   // Theater mode filters
-  const [familyFriendly, setFamilyFriendly] = useState(false);
+  // Family-friendly filter — the toggle UI was retired when the "In Theaters"
+  // tab became a browse-first grid (decision engine no longer runs for theater).
+  // Kept as a constant so the legacy now-playing fetch path still compiles and
+  // can be re-surfaced later as a grid filter when we customize this tab.
+  const [familyFriendly] = useState(false);
 
   // History panel tab — 'watched' | 'saved'
   const [historyTab, setHistoryTab] = useState('watched');
@@ -1074,6 +1082,14 @@ function App() {
   // previously granted, we silently get coords and open the sheet. If
   // they declined, fall back to the stored ZIP if any. Otherwise the
   // permission modal surfaces with the right copy ('first' / 'retry').
+  // Browse-grid tap: remember which film, then run the same location gate as
+  // the old "Get tickets" button. Once location resolves, the ShowtimesSheet
+  // opens for this movie.
+  const handleTheaterMoviePick = (movie) => {
+    setTheaterMovie(movie);
+    openShowtimesFlow();
+  };
+
   const openShowtimesFlow = async () => {
     const permission = getStoredPermissionState();
     const zip        = getStoredZip();
@@ -2963,14 +2979,14 @@ function App() {
         />
       )}
 
-      {/* Theater Mode 2.0 — showtimes sheet (M2+M3). Opens when the user
-          taps "Get tickets" on a theater pick. Shows nearest theaters
-          + today's showtimes for the picked movie. */}
-      {showShowtimes && result && (
+      {/* Showtimes sheet — opens when the user taps a film in the "In Theaters"
+          browse grid (after the location gate). Shows nearest theaters +
+          today's showtimes for the picked movie, with in-app ticket checkout. */}
+      {showShowtimes && theaterMovie && (
         <ShowtimesSheet
-          result={result}
+          result={theaterMovie}
           userLocation={userLocation}
-          onClose={() => setShowShowtimes(false)}
+          onClose={() => { setShowShowtimes(false); setTheaterMovie(null); }}
           onLocationChange={handleLocationChange}
         />
       )}
@@ -3029,9 +3045,9 @@ function App() {
         </div>
       )}
 
-      {(mode === 'solo' || mode === 'theater') && (() => {
+      {mode === 'solo' && (() => {
         // Each mode uses its own genre slot so selections never cross-contaminate.
-        const moodPlayer = mode === 'theater' ? 'theater' : 'solo';
+        const moodPlayer = 'solo';
         const activeSlot = selectedGenres[moodPlayer] || [];
         const genreListId = `${moodPlayer}-genre-list`;
         return (
@@ -3318,29 +3334,15 @@ function App() {
         </>
       )}
 
+      {/* In Theaters — generic browse-first grid. People heading to the cinema
+          already know what they want, so this skips the decision engine: every
+          film now playing, tap a poster → showtimes + in-app tickets. */}
       {mode === 'theater' && (
-        <>
-          <div className="theater-banner">
-            <span aria-hidden="true">🎬</span> Updated weekly · US theaters
-          </div>
-          <div className="section theater-filters">
-            <div className="label" id="theater-filter-label">Filter</div>
-            <div className="theater-filter-row" role="group" aria-labelledby="theater-filter-label">
-              <button
-                type="button"
-                className={`theater-filter-chip ${familyFriendly ? 'chip-on' : ''}`}
-                onClick={() => setFamilyFriendly(prev => !prev)}
-                aria-pressed={familyFriendly}
-              >
-                🧒 Family-friendly
-              </button>
-            </div>
-          </div>
-        </>
+        <InTheaters onPickMovie={handleTheaterMoviePick} />
       )}
 
-      <div className={`row2${mode === 'theater' ? ' row2-single' : ''}`}>
-        {mode !== 'theater' && (
+      {mode !== 'theater' && (
+      <div className="row2">
         <div className="fcard">
           <div className="label" id="format-label">Format</div>
           <div className="tog-row" role="group" aria-labelledby="format-label">
@@ -3360,7 +3362,6 @@ function App() {
             })}
           </div>
         </div>
-        )}
         <div className="fcard">
           <label className="label" htmlFor="min-rating-input">Min Rating</label>
           <div className="range-row">
@@ -3384,6 +3385,7 @@ function App() {
           </div>
         </div>
       </div>
+      )}
 
       {mode !== 'theater' && (
         <div className="section">
@@ -3440,7 +3442,7 @@ function App() {
         </div>
       )}
 
-      <div className="divider" />
+      {mode !== 'theater' && <div className="divider" />}
 
       {/* Note: we intentionally don't surface a "X titles available" count here.
           Users shouldn't be primed by the inventory size of their filters —
@@ -3451,7 +3453,7 @@ function App() {
       {/* Hidden during an active couple session — the pick is generated
           automatically once both partners lock in, and re-picks come from the
           shared result card's "Try another". */}
-      {!coupleSession && (
+      {!coupleSession && mode !== 'theater' && (
         <div className="btn-row">
           <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
             {loading ? 'Finding...' : 'Find something for us →'}
@@ -4067,7 +4069,7 @@ function App() {
                           mode,
                           surface: 'cinema_mode',
                         });
-                        openShowtimesFlow();
+                        handleTheaterMoviePick(cinemaItem);
                       }}
                       style={{ background: getServiceColor(cinemaItem.service) }}
                     >
