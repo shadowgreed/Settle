@@ -1082,12 +1082,16 @@ function App() {
   // previously granted, we silently get coords and open the sheet. If
   // they declined, fall back to the stored ZIP if any. Otherwise the
   // permission modal surfaces with the right copy ('first' / 'retry').
-  // Browse-grid tap: remember which film, then run the same location gate as
-  // the old "Get tickets" button. Once location resolves, the ShowtimesSheet
-  // opens for this movie.
+  // Browse-grid tap: remember which film, then open showtimes. If the user
+  // already set an area (ZIP or GPS) via the In Theaters area control, skip
+  // the gate and go straight to local times; otherwise run the location gate.
   const handleTheaterMoviePick = (movie) => {
     setTheaterMovie(movie);
-    openShowtimesFlow();
+    if (userLocation) {
+      setShowShowtimes(true);
+    } else {
+      openShowtimesFlow();
+    }
   };
 
   const openShowtimesFlow = async () => {
@@ -3046,22 +3050,17 @@ function App() {
       )}
 
       {mode === 'solo' && (() => {
-        // Each mode uses its own genre slot so selections never cross-contaminate.
+        // Solo mode uses its own genre slot so selections never cross-contaminate.
         const moodPlayer = 'solo';
         const activeSlot = selectedGenres[moodPlayer] || [];
         const genreListId = `${moodPlayer}-genre-list`;
         return (
           <div className="section">
             <div className="label" id="mood-greeting-label">
-              {mode === 'theater' ? 'What are you in the mood for?' : moodGreeting()}
+              {moodGreeting()}
             </div>
             <div className="mood-grid" role="group" aria-labelledby="mood-greeting-label">
-              {/* Decade moods ('80s / '90s / '00s) are hidden in theater
-                  mode — they query back catalog by release year, which
-                  doesn't make sense for what's currently playing in
-                  cinemas. */}
               {MOODS
-                .filter(m => mode !== 'theater' || !m.ids.some(id => DECADE_YEARS[id]))
                 .map(mood => (
                   <button
                     key={mood.label}
@@ -3338,7 +3337,12 @@ function App() {
           already know what they want, so this skips the decision engine: every
           film now playing, tap a poster → showtimes + in-app tickets. */}
       {mode === 'theater' && (
-        <InTheaters onPickMovie={handleTheaterMoviePick} />
+        <InTheaters
+          onPickMovie={handleTheaterMoviePick}
+          userLocation={userLocation}
+          defaultZip={getStoredZip()}
+          onSetLocation={handleLocationChange}
+        />
       )}
 
       {mode !== 'theater' && (
