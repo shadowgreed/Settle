@@ -27,6 +27,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { enforceRateLimit } = require('../lib/rateLimit');
+const { getShowtimesCache, setShowtimesCache } = require('../lib/showtimesCache');
 
 const SERP_BASE    = 'https://serpapi.com/search.json';
 const GEOCODE_BASE = 'https://maps.googleapis.com/maps/api/geocode/json';
@@ -154,6 +155,25 @@ module.exports = async function handler(req, res) {
     }
   }
 
+  // Backend cache key — derived from the client's raw inputs so a cache HIT
+  // avoids the reverse-geocode round trip too. ZIP keys directly; GPS rounds to
+  // ~1 km (2 dp) so the same spot reuses one entry.
+  const cacheLocKey = zip
+    ? `z:${zip}`
+    : (lat && lng ? `g:${Number(lat).toFixed(2)},${Number(lng).toFixed(2)}` : null);
+
+  // Durable shared cache (Upstash) FIRST — a hit costs no SerpAPI call and no
+  // rate-limit budget. This is the main lever against repeated SerpAPI spend:
+  // the first visitor to a ZIP today pays; everyone else rides the cache.
+  if (cacheLocKey) {
+    const cached = await getShowtimesCache(movie, cacheLocKey);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=300');
+      res.setHeader('X-Settle-Showtimes-Cache', 'hit');
+      return res.status(200).json(cached);
+    }
+  }
+
   // Rate-limit BEFORE any paid upstream work (reverse-geocode + SerpAPI).
   // Two-tier: tight per-user (verified Firebase uid) + loose per-IP backstop;
   // fail-open if Upstash is unreachable. See lib/rateLimit.js.
@@ -219,12 +239,25 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: msg });
     }
 
+    // Slim payload — the client (and native app) only ever reads `showtimes`.
+    // Caching just this keeps the Redis entry small and the response identical
+    // for the client's purposes.
+    const payload = { showtimes: data.showtimes ?? null };
+
+    // Persist to the durable shared cache (incl. negative results) so the next
+    // visitor to this movie+location skips SerpAPI entirely. Awaited so the
+    // write completes before the serverless instance can freeze.
+    if (cacheLocKey) {
+      await setShowtimesCache(movie, cacheLocKey, payload);
+    }
+
     // Showtimes are date-specific; 30-min CDN cache is safe. `public` keeps the
     // CDN caching this shared (non-user-specific) response even though the
     // request now carries an Authorization header for per-user rate limiting —
     // the body is keyed only on movie+location, never on the user.
     res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=300');
-    return res.status(200).json(data);
+    res.setHeader('X-Settle-Showtimes-Cache', 'miss');
+    return res.status(200).json(payload);
   } catch (err) {
     console.error('[showtimes proxy]', err.message);
     return res.status(502).json({ error: 'Showtimes request failed' });
