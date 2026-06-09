@@ -41,7 +41,7 @@
   line-height: 1.5;
   color: rgba(255, 255, 255, 0.6);
 }
-.lft-body strong { color: #d9b04a; font-weight: 700; }
+.lft-body strong { color: #EF9F27; font-weight: 700; }
 
 .lft-summary {
   margin: 16px 0 18px;
@@ -64,7 +64,7 @@
 .lft-continue {
   display: block;
   width: 100%;
-  background: #d9b04a;
+  background: #EF9F27;
   color: #0c0c0c;
   border: none;
   border-radius: 10px;

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import tmdbService from '../services/tmdb';
 import { getShowtimes, ShowtimesServiceError } from '../services/showtimes';
+import AreaPicker from './AreaPicker';
 import './InTheaters.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -16,11 +17,10 @@ import './InTheaters.css';
 //     that have left local theaters can't slip through.
 //   • Best-first: candidates are ranked by rating (desc), then popularity.
 //   • Bounded cost: verification runs in batches of BATCH with a small
-//     concurrency cap; "Show more" verifies the next batch. Results are cached
-//     (in-memory + shared CDN) so popular areas are nearly free.
-//
-// Self-contained on purpose — easy to reshape later (rails, format filters,
-// affiliate tags) without touching the rest of the app.
+//     concurrency cap; "Check more" verifies the next batch. Results are cached
+//     (in-memory + shared CDN + Upstash) so popular areas are nearly free.
+//   • Steady reveal: the first batch is held behind skeletons until it settles,
+//     then the grid fades in — no poster-by-poster pop-in.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const BATCH = 10;      // candidates verified per batch
@@ -78,6 +78,9 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
   const [attempted, setAttempted] = useState(BATCH); // how many candidates we've tried
   const [verifying, setVerifying] = useState(false);
   const [serviceDown, setServiceDown] = useState(false);
+  // Hold the first batch behind skeletons until it settles, then reveal the
+  // grid all at once (fades in) rather than poster-by-poster.
+  const [revealed, setRevealed] = useState(false);
 
   const mark = (id, status) => {
     verifiedRef.current = { ...verifiedRef.current, [id]: status };
@@ -137,17 +140,18 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
 
   // Changing area invalidates ALL prior verification — a film playing near the
   // old ZIP says nothing about the new one. Wipe the map so nothing leaks
-  // across areas, and start over from the first batch.
+  // across areas, and start over from the first batch (held behind skeletons).
   useEffect(() => {
     verifiedRef.current = {};
     setVerified({});
     setServiceDown(false);
     setAttempted(BATCH);
+    setRevealed(false);
   }, [locationKey]);
 
   // A new search just re-scopes which titles to check; per-movie verification
-  // for the current area stays valid, so only the batch cursor resets.
-  useEffect(() => { setAttempted(BATCH); }, [query]);
+  // for the current area stays valid, so only the batch cursor + reveal reset.
+  useEffect(() => { setAttempted(BATCH); setRevealed(false); }, [query]);
 
   // ── Verification driver ────────────────────────────────────────────────────
   useEffect(() => {
@@ -199,8 +203,13 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
   const batchSettled = !verifying && resolvedCount >= Math.min(attempted, targets.length);
   const moreToCheck  = attempted < targets.length;
 
+  // Once a batch settles, reveal the grid (all-at-once fade-in).
+  useEffect(() => {
+    if (batchSettled && !verifying) setRevealed(true);
+  }, [batchSettled, verifying]);
+
   // Gently check the next batch when the current one turned up nothing, so the
-  // user isn't forced to tap "Show more" repeatedly. Bounded to cap spend.
+  // user isn't forced to tap "Check more" repeatedly. Bounded to cap spend.
   useEffect(() => {
     if (batchSettled && !serviceDown && showing.length === 0 && moreToCheck && attempted < AUTO_ADVANCE_CAP) {
       setAttempted(a => a + BATCH);
@@ -214,48 +223,20 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
     return 'your area';
   }, [userLocation, defaultZip]);
 
-  // ── Render ─────────────────────────────────────────────────────────────────
-  const controls = (
-    <div className="intheaters-controls">
-      <div className="intheaters-search">
-        <span className="intheaters-search-icon" aria-hidden="true">🔍</span>
-        <input
-          type="search"
-          className="intheaters-search-input"
-          placeholder="Search movies in theaters"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          aria-label="Search movies in theaters by title"
-          enterKeyHint="search"
-          disabled={!locationKey}
-        />
-        {query && (
-          <button
-            type="button"
-            className="intheaters-search-clear"
-            onClick={() => setQuery('')}
-            aria-label="Clear search"
-          >
-            ✕
-          </button>
-        )}
-      </div>
-
-      {onSetLocation && (
-        <AreaControl
-          userLocation={userLocation}
-          defaultZip={defaultZip}
-          onSetLocation={onSetLocation}
-        />
-      )}
-    </div>
+  const areaEl = onSetLocation && (
+    <AreaPicker
+      variant="chip"
+      userLocation={userLocation}
+      defaultZip={defaultZip}
+      onChange={onSetLocation}
+    />
   );
 
-  // Gate: no area yet → ask for one (nothing unverified is ever shown).
+  // ── Gate: no area yet → ask for one (search is useless until then). ─────────
   if (!locationKey) {
     return (
       <div className="intheaters">
-        {controls}
+        <div className="intheaters-controls intheaters-controls--gate">{areaEl}</div>
         <div className="intheaters-empty">
           <div className="intheaters-empty-icon" aria-hidden="true">📍</div>
           <p>Set your area to see what's playing near you — enter a ZIP or use your location above.</p>
@@ -264,11 +245,37 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
     );
   }
 
-  const loadingNow = loading || (showing.length === 0 && !batchSettled);
+  // Skeletons stay up until the batch settles (no per-poster pop-in), and again
+  // whenever we're auto-checking deeper with nothing to show yet.
+  const stillWorking = loading || !revealed || (verifying && showing.length === 0);
 
   return (
     <div className="intheaters">
-      {controls}
+      <div className="intheaters-controls">
+        <div className="intheaters-search">
+          <span className="intheaters-search-icon" aria-hidden="true">🔍</span>
+          <input
+            type="search"
+            className="intheaters-search-input"
+            placeholder="Search movies in theaters"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            aria-label="Search movies in theaters by title"
+            enterKeyHint="search"
+          />
+          {query && (
+            <button
+              type="button"
+              className="intheaters-search-clear"
+              onClick={() => setQuery('')}
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {areaEl}
+      </div>
 
       <div className="intheaters-status">
         Playing near <strong>{areaLabel}</strong>
@@ -282,7 +289,7 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
         </div>
       )}
 
-      {!error && loadingNow && (
+      {!error && stillWorking && (
         <>
           <div className="intheaters-checking" role="status">
             Finding films playing near {areaLabel}…
@@ -299,14 +306,14 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
         </>
       )}
 
-      {!error && !loadingNow && showing.length === 0 && serviceDown && (
+      {!error && !stillWorking && showing.length === 0 && serviceDown && (
         <div className="intheaters-empty">
           <div className="intheaters-empty-icon" aria-hidden="true">🛠️</div>
           <p>Showtimes are temporarily unavailable. Please try again in a bit.</p>
         </div>
       )}
 
-      {!error && !loadingNow && showing.length === 0 && !serviceDown && (
+      {!error && !stillWorking && showing.length === 0 && !serviceDown && (
         <div className="intheaters-empty">
           <div className="intheaters-empty-icon" aria-hidden="true">{query ? '🔍' : '🍿'}</div>
           <p>
@@ -320,8 +327,8 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
         </div>
       )}
 
-      {!error && showing.length > 0 && (
-        <ul className="intheaters-grid">
+      {!error && !stillWorking && showing.length > 0 && (
+        <ul className="intheaters-grid intheaters-grid--reveal">
           {showing.map(movie => {
             const meta = [
               movie.year || null,
@@ -342,6 +349,10 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
                   </div>
                   <div className="intheaters-name" title={movie.title}>{movie.title}</div>
                   {meta && <div className="intheaters-meta">{meta}</div>}
+                  {/* Persistent tap cue — the hover badge above is invisible on
+                      touch, so every device gets an explicit "this opens
+                      showtimes" signal here. */}
+                  <div className="intheaters-cta" aria-hidden="true">🎟️ Showtimes ›</div>
                 </button>
               </li>
             );
@@ -349,107 +360,20 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
         </ul>
       )}
 
-      {!error && !loadingNow && moreToCheck && (
+      {!error && !stillWorking && moreToCheck && (
         <button
           type="button"
           className="intheaters-more"
           onClick={() => setAttempted(a => a + BATCH)}
           disabled={verifying}
         >
-          {verifying ? 'Checking…' : 'Show more films'}
+          {verifying ? 'Checking…' : 'Check more films'}
         </button>
       )}
+
+      {!error && !stillWorking && !moreToCheck && showing.length > 0 && (
+        <p className="intheaters-end">That's everything playing near {areaLabel}.</p>
+      )}
     </div>
-  );
-}
-
-// ── AreaControl ──────────────────────────────────────────────────────────────
-// Sets the area showtimes are pulled for. Also the source of truth for the grid
-// filter — change the ZIP and the whole grid re-verifies against the new area.
-
-function AreaControl({ userLocation, defaultZip, onSetLocation }) {
-  const [editing,  setEditing]  = useState(false);
-  const [zipDraft, setZipDraft] = useState('');
-  const [busy,     setBusy]     = useState(false);
-  const [err,      setErr]      = useState('');
-
-  const label = useMemo(() => {
-    if (userLocation?.source === 'gps') return 'Near you';
-    if (userLocation?.zip) return `Near ${userLocation.zip}`;
-    if (defaultZip) return `Near ${defaultZip}`;
-    return 'Set your area';
-  }, [userLocation, defaultZip]);
-
-  const open = () => {
-    setZipDraft(userLocation?.zip || defaultZip || '');
-    setErr('');
-    setEditing(true);
-  };
-
-  const close = () => { setEditing(false); setErr(''); setBusy(false); };
-
-  const submitZip = async (e) => {
-    e?.preventDefault?.();
-    const zip = (zipDraft || '').trim();
-    if (!/^\d{5}$/.test(zip)) { setErr('Enter a valid 5-digit ZIP.'); return; }
-    setBusy(true); setErr('');
-    try {
-      await onSetLocation({ mode: 'zip', zip });
-      setEditing(false);
-    } catch (e2) {
-      setErr(e2?.message || 'Could not set that area. Try again.');
-    } finally { setBusy(false); }
-  };
-
-  const useGps = async () => {
-    setBusy(true); setErr('');
-    try {
-      await onSetLocation({ mode: 'gps' });
-      setEditing(false);
-    } catch (e2) {
-      setErr(e2?.message || 'Location unavailable. Use a ZIP instead.');
-    } finally { setBusy(false); }
-  };
-
-  if (!editing) {
-    return (
-      <button type="button" className="intheaters-area" onClick={open} aria-label="Set your area for showtimes">
-        <span className="intheaters-area-icon" aria-hidden="true">📍</span>
-        <span className="intheaters-area-label">{label}</span>
-      </button>
-    );
-  }
-
-  return (
-    <form className="intheaters-area-form" onSubmit={submitZip}>
-      <div className="intheaters-area-row">
-        <input
-          type="text"
-          className="intheaters-area-input"
-          placeholder="ZIP code"
-          value={zipDraft}
-          onChange={e => setZipDraft(e.target.value.replace(/[^\d]/g, '').slice(0, 5))}
-          inputMode="numeric"
-          pattern="\d{5}"
-          maxLength={5}
-          autoFocus
-          aria-label="5-digit ZIP code"
-          autoComplete="postal-code"
-          disabled={busy}
-        />
-        <button type="submit" className="intheaters-area-go" disabled={busy || zipDraft.length !== 5}>
-          {busy ? '…' : 'Set'}
-        </button>
-      </div>
-      <div className="intheaters-area-actions">
-        <button type="button" className="intheaters-area-gps" onClick={useGps} disabled={busy}>
-          <span aria-hidden="true">🎯</span> Use my location
-        </button>
-        <button type="button" className="intheaters-area-cancel" onClick={close} disabled={busy}>
-          Cancel
-        </button>
-      </div>
-      {err && <p className="intheaters-area-error" role="alert">{err}</p>}
-    </form>
   );
 }

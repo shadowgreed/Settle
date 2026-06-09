@@ -1,7 +1,8 @@
 /* ─────────────────────────────────────────────────────────────────────────────
    InTheaters — browse-first poster grid for the "In Theaters" tab.
    Dark / cinematic palette to match the rest of Settle (bg #0a0a0a,
-   surface #1a1a1a, text #f5f5f5, gold accent #d9b04a).
+   surface #1a1a1a, text #f5f5f5, amber accent #EF9F27 — the app accent).
+   The area control lives in the shared AreaPicker component.
    ──────────────────────────────────────────────────────────────────────────── */
 
 .intheaters {
@@ -11,10 +12,12 @@
 /* ── Controls (search + area) ──────────────────────────────────────────────── */
 .intheaters-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: flex-start;
   margin: 0 0 14px;
 }
+.intheaters-controls--gate { justify-content: center; }
 
 .intheaters-search {
   position: relative;
@@ -28,7 +31,7 @@
 }
 
 .intheaters-search:focus-within {
-  border-color: rgba(217, 176, 74, 0.55);
+  border-color: rgba(239, 159, 39, 0.55);
 }
 
 .intheaters-search-icon {
@@ -53,6 +56,11 @@
 .intheaters-search-input::-webkit-search-cancel-button { display: none; }
 
 .intheaters-search-clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  min-height: 44px;
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.5);
@@ -62,96 +70,6 @@
   line-height: 1;
 }
 .intheaters-search-clear:hover { color: #f5f5f5; }
-
-/* Area chip */
-.intheaters-area {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 46%;
-  background: #1a1a1a;
-  border: 0.5px solid #2a2a2a;
-  border-radius: 10px;
-  color: rgba(255, 255, 255, 0.8);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 11px 12px;
-  cursor: pointer;
-}
-.intheaters-area:hover { border-color: rgba(217, 176, 74, 0.55); }
-.intheaters-area-icon { font-size: 12px; }
-.intheaters-area-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.intheaters-area-form {
-  flex: 1 1 100%;
-  background: #141414;
-  border: 0.5px solid #2a2a2a;
-  border-radius: 10px;
-  padding: 10px;
-}
-.intheaters-area-row { display: flex; gap: 8px; }
-.intheaters-area-input {
-  flex: 1 1 auto;
-  min-width: 0;
-  background: #0a0a0a;
-  border: 0.5px solid #2a2a2a;
-  border-radius: 8px;
-  color: #f5f5f5;
-  font-size: 16px; /* >=16px — prevents iOS Safari zoom-on-focus */
-  padding: 9px 11px;
-  outline: none;
-}
-.intheaters-area-input:focus { border-color: rgba(217, 176, 74, 0.55); }
-.intheaters-area-go {
-  flex: 0 0 auto;
-  background: #d9b04a;
-  color: #0c0c0c;
-  border: none;
-  border-radius: 8px;
-  font-size: 13.5px;
-  font-weight: 700;
-  padding: 9px 16px;
-  cursor: pointer;
-}
-.intheaters-area-go:disabled { opacity: 0.5; cursor: default; }
-.intheaters-area-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 9px;
-}
-.intheaters-area-gps {
-  background: none;
-  border: none;
-  color: #d9b04a;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  padding: 0;
-}
-.intheaters-area-cancel {
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.5);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
-.intheaters-area-error {
-  margin: 8px 0 0;
-  color: #ff8080;
-  font-size: 12.5px;
-}
-
-@media (max-width: 380px) {
-  .intheaters-area-label { display: none; }
-  .intheaters-area { padding: 11px; }
-}
 
 /* ── Grid ──────────────────────────────────────────────────────────────────── */
 .intheaters-grid {
@@ -184,7 +102,7 @@
 }
 
 .intheaters-card-btn:focus-visible {
-  outline: 2px solid #d9b04a;
+  outline: 2px solid #EF9F27;
   outline-offset: 3px;
   border-radius: 12px;
 }
@@ -211,11 +129,12 @@
 .intheaters-card-btn:hover .intheaters-poster,
 .intheaters-card-btn:active .intheaters-poster {
   transform: translateY(-2px);
-  border-color: rgba(217, 176, 74, 0.55);
+  border-color: rgba(239, 159, 39, 0.55);
 }
 
-/* "Tickets" badge slides up on hover/focus — the affordance that this poster
-   is tappable straight to checkout, not just a thumbnail. */
+/* "Tickets" badge slides up on hover/focus (pointer devices) — a nice extra on
+   desktop. On touch there's no hover, so the persistent .intheaters-cta caption
+   below carries the affordance instead. */
 .intheaters-tickets {
   position: absolute;
   left: 0;
@@ -225,8 +144,8 @@
   font-size: 11.5px;
   font-weight: 700;
   text-align: center;
-  color: #0c0c0c;
-  background: #d9b04a;
+  color: #0a0a0a;
+  background: #EF9F27;
   transform: translateY(101%);
   transition: transform 0.18s ease;
 }
@@ -253,7 +172,28 @@
 .intheaters-meta {
   margin-top: 2px;
   font-size: 11.5px;
-  color: rgba(255, 255, 255, 0.45);
+  color: rgba(255, 255, 255, 0.6); /* >=4.5:1 on the dark bg */
+}
+
+/* Persistent tap cue (touch devices). Hidden where hover exists, since the
+   slide-up poster badge covers that case there. */
+.intheaters-cta {
+  margin-top: 4px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #EF9F27;
+}
+@media (hover: hover) {
+  .intheaters-cta { display: none; }
+}
+
+/* ── Reveal ────────────────────────────────────────────────────────────────── */
+.intheaters-grid--reveal .intheaters-card {
+  animation: intheaters-card-in 0.28s ease both;
+}
+@keyframes intheaters-card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* ── Empty / error ─────────────────────────────────────────────────────────── */
@@ -276,11 +216,12 @@
 }
 
 .intheaters-retry {
-  background: #d9b04a;
-  color: #0c0c0c;
+  background: #EF9F27;
+  color: #0a0a0a;
   border: none;
   border-radius: 10px;
-  padding: 9px 18px;
+  padding: 11px 18px;
+  min-height: 44px;
   font-size: 13.5px;
   font-weight: 700;
   cursor: pointer;
@@ -315,23 +256,24 @@
   .intheaters-skel,
   .intheaters-skel-line,
   .intheaters-poster,
-  .intheaters-tickets { animation: none; transition: none; }
+  .intheaters-tickets,
+  .intheaters-grid--reveal .intheaters-card { animation: none; transition: none; }
 }
 
-/* ── Status / progress / show-more ─────────────────────────────────────────── */
+/* ── Status / progress / more ──────────────────────────────────────────────── */
 .intheaters-status {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.4);
+  color: rgba(255, 255, 255, 0.55); /* lifted for AA at small size */
   margin: 0 2px 12px;
 }
-.intheaters-status strong { color: #d9b04a; font-weight: 700; }
+.intheaters-status strong { color: #EF9F27; font-weight: 700; }
 
 .intheaters-checking {
   font-size: 13px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.6);
   margin: 0 2px 12px;
 }
 
@@ -339,6 +281,7 @@
   display: block;
   width: 100%;
   margin-top: 18px;
+  min-height: 44px;
   background: #1a1a1a;
   border: 0.5px solid #2a2a2a;
   border-radius: 10px;
@@ -348,5 +291,12 @@
   padding: 13px;
   cursor: pointer;
 }
-.intheaters-more:hover { border-color: rgba(217, 176, 74, 0.55); }
+.intheaters-more:hover { border-color: rgba(239, 159, 39, 0.55); }
 .intheaters-more:disabled { opacity: 0.6; cursor: default; }
+
+.intheaters-end {
+  text-align: center;
+  margin: 18px 0 4px;
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.45);
+}

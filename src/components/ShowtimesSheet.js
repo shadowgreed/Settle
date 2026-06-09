@@ -3,10 +3,10 @@ import useFocusTrap from '../hooks/useFocusTrap';
 import {
   getShowtimes,
   ShowtimesServiceError,
-  invalidateShowtimesCache,
 } from '../services/showtimes';
 import { trackShowtimesOpened } from '../services/analytics';
 import { isNative, openExternal } from '../native/bridge';
+import AreaPicker from './AreaPicker';
 import LeaveForTickets from './LeaveForTickets';
 import './ShowtimesSheet.css';
 
@@ -24,9 +24,9 @@ import './ShowtimesSheet.css';
 // Showtime pills hand off to the purchase site: a native in-app browser on
 // the app, or (on web) a "leaving Settle" confirmation before a new tab.
 //
-// The LocationChanger header chip lets the user override the search
-// location at any time — primary recovery path when GPS fails (Safari)
-// or when the user wants to search a different area entirely.
+// The shared AreaPicker strip lets the user override the search location at
+// any time — primary recovery path when GPS fails (Safari) or when the user
+// wants to search a different area entirely.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_VISIBLE  = 3;
@@ -156,10 +156,13 @@ export default function ShowtimesSheet({
             GPS isn't producing usable results (Safari first-run, denied
             permission, wrong neighbourhood, etc.). */}
         {onLocationChange && (
-          <LocationChanger
-            userLocation={userLocation}
-            onChange={onLocationChange}
-          />
+          <div className="showtimes-area">
+            <AreaPicker
+              variant="strip"
+              userLocation={userLocation}
+              onChange={onLocationChange}
+            />
+          </div>
         )}
 
         <div className="showtimes-body">
@@ -244,139 +247,6 @@ export default function ShowtimesSheet({
           timeStr={leaveInfo.timeStr}
           onCancel={() => setLeaveInfo(null)}
         />
-      )}
-    </div>
-  );
-}
-
-// ── LocationChanger ──────────────────────────────────────────────────────────
-// Compact chip that surfaces the current search location plus a one-tap
-// editor. Always visible inside the sheet so users have an obvious recovery
-// path when GPS misbehaves (Safari) or results don't match their area.
-
-function LocationChanger({ userLocation, onChange }) {
-  const [editing,  setEditing]  = useState(false);
-  const [zipDraft, setZipDraft] = useState('');
-  const [busy,     setBusy]     = useState(false);
-  const [err,      setErr]      = useState('');
-
-  // Friendly label for the active location.
-  const label = useMemo(() => {
-    if (!userLocation) return 'Set location';
-    if (userLocation.source === 'gps') return 'Using your location';
-    if (userLocation.zip) return `Near ${userLocation.zip}`;
-    return 'Set location';
-  }, [userLocation]);
-
-  const openEditor = () => {
-    setZipDraft(userLocation?.zip || '');
-    setErr('');
-    setEditing(true);
-  };
-
-  const cancelEdit = () => {
-    setEditing(false);
-    setErr('');
-    setBusy(false);
-  };
-
-  const submitZip = async (e) => {
-    e?.preventDefault?.();
-    const trimmed = (zipDraft || '').trim();
-    if (!/^\d{5}$/.test(trimmed)) {
-      setErr('Enter a valid 5-digit ZIP.');
-      return;
-    }
-    setBusy(true);
-    setErr('');
-    try {
-      invalidateShowtimesCache();
-      await onChange({ mode: 'zip', zip: trimmed });
-      setEditing(false);
-    } catch (e) {
-      setErr(e?.message || 'Could not update location. Try again.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const useGps = async () => {
-    setBusy(true);
-    setErr('');
-    try {
-      invalidateShowtimesCache();
-      await onChange({ mode: 'gps' });
-      setEditing(false);
-    } catch (e) {
-      setErr(e?.message || 'Location unavailable. Use ZIP instead.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="showtimes-locchip">
-      {!editing && (
-        <button
-          type="button"
-          className="showtimes-locchip-button"
-          onClick={openEditor}
-          aria-label="Change search location"
-        >
-          <span className="showtimes-locchip-icon" aria-hidden="true">📍</span>
-          <span className="showtimes-locchip-label">{label}</span>
-          <span className="showtimes-locchip-edit" aria-hidden="true">Change</span>
-        </button>
-      )}
-
-      {editing && (
-        <form className="showtimes-locchip-form" onSubmit={submitZip}>
-          <div className="showtimes-locchip-row">
-            <input
-              type="text"
-              className="showtimes-locchip-input"
-              placeholder="ZIP code"
-              value={zipDraft}
-              onChange={(e) => setZipDraft(e.target.value.replace(/[^\d]/g, '').slice(0, 5))}
-              inputMode="numeric"
-              pattern="\d{5}"
-              maxLength={5}
-              autoFocus
-              aria-label="5-digit ZIP code"
-              autoComplete="postal-code"
-              disabled={busy}
-            />
-            <button
-              type="submit"
-              className="showtimes-locchip-go"
-              disabled={busy || zipDraft.length !== 5}
-            >
-              {busy ? '…' : 'Search'}
-            </button>
-          </div>
-          <div className="showtimes-locchip-actions">
-            <button
-              type="button"
-              className="showtimes-locchip-gps"
-              onClick={useGps}
-              disabled={busy}
-              aria-label="Use my current location"
-            >
-              <span aria-hidden="true">🎯</span> Use my location
-            </button>
-            <button
-              type="button"
-              className="showtimes-locchip-cancel"
-              onClick={cancelEdit}
-              disabled={busy}
-            >
-              Cancel
-            </button>
-          </div>
-          {err && (
-            <p className="showtimes-locchip-error" role="alert">{err}</p>
-          )}
-        </form>
       )}
     </div>
   );
