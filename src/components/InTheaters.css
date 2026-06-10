@@ -270,6 +270,7 @@
   margin: 0 2px 12px;
 }
 .intheaters-status strong { color: #EF9F27; font-weight: 700; }
+.intheaters-status-count { color: rgba(255, 255, 255, 0.55); }
 
 .intheaters-checking {
   font-size: 13px;

@@ -1,5 +1,6 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
+import { setSkipLeaveConfirm } from './ShowtimesSheet';
 import './LeaveForTickets.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -34,6 +35,14 @@ export default function LeaveForTickets({ url, movie, theater, timeStr, onCancel
   useFocusTrap(ref, true);
 
   const provider = providerLabel(url);
+  const [skipNext, setSkipNext] = useState(false);
+
+  // Persist the opt-out only when the user actually continues — ticking the
+  // box and then backing out shouldn't silence future confirmations.
+  const handleContinue = () => {
+    if (skipNext) setSkipLeaveConfirm();
+    onCancel();
+  };
 
   return (
     <div className="lft-overlay" onClick={onCancel}>
@@ -61,12 +70,21 @@ export default function LeaveForTickets({ url, movie, theater, timeStr, onCancel
           </div>
         </div>
 
+        <label className="lft-skip">
+          <input
+            type="checkbox"
+            checked={skipNext}
+            onChange={e => setSkipNext(e.target.checked)}
+          />
+          <span>Don't ask me again — go straight to checkout</span>
+        </label>
+
         <a
           className="lft-continue"
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          onClick={onCancel}
+          onClick={handleContinue}
         >
           Continue to {provider} ↗
         </a>

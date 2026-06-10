@@ -64,6 +64,12 @@ async function verifyPlaying(title, loc) {
   return 'none';
 }
 
+// Candidate pool order: best-rated first, popularity as the tiebreak.
+const rankNowPlaying = (list) =>
+  (list || [])
+    .filter(m => m.posterPath)
+    .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.popularity || 0) - (a.popularity || 0));
+
 export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSetLocation }) {
   const [movies,  setMovies]  = useState([]);   // rating-sorted candidate pool
   const [loading, setLoading] = useState(true); // now-playing fetch
@@ -88,34 +94,25 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
   };
 
   // ── Candidate pool (national now-playing, ranked best-first) ───────────────
-  const loadNowPlaying = () => {
+  // Used by both the mount effect and the error-state retry. `isCancelled`
+  // guards setState after unmount (always-false for the retry path).
+  const loadNowPlaying = (isCancelled = () => false) => {
     setLoading(true);
     setError(false);
     return tmdbService.getNowPlaying()
       .then(list => {
-        const ranked = (list || [])
-          .filter(m => m.posterPath)
-          .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.popularity || 0) - (a.popularity || 0));
-        setMovies(ranked);
+        if (isCancelled()) return;
+        setMovies(rankNowPlaying(list));
         setLoading(false);
       })
-      .catch(() => { setError(true); setLoading(false); });
+      .catch(() => { if (!isCancelled()) { setError(true); setLoading(false); } });
   };
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    tmdbService.getNowPlaying()
-      .then(list => {
-        if (cancelled) return;
-        const ranked = (list || [])
-          .filter(m => m.posterPath)
-          .sort((a, b) => (b.rating || 0) - (a.rating || 0) || (b.popularity || 0) - (a.popularity || 0));
-        setMovies(ranked);
-        setLoading(false);
-      })
-      .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
+    loadNowPlaying(() => cancelled);
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Restore a previously-used area on first mount so returning users skip the
@@ -279,13 +276,18 @@ export default function InTheaters({ onPickMovie, userLocation, defaultZip, onSe
 
       <div className="intheaters-status">
         Playing near <strong>{areaLabel}</strong>
+        {!stillWorking && showing.length > 0 && (
+          <span className="intheaters-status-count">
+            {' '}· {showing.length} film{showing.length === 1 ? '' : 's'}{moreToCheck ? '+' : ''}
+          </span>
+        )}
       </div>
 
       {error && !loading && (
         <div className="intheaters-empty">
           <div className="intheaters-empty-icon" aria-hidden="true">🎬</div>
           <p>Couldn't load what's playing. Check your connection and try again.</p>
-          <button type="button" className="intheaters-retry" onClick={loadNowPlaying}>Try again</button>
+          <button type="button" className="intheaters-retry" onClick={() => loadNowPlaying()}>Try again</button>
         </div>
       )}
 

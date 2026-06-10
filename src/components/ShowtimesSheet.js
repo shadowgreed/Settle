@@ -32,11 +32,23 @@ import './ShowtimesSheet.css';
 const DEFAULT_VISIBLE  = 3;
 const EXPANDED_VISIBLE = 10;
 
+// Users who tick "Don't ask me again" in the leaving-Settle dialog skip it on
+// future buys and go straight to checkout in a new tab.
+const SKIP_LEAVE_KEY = 'settle_skip_leave_confirm';
+
+export const shouldSkipLeaveConfirm = () => {
+  try { return localStorage.getItem(SKIP_LEAVE_KEY) === '1'; } catch { return false; }
+};
+export const setSkipLeaveConfirm = () => {
+  try { localStorage.setItem(SKIP_LEAVE_KEY, '1'); } catch {}
+};
+
 export default function ShowtimesSheet({
   result,
   userLocation,
   onClose,
   onLocationChange,        // ({ mode: 'gps' | 'zip', zip? }) => Promise<void>
+  onBuyIntent,             // fired once per sheet when the user taps a showtime
 }) {
   const sheetRef = useRef(null);
   useFocusTrap(sheetRef, true);
@@ -49,15 +61,25 @@ export default function ShowtimesSheet({
   // Web-only "leaving Settle" dialog payload — { url, movie, theater, timeStr }.
   // null when closed. On native we open the in-app browser directly instead.
   const [leaveInfo,     setLeaveInfo]     = useState(null);
+  // Buy-intent fires at most once per sheet open — tapping three showtimes for
+  // the same film is still one trip to the movies.
+  const intentSentRef = useRef(false);
 
   // Ticket hand-off. Native gets a true in-app browser (SFSafariViewController /
   // Custom Tab) — no awareness dialog, the user never actually leaves the app.
   // Web can only open a new tab (ticketing sites block iframing), so confirm
-  // first via LeaveForTickets.
+  // first via LeaveForTickets — unless the user opted out of the confirmation,
+  // in which case open directly (synchronous within the tap, so popup-safe).
   const handleBuy = (info) => {
     if (!info?.url) return;
+    if (!intentSentRef.current) {
+      intentSentRef.current = true;
+      try { onBuyIntent?.(); } catch {}
+    }
     if (isNative()) {
       openExternal(info.url);
+    } else if (shouldSkipLeaveConfirm()) {
+      window.open(info.url, '_blank', 'noopener,noreferrer');
     } else {
       setLeaveInfo(info);
     }

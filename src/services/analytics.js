@@ -163,7 +163,7 @@ export function trackDeepLinkOpened({ service, titleId, mode, surface }) {
     service,
     title_id: titleId,
     mode,
-    surface, // 'result_card' | 'cinema_mode'
+    surface, // 'result_card' | 'cinema_mode' | 'showtimes_sheet'
   });
 }
 

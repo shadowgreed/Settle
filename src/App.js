@@ -2993,6 +2993,19 @@ function App() {
           userLocation={userLocation}
           onClose={() => { setShowShowtimes(false); setTheaterMovie(null); }}
           onLocationChange={handleLocationChange}
+          onBuyIntent={() => {
+            // A showtime tap is the strongest intent signal in the app. Record
+            // it in watch history so the film feeds the rate → taste-profile
+            // loop and the next-day "how was it?" push — the same retention
+            // loop streaming picks already get.
+            trackDeepLinkOpened({
+              service: 'In Theaters',
+              titleId: theaterMovie.id,
+              mode,
+              surface: 'showtimes_sheet',
+            });
+            saveToHistory(theaterMovie);
+          }}
         />
       )}
 
