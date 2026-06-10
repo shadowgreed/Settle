@@ -1,0 +1,6 @@
+.brand-logo {
+  width: auto;
+  display: block;
+  user-select: none;
+  -webkit-user-drag: none;
+}

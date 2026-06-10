@@ -25,6 +25,7 @@ import PushOptIn from './components/PushOptIn';
 import Settings from './components/Settings';
 import ShowtimesSheet from './components/ShowtimesSheet';
 import InTheaters from './components/InTheaters';
+import BrandLogo from './components/BrandLogo';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -2782,8 +2783,7 @@ function App() {
     return (
       <div className="authgate">
         <div className="authgate-brand">
-          <span className="authgate-emoji" aria-hidden="true">🎬</span>
-          <span className="authgate-wordmark">SETTLE</span>
+          <BrandLogo className="authgate-logo" height={30} />
         </div>
         <div className="authgate-spinner" aria-label="Loading…" />
       </div>

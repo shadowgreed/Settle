@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { signInWithGoogle, sendMagicLink, completeMagicLinkSignIn } from '../services/auth';
 import { PrivacyBody, TermsBody } from './LegalContent';
 import useFocusTrap from '../hooks/useFocusTrap';
+import BrandLogo from './BrandLogo';
 import './AuthGate.css';
 
 export default function AuthGate() {
@@ -114,8 +115,7 @@ export default function AuthGate() {
     return (
       <div className="authgate">
         <div className="authgate-brand">
-          <span className="authgate-emoji" aria-hidden="true">🎬</span>
-          <span className="authgate-wordmark">SETTLE</span>
+          <BrandLogo className="authgate-logo" height={30} />
         </div>
         <div className="authgate-spinner" aria-label="Signing in…" />
       </div>
@@ -126,8 +126,7 @@ export default function AuthGate() {
     return (
       <div className="authgate">
         <div className="authgate-brand">
-          <span className="authgate-emoji" aria-hidden="true">🎬</span>
-          <span className="authgate-wordmark">SETTLE</span>
+          <BrandLogo className="authgate-logo" height={30} />
         </div>
         <div className="authgate-sent">
           <div className="authgate-sent-icon" aria-hidden="true">📬</div>
@@ -152,8 +151,7 @@ export default function AuthGate() {
     return (
       <div className="authgate">
         <div className="authgate-brand">
-          <span className="authgate-emoji" aria-hidden="true">🎬</span>
-          <span className="authgate-wordmark">SETTLE</span>
+          <BrandLogo className="authgate-logo" height={30} />
         </div>
         <p className="authgate-tagline">Confirm your email to finish signing in.</p>
 
@@ -197,8 +195,7 @@ export default function AuthGate() {
   return (
     <div className="authgate">
       <div className="authgate-brand">
-        <span className="authgate-emoji" aria-hidden="true">🎬</span>
-        <span className="authgate-wordmark">SETTLE</span>
+        <BrandLogo className="authgate-logo" height={30} />
       </div>
       <p className="authgate-tagline">Your picks, everywhere you go.</p>
 

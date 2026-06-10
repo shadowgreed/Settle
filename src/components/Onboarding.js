@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
+import BrandLogo from './BrandLogo';
 import './Onboarding.css';
 
 // 4×6 = 24 poster-palette color cells — heavily muted via CSS filter
@@ -156,7 +157,7 @@ export default function Onboarding({ onDone }) {
         {/* Slide 0 — Brand Reveal */}
         <div className="ob-slide" aria-label="Slide 1 of 4">
           <div className="ob-brand-wrap" key={`s0-${slide === 0 ? animKey : 0}`}>
-            <h1 className="ob-brand-name">Settle</h1>
+            <h1 className="ob-brand-name"><BrandLogo className="ob-brand-logo" height={null} alt="Settle" /></h1>
             <div className="ob-brand-rule" aria-hidden="true" />
             <p className="ob-brand-tagline">End the debate.</p>
           </div>

@@ -119,12 +119,14 @@
   text-align: center;
 }
 
+.ob-brand-logo { margin: 0 auto; height: clamp(46px, 13vw, 72px); }
+
 .ob-brand-name {
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-size: clamp(72px, 18vw, 110px);
   font-weight: 300;
   letter-spacing: 0.12em;
-  line-height: 1;
+  line-height: 0;
   color: #fff;
   margin: 0;
 
