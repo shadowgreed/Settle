@@ -1,0 +1,113 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   NudgeCard — shared re-engagement card above the mode tabs (saved-pick nudge
+   in solo, partner-saved nudge in couples). Same visual language as
+   NewReleasesCard: warm dark gradient, gold accent, dismiss at the edge.
+───────────────────────────────────────────────────────────────────────────── */
+
+.nudge-card {
+  display: flex;
+  align-items: stretch;
+  background: linear-gradient(135deg, #1a1610 0%, #0e0e0e 70%);
+  border: 0.5px solid rgba(201, 169, 110, 0.28);
+  border-radius: 12px;
+  margin: 0 0 14px;
+  overflow: hidden;
+  animation: nudge-slide-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes nudge-slide-in {
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.nudge-body {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px 10px 12px;
+  background: none;
+  border: none;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-height: 56px;
+  touch-action: manipulation;
+  transition: background 150ms;
+}
+.nudge-body:hover,
+.nudge-body:focus-visible {
+  background: rgba(201, 169, 110, 0.06);
+  outline: none;
+}
+
+.nudge-poster {
+  width: 34px;
+  height: 51px;
+  border-radius: 5px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: #1a1a1a;
+}
+
+.nudge-icon {
+  font-size: 18px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.nudge-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.nudge-headline {
+  font-size: 13px;
+  font-weight: 600;
+  color: #f5f5f5;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+}
+
+.nudge-sub {
+  font-size: 11px;
+  color: rgba(201, 169, 110, 0.85);
+  letter-spacing: 0.02em;
+}
+
+.nudge-arrow {
+  font-size: 16px;
+  color: rgba(201, 169, 110, 0.7);
+  flex-shrink: 0;
+  padding-right: 8px;
+}
+
+.nudge-dismiss {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-left: 0.5px solid rgba(201, 169, 110, 0.15);
+  color: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+  font-size: 14px;
+  width: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  transition: color 150ms, background 150ms;
+}
+.nudge-dismiss:hover,
+.nudge-dismiss:focus-visible {
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.04);
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nudge-card { animation: none; }
+}

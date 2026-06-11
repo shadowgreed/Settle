@@ -1658,6 +1658,22 @@ input[type="range"]::-moz-range-thumb {
   color: #f5f5f5;
 }
 
+/* Armed state — first tap turns the button into an explicit warning; the
+   second tap (within the window) actually erases. */
+.history-clear.history-clear-armed,
+.history-clear.history-clear-armed:hover {
+  border-color: rgba(255, 107, 107, 0.6);
+  color: #ff8080;
+  background: rgba(255, 107, 107, 0.08);
+  font-weight: 600;
+}
+
+/* Couple-match badge on watch-history entries */
+.history-couple-badge {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
 /* ── In Theaters mode ── */
 .mtab.on.theater-tab,
 .theater-tab.on {

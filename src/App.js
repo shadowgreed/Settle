@@ -26,6 +26,7 @@ import Settings from './components/Settings';
 import ShowtimesSheet from './components/ShowtimesSheet';
 import InTheaters from './components/InTheaters';
 import BrandLogo from './components/BrandLogo';
+import NudgeCard from './components/NudgeCard';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -269,6 +270,19 @@ function App() {
     } catch { return false; }
   });
 
+  // Per-mode retention nudges — saved-pick (solo) and partner-saved (couples).
+  // Same per-day dismissal contract as the new-releases card above.
+  const wasDismissedToday = (key) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      return localStorage.getItem(key) === today;
+    } catch { return false; }
+  };
+  const [savedNudgeDismissed,  setSavedNudgeDismissed]  =
+    useState(() => wasDismissedToday('settle_savednudge_dismissed'));
+  const [coupleNudgeDismissed, setCoupleNudgeDismissed] =
+    useState(() => wasDismissedToday('settle_couplenudge_dismissed'));
+
   // Push opt-in state (PM roadmap 3.1).
   // pickCount persists across sessions; the opt-in banner appears once
   // pickCount >= 3 AND the user hasn't seen the prompt before AND push is
@@ -383,6 +397,12 @@ function App() {
 
   // History panel tab — 'watched' | 'saved'
   const [historyTab, setHistoryTab] = useState('watched');
+  // Two-tap guard for the destructive Clear buttons — 'history' | 'saved' |
+  // null. First tap arms ("Tap again…"), second tap within ~3.5s executes;
+  // otherwise it quietly disarms. These wipes also overwrite the cloud copy,
+  // so a single accidental tap was unrecoverable.
+  const [confirmClear, setConfirmClear] = useState(null);
+  const confirmClearTimer = useRef(null);
 
   // ── Auth & cloud sync ──────────────────────────────────────────────────────
   // undefined = auth still initialising, null = signed out, object = signed in
@@ -1203,13 +1223,18 @@ function App() {
     }
   };
 
-  const handleNewReleasesDismiss = () => {
-    setNewReleasesDismissed(true);
+  // Shared "dismiss for today" — persists the day key so the card stays gone
+  // until tomorrow. Used by the new-releases card and both retention nudges.
+  const dismissForToday = (key, setter) => {
+    setter(true);
     try {
       const today = new Date().toISOString().slice(0, 10);
-      safeSet('settle_newrel_dismissed', today);
+      safeSet(key, today);
     } catch {}
   };
+
+  const handleNewReleasesDismiss = () =>
+    dismissForToday('settle_newrel_dismissed', setNewReleasesDismissed);
 
   // ── Push notifications opt-in (PM roadmap 3.1) ──────────────────────────
   // On mount + when the signed-in account changes, check whether this device
@@ -2663,6 +2688,21 @@ function App() {
     // handleVote already calls setRatingPopup(null) and setWatchLoopStep(null)
   };
 
+  // First tap arms the button, second tap (within the window) executes.
+  // Switching tabs or closing the panel re-renders with the timer running —
+  // the timeout disarms regardless, so a stale armed state can't linger.
+  const requestClear = (kind, action) => {
+    if (confirmClear === kind) {
+      clearTimeout(confirmClearTimer.current);
+      setConfirmClear(null);
+      action();
+      return;
+    }
+    setConfirmClear(kind);
+    clearTimeout(confirmClearTimer.current);
+    confirmClearTimer.current = setTimeout(() => setConfirmClear(null), 3500);
+  };
+
   const clearHistory = () => {
     setWatchHistory([]);
     // Use the same removal path everywhere (was directly calling
@@ -3021,17 +3061,66 @@ function App() {
         />
       )}
 
-      {/* "New in your genres" home card (PM roadmap 3.2). Solo mode only;
-          hidden silently when there's nothing new or the user dismissed it
-          today. Tap → seed top genres + fire a fresh pick. */}
-      {mode === 'solo' && newReleasesCount > 0 && !newReleasesDismissed && (
-        <NewReleasesCard
-          count={newReleasesCount}
-          genreNames={(topGenresByPlayer.solo || []).map(g => g.name)}
-          onTap={handleNewReleasesTap}
-          onDismiss={handleNewReleasesDismiss}
-        />
-      )}
+      {/* Per-mode retention nudges — at most ONE card shows at a time so the
+          home screen never stacks banners. Priority: a film the user (or
+          their partner) explicitly saved beats the generic new-releases
+          count, because it's a concrete "watch tonight" candidate. */}
+      {(() => {
+        // Solo: resurface the most recent saved pick — but not one saved
+        // today, which would just echo what the user did moments ago.
+        const savedCandidate = savedForLater[0];
+        const savedNudgeVisible =
+          mode === 'solo' && !savedNudgeDismissed && !!savedCandidate &&
+          (!savedCandidate.savedAt ||
+            savedCandidate.savedAt.slice(0, 10) !== new Date().toISOString().slice(0, 10));
+
+        // Couples: surface the partner's most recent saved pick — a built-in
+        // "watch together tonight" suggestion neither person has to make.
+        const partnerCandidate = partnerSaved[0];
+        const coupleNudgeVisible =
+          mode === 'couple' && !coupleNudgeDismissed && !!partnerUid && !!partnerCandidate;
+
+        if (savedNudgeVisible) {
+          return (
+            <NudgeCard
+              posterPath={savedCandidate.posterPath}
+              icon="★"
+              headline={`You saved ${savedCandidate.title}`}
+              sub="Watch it tonight?"
+              ctaAriaLabel={`Open your saved pick ${savedCandidate.title}`}
+              onTap={() => handleHistoryReplay(savedCandidate)}
+              onDismiss={() => dismissForToday('settle_savednudge_dismissed', setSavedNudgeDismissed)}
+            />
+          );
+        }
+        if (coupleNudgeVisible) {
+          return (
+            <NudgeCard
+              posterPath={partnerCandidate.posterPath}
+              icon="💑"
+              headline={`${(partnerName || 'Your partner').split(' ')[0]} saved ${partnerCandidate.title}`}
+              sub="Watch it together tonight?"
+              ctaAriaLabel={`Open ${partnerCandidate.title}, saved by ${partnerName || 'your partner'}`}
+              onTap={() => handleHistoryReplay(partnerCandidate)}
+              onDismiss={() => dismissForToday('settle_couplenudge_dismissed', setCoupleNudgeDismissed)}
+            />
+          );
+        }
+        // "New in your genres" home card (PM roadmap 3.2). Solo mode only;
+        // hidden silently when there's nothing new or the user dismissed it
+        // today. Tap → seed top genres + fire a fresh pick.
+        if (mode === 'solo' && newReleasesCount > 0 && !newReleasesDismissed) {
+          return (
+            <NewReleasesCard
+              count={newReleasesCount}
+              genreNames={(topGenresByPlayer.solo || []).map(g => g.name)}
+              onTap={handleNewReleasesTap}
+              onDismiss={handleNewReleasesDismiss}
+            />
+          );
+        }
+        return null;
+      })()}
 
       <div id="main-content" className="mode-tabs" role="group" aria-label="Mode" tabIndex={-1}>
         <button
@@ -3857,7 +3946,21 @@ function App() {
                             )}
                           </div>
                           <div className="history-info">
-                            <div className="history-entry-title">{entry.title}</div>
+                            <div className="history-entry-title">
+                              {entry.title}
+                              {/* Couple matches were stored but invisible — the
+                                  badge makes "we agreed on this one" scannable. */}
+                              {entry.coupleAgreed && (
+                                <span
+                                  className="history-couple-badge"
+                                  role="img"
+                                  aria-label="Matched together"
+                                  title="You matched on this together"
+                                >
+                                  💑
+                                </span>
+                              )}
+                            </div>
                             <div className="history-entry-meta">{entry.year} · {entry.type}</div>
                             <div className="history-entry-bottom">
                               <span className="history-service" style={{
@@ -3887,8 +3990,11 @@ function App() {
                         </button>
                       ))}
                     </div>
-                    <button className="history-clear" onClick={clearHistory}>
-                      Clear history
+                    <button
+                      className={`history-clear ${confirmClear === 'history' ? 'history-clear-armed' : ''}`}
+                      onClick={() => requestClear('history', clearHistory)}
+                    >
+                      {confirmClear === 'history' ? '⚠ Tap again to erase all history' : 'Clear history'}
                     </button>
                   </>
                 )}
@@ -3951,13 +4057,16 @@ function App() {
                       </button>
                     ))}
                   </div>
-                  <button className="history-clear" onClick={() => {
-                    setSavedForLater([]);
-                    localStorage.removeItem('settle-saved');
-                    // Authoritative overwrite (see clearHistory for rationale).
-                    flushAuthoritativeSync({ savedForLater: [] });
-                  }}>
-                    Clear saved
+                  <button
+                    className={`history-clear ${confirmClear === 'saved' ? 'history-clear-armed' : ''}`}
+                    onClick={() => requestClear('saved', () => {
+                      setSavedForLater([]);
+                      localStorage.removeItem('settle-saved');
+                      // Authoritative overwrite (see clearHistory for rationale).
+                      flushAuthoritativeSync({ savedForLater: [] });
+                    })}
+                  >
+                    {confirmClear === 'saved' ? '⚠ Tap again to remove all saved picks' : 'Clear saved'}
                   </button>
                 </>
               )
