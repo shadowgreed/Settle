@@ -27,6 +27,7 @@ import ShowtimesSheet from './components/ShowtimesSheet';
 import InTheaters from './components/InTheaters';
 import BrandLogo from './components/BrandLogo';
 import NudgeCard from './components/NudgeCard';
+import settleMark from './assets/settle-mark.png';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -2866,6 +2867,8 @@ function App() {
             </button>
           )}
         </div>
+        {/* Quiet brand anchor — the home screen never showed the mark before. */}
+        <img className="account-brand" src={settleMark} alt="" aria-hidden="true" draggable="false" />
         <div className="account-bar-right">
           {/* Couples streak — shown whenever the user has a >=2-night streak,
               regardless of current mode (PM roadmap 1.3). Tapping opens a

@@ -47,16 +47,36 @@ body {
 
 .app {
   padding: 2rem 1rem;
+  /* Installed-PWA mode draws edge-to-edge under the iOS status bar
+     (viewport-fit=cover + black-translucent) — keep content clear of the
+     clock/signal/battery on notched devices, identical elsewhere. */
+  padding-top: max(2rem, calc(env(safe-area-inset-top) + 10px));
   max-width: 680px;
   margin: 0 auto;
 }
 
 /* ── Account bar ─────────────────────────────────────────────────────────── */
 .account-bar {
+  position: relative; /* anchors the centered brand mark */
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
+}
+
+/* Centered "S" mark — quiet brand anchor on the home screen. Absolute so it
+   stays truly centered regardless of the side groups' widths; decorative,
+   so it never intercepts taps. */
+.account-brand {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  height: 20px;
+  width: auto;
+  opacity: 0.9;
+  pointer-events: none;
+  user-select: none;
 }
 
 /* User identity (avatar + name) lives in Settings now — the main page
@@ -2684,7 +2704,10 @@ input[type="range"]::-moz-range-thumb {
 
 /* ── Mobile responsiveness ── */
 @media (max-width: 480px) {
-  .app { padding: 1.25rem 0.875rem; }
+  .app {
+    padding: 1.25rem 0.875rem;
+    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 8px));
+  }
 
   /* Mode tabs wrap rather than compress to unreadable widths */
   .mode-tabs { gap: 5px; flex-wrap: wrap; }
@@ -2710,7 +2733,10 @@ input[type="range"]::-moz-range-thumb {
   .poster       { width: 90px; height: 135px; }
 
   /* Cinema overlay — poster scales down for narrow viewports */
-  .cinema-overlay { padding: 1.25rem; }
+  .cinema-overlay {
+    padding: 1.25rem;
+    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 8px));
+  }
   .cinema-poster,
   .cinema-poster-placeholder { width: 200px; height: 300px; }
   .cinema-title { font-size: 20px; max-width: 260px; }
@@ -2745,7 +2771,10 @@ input[type="range"]::-moz-range-thumb {
 
 /* ── 375px — iPhone SE / very narrow viewports ── */
 @media (max-width: 375px) {
-  .app { padding: 1rem 0.75rem; }
+  .app {
+    padding: 1rem 0.75rem;
+    padding-top: max(1rem, calc(env(safe-area-inset-top) + 8px));
+  }
 
   .mode-tabs { gap: 4px; }
   .mtab { padding: 7px 8px; font-size: 11px; }
@@ -2755,7 +2784,10 @@ input[type="range"]::-moz-range-thumb {
   .mood-emoji { font-size: 18px; }
 
   /* Cinema poster fits within 375 - 2×24px padding = 327px available */
-  .cinema-overlay { padding: 1rem; }
+  .cinema-overlay {
+    padding: 1rem;
+    padding-top: max(1rem, calc(env(safe-area-inset-top) + 8px));
+  }
   .cinema-poster,
   .cinema-poster-placeholder { width: 170px; height: 255px; }
   .cinema-title { font-size: 18px; max-width: 240px; }

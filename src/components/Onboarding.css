@@ -64,7 +64,8 @@
 /* ── Skip button ─────────────────────────────────────────────────────────── */
 .ob-skip {
   position: absolute;
-  top: 20px;
+  /* Clear the iOS status bar in installed-PWA mode (edge-to-edge rendering). */
+  top: max(20px, calc(env(safe-area-inset-top) + 8px));
   right: 24px;
   z-index: 10;
   background: rgba(255,255,255,0.08);
