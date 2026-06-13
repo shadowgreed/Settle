@@ -27,7 +27,7 @@ import ShowtimesSheet from './components/ShowtimesSheet';
 import InTheaters from './components/InTheaters';
 import BrandLogo from './components/BrandLogo';
 import NudgeCard from './components/NudgeCard';
-import settleMark from './assets/settle-mark.png';
+import settleWordmark from './assets/settle-wordmark.png';
 import StreakHistory from './components/StreakHistory';
 import TrailerOverlay from './components/TrailerOverlay';
 import { PrivacyBody, TermsBody } from './components/LegalContent';
@@ -220,8 +220,6 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showStreakHistory, setShowStreakHistory] = useState(false);
-  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
-  const signOutResetRef = useRef(null);
   const [showToast, setShowToast] = useState(false);
   const [playerNames, setPlayerNames] = useState(() => {
     try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'Him', p2: 'Her' }; }
@@ -510,12 +508,6 @@ function App() {
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Cancel the auto-revert timer for the sign-out confirm if the component
-  // unmounts before the user resolves it.
-  useEffect(() => () => {
-    if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
   }, []);
 
   // Clears every per-account localStorage key and resets in-memory state to
@@ -2838,11 +2830,22 @@ function App() {
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
-      {/* Account bar — left: history actions (watch + saved) · right: streak +
-          settings + sign-out. User identity lives in Settings; the main page
-          stays focused on the pick flow. */}
+      {/* Account bar — left: Settle wordmark · right: streak + history + saved + settings.
+          Sign-out lives inside Settings next to the account name. */}
       <div className="account-bar">
-        <div className="account-bar-left">
+        <img className="account-brand" src={settleWordmark} alt="Settle" draggable="false" />
+        <div className="account-bar-right">
+          {streakInfo ? (
+            <button
+              type="button"
+              className="account-stat account-streak"
+              onClick={() => setShowStreakHistory(true)}
+              title={`${streakInfo}-night streak — tap for details`}
+              aria-label={`${streakInfo}-night streak. Open streak history.`}
+            >
+              <span aria-hidden="true">🔥</span> {streakInfo}
+            </button>
+          ) : null}
           <button
             className="account-stat"
             onClick={() => { setShowHistory(true); setHistoryTab('watched'); }}
@@ -2866,76 +2869,17 @@ function App() {
               <span aria-hidden="true">★</span> {savedForLater.length}
             </button>
           )}
-        </div>
-        {/* Quiet brand anchor — the home screen never showed the mark before. */}
-        <img className="account-brand" src={settleMark} alt="" aria-hidden="true" draggable="false" />
-        <div className="account-bar-right">
-          {/* Couples streak — shown whenever the user has a >=2-night streak,
-              regardless of current mode (PM roadmap 1.3). Tapping opens a
-              7-day history modal so the streak feels like an investment, not
-              just a stat. Hidden silently for users with no couples activity
-              (streakInfo === null). */}
-          {streakInfo ? (
-            <button
-              type="button"
-              className="account-stat account-streak"
-              onClick={() => setShowStreakHistory(true)}
-              title={`${streakInfo}-night streak — tap for details`}
-              aria-label={`${streakInfo}-night streak. Open streak history.`}
-            >
-              <span aria-hidden="true">🔥</span> {streakInfo}
-            </button>
-          ) : null}
           <button
             className="account-settings-btn"
             onClick={() => setShowSettings(true)}
-            aria-label="Privacy and data settings"
-            title="Privacy & data"
+            aria-label="Settings"
+            title="Settings"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>
           </button>
-          {confirmingSignOut ? (
-            <>
-              <button
-                className="account-signout account-signout-confirm"
-                onClick={() => {
-                  if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
-                  setConfirmingSignOut(false);
-                  handleSignOut();
-                }}
-                aria-label="Confirm sign out"
-              >
-                Yes, sign out
-              </button>
-              <button
-                className="account-signout account-signout-cancel"
-                onClick={() => {
-                  if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
-                  setConfirmingSignOut(false);
-                }}
-                aria-label="Cancel sign out"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              className="account-signout"
-              onClick={() => {
-                setConfirmingSignOut(true);
-                if (signOutResetRef.current) clearTimeout(signOutResetRef.current);
-                // Auto-revert after 4 s so a forgotten confirm doesn't sit
-                // there exposed if the user wanders off.
-                signOutResetRef.current = setTimeout(() => setConfirmingSignOut(false), 4000);
-              }}
-              aria-label="Sign out"
-            >
-              Sign out
-            </button>
-          )}
         </div>
       </div>
 
@@ -2957,6 +2901,7 @@ function App() {
             />
           )}
           onClose={() => setShowSettings(false)}
+          onSignOut={handleSignOut}
           onWithdrawConsent={handleWithdrawConsent}
           onDeleteAccount={handleDeleteAccount}
           onSavePlayerNames={savePlayerName}

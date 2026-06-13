@@ -57,39 +57,19 @@ body {
 
 /* ── Account bar ─────────────────────────────────────────────────────────── */
 .account-bar {
-  position: relative; /* anchors the centered brand mark */
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 16px;
 }
 
-/* Centered "S" mark — quiet brand anchor on the home screen. Absolute so it
-   stays truly centered regardless of the side groups' widths; decorative,
-   so it never intercepts taps. */
+/* Full Settle wordmark on the far left. Amber transparent PNG. */
 .account-brand {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  height: 20px;
+  height: 22px;
   width: auto;
-  opacity: 0.9;
-  pointer-events: none;
+  flex-shrink: 0;
+  opacity: 0.92;
   user-select: none;
-}
-
-/* User identity (avatar + name) lives in Settings now — the main page
-   account bar is just for the saved-star count + streak + settings/sign-out
-   actions. */
-
-.account-bar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  /* Empty when the user has no saved picks — collapses naturally because
-     children are conditionally rendered. */
-  min-height: 28px;
 }
 
 .account-bar-right {
@@ -131,41 +111,6 @@ body {
   outline: none;
 }
 
-.account-signout {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 6px;
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 12px;
-  padding: 4px 10px;
-  cursor: pointer;
-  font-family: inherit;
-  flex-shrink: 0;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.account-signout:hover {
-  color: rgba(255, 255, 255, 0.75);
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-/* Two-stage sign-out confirm — shown after the user taps "Sign out" once.
-   "Yes, sign out" is intentionally amber-toned to draw the eye, and Cancel
-   is the visually-quieter neutral pill so the dangerous action isn't the
-   path of least resistance. Both auto-revert to "Sign out" after 4 s. */
-.account-signout.account-signout-confirm {
-  color: #f0c75a;
-  border-color: #6b4f1c;
-  background: rgba(107, 79, 28, 0.18);
-}
-.account-signout.account-signout-confirm:hover {
-  color: #ffd870;
-  border-color: #8a6826;
-  background: rgba(107, 79, 28, 0.32);
-}
-.account-signout.account-signout-cancel {
-  color: rgba(255, 255, 255, 0.65);
-}
 
 /* ── Empty state — no matches ────────────────────────────────────────────── */
 .nomatch-empty {

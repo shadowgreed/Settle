@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
 import './Settings.css';
 
@@ -32,6 +32,7 @@ export default function Settings({
   pushBusy,
   partnerLinkSlot,   // ReactNode — CoupleLink rendered by App.js
   onClose,
+  onSignOut,
   onWithdrawConsent,
   onDeleteAccount,
   onSavePlayerNames,
@@ -39,6 +40,26 @@ export default function Settings({
 }) {
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
+
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const signOutTimerRef = useRef(null);
+
+  const requestSignOut = useCallback(() => {
+    setConfirmingSignOut(true);
+    clearTimeout(signOutTimerRef.current);
+    signOutTimerRef.current = setTimeout(() => setConfirmingSignOut(false), 4000);
+  }, []);
+
+  const cancelSignOut = useCallback(() => {
+    clearTimeout(signOutTimerRef.current);
+    setConfirmingSignOut(false);
+  }, []);
+
+  const confirmSignOut = useCallback(() => {
+    clearTimeout(signOutTimerRef.current);
+    setConfirmingSignOut(false);
+    onSignOut?.();
+  }, [onSignOut]);
 
   // Per-flow stage so revoke errors don't leak into the delete UI.
   const [revokeStage, setRevokeStage] = useState(STAGE.IDLE);
@@ -159,6 +180,42 @@ export default function Settings({
                   </div>
                 )}
               </div>
+              {onSignOut && (
+                confirmingSignOut ? (
+                  <div className="settings-signout-confirm-row">
+                    <button
+                      type="button"
+                      className="settings-signout-confirm-yes"
+                      onClick={confirmSignOut}
+                      aria-label="Confirm sign out"
+                    >
+                      Sign out
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-signout-confirm-cancel"
+                      onClick={cancelSignOut}
+                      aria-label="Cancel sign out"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-signout-btn"
+                    onClick={requestSignOut}
+                    aria-label="Sign out"
+                    title="Sign out"
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                      <polyline points="16 17 21 12 16 7" />
+                      <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                  </button>
+                )
+              )}
             </div>
           </div>
 
