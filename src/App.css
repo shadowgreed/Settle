@@ -1115,13 +1115,15 @@ input[type="range"]::-moz-range-thumb {
 .p2-tab { color: #EC4899; }
 
 .p1-tab.active {
-  background: rgba(37, 99, 235, 0.08);
+  background: rgba(37, 99, 235, 0.14);
   border-color: #2563EB;
+  box-shadow: 0 0 14px rgba(37, 99, 235, 0.18);
 }
 
 .p2-tab.active {
-  background: rgba(236, 72, 153, 0.08);
+  background: rgba(236, 72, 153, 0.14);
   border-color: #EC4899;
+  box-shadow: 0 0 14px rgba(236, 72, 153, 0.18);
 }
 
 .player-tab-emoji { font-size: 16px; }
@@ -1164,8 +1166,16 @@ input[type="range"]::-moz-range-thumb {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.p1-panel { background: rgba(37, 99, 235, 0.03); }
-.p2-panel { background: rgba(236, 72, 153, 0.03); }
+/* The active player's hue carries into their panel so the page always
+   reads "two people" — the left edge tint matches the selected tab. */
+.p1-panel {
+  background: rgba(37, 99, 235, 0.05);
+  border-left: 2px solid rgba(37, 99, 235, 0.5);
+}
+.p2-panel {
+  background: rgba(236, 72, 153, 0.05);
+  border-left: 2px solid rgba(236, 72, 153, 0.5);
+}
 
 /* ── Mood buttons ── */
 .mood-grid {
@@ -1320,18 +1330,37 @@ input[type="range"]::-moz-range-thumb {
 }
 
 /* ── Shared zone ── */
+/* "Both want" — the emotional payoff of the tab. The violet is the literal
+   blend of P1's blue and P2's pink; the glow makes the agreement feel like
+   a moment instead of another settings row. */
 .shared-zone {
   margin-bottom: 1rem;
   padding: 12px 14px;
   border-radius: 10px;
-  background: rgba(83, 74, 183, 0.06);
-  border: 0.5px solid rgba(83, 74, 183, 0.2);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.10) 0%, rgba(83, 74, 183, 0.12) 50%, rgba(236, 72, 153, 0.10) 100%);
+  border: 0.5px solid rgba(131, 110, 255, 0.45);
+  box-shadow: 0 0 22px rgba(83, 74, 183, 0.16);
   animation: sharedZoneIn 0.35s ease;
 }
 
 @keyframes sharedZoneIn {
   from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Chips pop in with a slight stagger — the overlap "arrives". */
+@keyframes sharedChipIn {
+  from { opacity: 0; transform: scale(0.85); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.shared-chip:nth-child(2) { animation-delay: 60ms; }
+.shared-chip:nth-child(3) { animation-delay: 120ms; }
+.shared-chip:nth-child(4) { animation-delay: 180ms; }
+.shared-chip:nth-child(5) { animation-delay: 240ms; }
+.shared-chip:nth-child(n+6) { animation-delay: 300ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shared-zone, .shared-chip { animation: none; }
 }
 
 .shared-zone-label {
@@ -1353,10 +1382,11 @@ input[type="range"]::-moz-range-thumb {
   font-size: 12px;
   padding: 4px 12px;
   border-radius: 20px;
-  background: rgba(83, 74, 183, 0.15);
-  color: #a89ff5;
-  border: 0.5px solid rgba(83, 74, 183, 0.3);
+  background: rgba(83, 74, 183, 0.18);
+  color: #b5adf7;
+  border: 0.5px solid rgba(131, 110, 255, 0.4);
   font-weight: 500;
+  animation: sharedChipIn 0.3s ease backwards;
 }
 
 .footer-row {
@@ -2969,21 +2999,52 @@ input[type="range"]::-moz-range-thumb {
    replaced by the live two-device Secret Vote.) */
 
 /* Start a couple session button */
+/* Hero CTA for couple mode's headline feature (live two-phone session).
+   App-amber gradient — the old Netflix-red ghost tint read as another
+   brand's tertiary button. */
 .start-session-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   margin-top: 10px;
+  min-height: 56px;
   padding: 12px 16px;
-  border-radius: 10px;
-  border: 0.5px solid rgba(229,9,20,0.4);
-  background: rgba(229,9,20,0.1);
-  color: #fff;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 12px;
+  border: none;
+  background: linear-gradient(135deg, #f4ad45 0%, #e08b1f 100%);
+  color: #0a0a0a;
+  text-align: left;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.15s;
+  box-shadow: 0 4px 18px rgba(239, 159, 39, 0.22);
+  transition: filter 0.15s, transform 0.12s, box-shadow 0.15s;
 }
-.start-session-btn:hover { background: rgba(229,9,20,0.18); }
+.start-session-btn:hover {
+  filter: brightness(1.05);
+  box-shadow: 0 5px 22px rgba(239, 159, 39, 0.3);
+}
+.start-session-btn:active { transform: scale(0.99); }
+
+.start-session-icon { font-size: 22px; flex-shrink: 0; }
+.start-session-text {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.start-session-headline {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+.start-session-sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(10, 10, 10, 0.65);
+}
+.start-session-arrow { font-size: 18px; font-weight: 700; flex-shrink: 0; }
 
 .start-session-error {
   margin: 8px 0 0;
@@ -3145,11 +3206,12 @@ input[type="range"]::-moz-range-thumb {
   margin: 0 0 10px;
   padding: 9px 14px;
   background: linear-gradient(135deg, #1a1200, #0f0a00);
-  border: 0.5px solid rgba(239, 159, 39, 0.3);
+  border: 0.5px solid rgba(239, 159, 39, 0.45);
   border-radius: 10px;
   font-size: 13px;
   font-weight: 500;
-  color: #c8943a;
+  color: #e0a849; /* lifted for contrast + warmth */
+  box-shadow: 0 0 16px rgba(239, 159, 39, 0.12);
   animation: fadeInUp 0.3s ease;
 }
 

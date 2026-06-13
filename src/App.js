@@ -3286,7 +3286,7 @@ function App() {
                 aria-selected={activePlayer === 'p1'}
                 aria-label={`Select ${playerNames.p1}`}
               >
-                <span className="player-tab-emoji" aria-hidden="true">⚽</span>
+                <span className="player-tab-emoji" aria-hidden="true">🍿</span>
                 {editingPlayer === 'p1' ? null : (
                   <span className="player-name">{playerNames.p1}</span>
                 )}
@@ -3327,7 +3327,7 @@ function App() {
                 aria-selected={activePlayer === 'p2'}
                 aria-label={`Select ${playerNames.p2}`}
               >
-                <span className="player-tab-emoji" aria-hidden="true">💅</span>
+                <span className="player-tab-emoji" aria-hidden="true">🎬</span>
                 {editingPlayer === 'p2' ? null : (
                   <span className="player-name">{playerNames.p2}</span>
                 )}
@@ -3422,14 +3422,22 @@ function App() {
             </div>
           )}
 
+          {/* Hero CTA — the live two-phone session is couple mode's headline
+              feature, so it gets the most confident treatment on the tab. */}
           <button
             className="start-session-btn"
             onClick={partnerUid ? handleStartSession : () => setShowSessionIntro(true)}
           >
-            <span aria-hidden="true">🎬</span>{' '}
-            {partnerUid
-              ? `Start a couple session with ${(partnerName || 'your partner').split(' ')[0]}`
-              : 'Couple session — watch on two phones'}
+            <span className="start-session-icon" aria-hidden="true">💑</span>
+            <span className="start-session-text">
+              <span className="start-session-headline">Pick together — live</span>
+              <span className="start-session-sub">
+                {partnerUid
+                  ? `You and ${(partnerName || 'your partner').split(' ')[0]}, each on your own phone`
+                  : 'Watch on two phones — yours and theirs'}
+              </span>
+            </span>
+            <span className="start-session-arrow" aria-hidden="true">→</span>
           </button>
           {sessionError && (
             <p className="start-session-error" role="alert">{sessionError}</p>
