@@ -46,21 +46,44 @@ body {
 }
 
 .app {
-  padding: 2rem 1rem;
-  /* Installed-PWA mode draws edge-to-edge under the iOS status bar
-     (viewport-fit=cover + black-translucent) — keep content clear of the
-     clock/signal/battery on notched devices, identical elsewhere. */
-  padding-top: max(2rem, calc(env(safe-area-inset-top) + 10px));
+  padding: 0 1rem 2rem;
   max-width: 680px;
   margin: 0 auto;
 }
 
 /* ── Account bar ─────────────────────────────────────────────────────────── */
+/* ── Sticky nav bar (Netflix-style) ─────────────────────────────────────── */
 .account-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Bleed the background flush to the viewport edges (negative of .app's
+     horizontal padding) so the glass effect spans full width on mobile. */
+  margin-left: -1rem;
+  margin-right: -1rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  /* Top padding absorbs the iOS status-bar safe area; bottom gives the
+     row breathing room before the content below. */
+  padding-top: max(calc(env(safe-area-inset-top) + 10px), 18px);
+  padding-bottom: 12px;
   margin-bottom: 16px;
+  /* At rest: transparent so it reads as part of the page. */
+  background: transparent;
+  transition: background 280ms ease, backdrop-filter 280ms ease,
+              -webkit-backdrop-filter 280ms ease, box-shadow 280ms ease;
+}
+
+/* Scrolled state — frosted glass appears once the user moves past the fold. */
+.account-bar.scrolled {
+  background: rgba(10, 10, 10, 0.82);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06),
+              0 4px 24px rgba(0, 0, 0, 0.45);
 }
 
 /* Full Settle wordmark on the far left. Amber transparent PNG. */
@@ -2680,8 +2703,13 @@ input[type="range"]::-moz-range-thumb {
 /* ── Mobile responsiveness ── */
 @media (max-width: 480px) {
   .app {
-    padding: 1.25rem 0.875rem;
-    padding-top: max(1.25rem, calc(env(safe-area-inset-top) + 8px));
+    padding: 0 0.875rem 1.25rem;
+  }
+  .account-bar {
+    margin-left: -0.875rem;
+    margin-right: -0.875rem;
+    padding-left: 0.875rem;
+    padding-right: 0.875rem;
   }
 
   /* Mode tabs wrap rather than compress to unreadable widths */
@@ -2747,8 +2775,13 @@ input[type="range"]::-moz-range-thumb {
 /* ── 375px — iPhone SE / very narrow viewports ── */
 @media (max-width: 375px) {
   .app {
-    padding: 1rem 0.75rem;
-    padding-top: max(1rem, calc(env(safe-area-inset-top) + 8px));
+    padding: 0 0.75rem 1rem;
+  }
+  .account-bar {
+    margin-left: -0.75rem;
+    margin-right: -0.75rem;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
   }
 
   .mode-tabs { gap: 4px; }

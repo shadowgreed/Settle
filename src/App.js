@@ -217,6 +217,7 @@ function App() {
     try { return JSON.parse(localStorage.getItem('streaming-history')) || []; }
     catch { return []; }
   });
+  const [navScrolled, setNavScrolled] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showStreakHistory, setShowStreakHistory] = useState(false);
@@ -508,6 +509,14 @@ function App() {
       unsub();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sticky nav — add .scrolled class once the user moves past the fold so
+  // the frosted-glass background fades in without covering content at rest.
+  useEffect(() => {
+    const onScroll = () => setNavScrolled(window.scrollY > 10);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
   // Clears every per-account localStorage key and resets in-memory state to
@@ -2830,9 +2839,10 @@ function App() {
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
 
-      {/* Account bar — left: Settle wordmark · right: streak + history + saved + settings.
-          Sign-out lives inside Settings next to the account name. */}
-      <div className="account-bar">
+      {/* Account bar — sticky nav (Netflix-style). Transparent at rest;
+          frosted-glass once the user scrolls past 10 px. Sign-out lives
+          inside Settings next to the account name. */}
+      <div className={`account-bar${navScrolled ? ' scrolled' : ''}`}>
         <img className="account-brand" src={settleWordmark} alt="Settle" draggable="false" />
         <div className="account-bar-right">
           {streakInfo ? (
