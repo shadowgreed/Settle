@@ -9,6 +9,12 @@
 // that drains the quota.
 const ALLOWED_PREFIXES = ['search', 'title/'];
 
+// Only the three query params the client actually sends. Forwarding arbitrary
+// query params turns the proxy into an open relay that can trigger unintended
+// Watchmode API behaviour (parameter pollution, quota draining on endpoints we
+// don't use, etc.). Everything else is silently dropped.
+const ALLOWED_PARAMS = new Set(['search_field', 'search_value', 'regions']);
+
 const { enforceRateLimit } = require('../lib/rateLimit');
 
 module.exports = async function handler(req, res) {
@@ -39,7 +45,7 @@ module.exports = async function handler(req, res) {
   url.searchParams.set('apiKey', process.env.WATCHMODE_KEY);
 
   for (const [key, value] of Object.entries(queryParams)) {
-    url.searchParams.set(key, value);
+    if (ALLOWED_PARAMS.has(key)) url.searchParams.set(key, String(value).slice(0, 200));
   }
 
   try {

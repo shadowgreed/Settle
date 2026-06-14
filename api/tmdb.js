@@ -18,6 +18,11 @@ module.exports = async function handler(req, res) {
 
   const { _p: tmdbPath = '', ...queryParams } = req.query;
 
+  // Reject traversal sequences before the URL constructor normalises them —
+  // `movie/123/../../other` passes a startsWith check but resolves elsewhere.
+  if (tmdbPath.includes('..')) {
+    return res.status(403).json({ error: 'Endpoint not allowed' });
+  }
   if (!ALLOWED_PREFIXES.some(prefix => tmdbPath.startsWith(prefix))) {
     return res.status(403).json({ error: 'Endpoint not allowed' });
   }

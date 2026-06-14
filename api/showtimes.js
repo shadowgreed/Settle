@@ -45,7 +45,11 @@ function isAllowedOrigin(origin) {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   try {
     const host = new URL(origin).hostname;
-    return host === 'vercel.app' || host.endsWith('.vercel.app');
+    // Allow Settle's own Vercel preview deploys (settle-*.vercel.app) but NOT
+    // arbitrary Vercel projects — any Vercel user could otherwise reach this
+    // paid SerpAPI endpoint cross-origin. The project slug always starts with
+    // "settle" in preview URLs (e.g. settle-git-fix-abc-shadowgreed.vercel.app).
+    return /^settle[a-z0-9-]*\.vercel\.app$/.test(host);
   } catch {
     return false;
   }

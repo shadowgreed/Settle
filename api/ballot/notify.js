@@ -94,16 +94,15 @@ module.exports = async function handler(req, res) {
   let profiles;
   try { profiles = await listProfiles(); } catch { profiles = []; }
   const partnerProfile = profiles.find(p => p.uid === partnerUid);
-  if (!partnerProfile?.subs?.length) {
-    return res.status(200).json({ ok: true, skipped: 'no_subscription' });
-  }
 
   // AUTHORISATION: only a real partner may push this user. The recipient's
   // profile records *their* linked partner (partnerUid, written on every app
   // open). We require it to equal the authenticated sender. Without this, any
   // signed-in user who learned another uid could spam push notifications.
-  if (partnerProfile.partnerUid !== uid) {
-    return res.status(200).json({ ok: true, skipped: 'not_linked' });
+  // Both the "no subscription" and "not linked" cases return the same response
+  // to prevent callers from inferring whether a given uid has push subscriptions.
+  if (!partnerProfile?.subs?.length || partnerProfile.partnerUid !== uid) {
+    return res.status(200).json({ ok: true, skipped: 'not_delivered' });
   }
 
   const msgFn = MESSAGES[eventType];

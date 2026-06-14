@@ -74,10 +74,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // ZERO_RESULTS, INVALID_REQUEST, etc — propagate without retry value.
+    // ZERO_RESULTS, INVALID_REQUEST, etc — propagate status without leaking
+    // Google's raw error_message (can contain quota/key diagnostics).
     return res.status(404).json({
       error: data.status || 'No geocoding result',
-      message: data.error_message || null,
     });
   } catch (err) {
     console.error('[Geocode proxy]', err.message);
