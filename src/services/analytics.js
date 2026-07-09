@@ -242,3 +242,45 @@ export function trackPartnerUnlinked() {
 export function trackAccountDeleteStarted() {
   track('account_delete_started');
 }
+
+// ── Result card + Watch History events (July 2026 handoff spec) ──────────────
+
+/** Fired when "Watching this" is tapped — the win condition. */
+export function trackPickAccepted({ tmdbId, mode, matchedMoods, service }) {
+  track('pick_accepted', { tmdb_id: tmdbId, mode, matched_moods: matchedMoods, service });
+}
+
+/** Fired when "Try another" is tapped. */
+export function trackPickRejected({ tmdbId, rejectionCountThisSession }) {
+  track('pick_rejected', { tmdb_id: tmdbId, rejection_count_this_session: rejectionCountThisSession });
+}
+
+/** Fired on the "I've seen this — don't pick it again" veto. */
+export function trackPickMarkedSeen({ tmdbId }) {
+  track('pick_marked_seen', { tmdb_id: tmdbId });
+}
+
+/** Fired when the synopsis "more" toggle expands (not on collapse). */
+export function trackResultSynopsisExpanded({ tmdbId }) {
+  track('result_synopsis_expanded', { tmdb_id: tmdbId });
+}
+
+/** Fired on every History row rating change (row thumbs or menu). */
+export function trackHistoryItemRated({ tmdbId, rating, source }) {
+  track('history_item_rated', { tmdb_id: tmdbId, rating, source }); // rating: 'up'|'down'|'cleared', source: 'row'|'menu'
+}
+
+/** Fired when the "Rate N more" nudge banner is tapped. */
+export function trackHistoryRateNudgeTapped({ unratedCount }) {
+  track('history_rate_nudge_tapped', { unrated_count: unratedCount });
+}
+
+/** Fired when "More like this" is tapped from a History row. */
+export function trackMoreLikeThisTapped({ seedTmdbId, resultFound }) {
+  track('more_like_this_tapped', { seed_tmdb_id: seedTmdbId, result_found: resultFound });
+}
+
+/** Fired when history is cleared via the header overflow menu. */
+export function trackHistoryCleared({ itemCount }) {
+  track('history_cleared', { item_count: itemCount });
+}

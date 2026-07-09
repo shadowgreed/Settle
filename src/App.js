@@ -13,6 +13,7 @@ import {
   trackModeSelected, trackCoupleFlowSelected, trackPartnerRenamed,
   trackRatingStepSelected, trackMatchCountShown, trackCtaTapped, trackZeroMatchesShown,
   trackPartnerUnlinked,
+  trackPickAccepted, trackPickRejected, trackPickMarkedSeen, trackResultSynopsisExpanded,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -288,7 +289,18 @@ function App() {
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [activePlayer, setActivePlayer] = useState('p1');
   const [showAllGenres, setShowAllGenres] = useState(false);
-  const [pickReason, setPickReason] = useState(null);
+  const [pickChips, setPickChips] = useState([]);
+  // Synopsis clamp (spec §2.3) — descRef measures actual overflow after the
+  // 3-line clamp so the "more" toggle only appears when text genuinely
+  // overflows (not a character-count guess). Re-measured on every new result,
+  // never re-measured on expand/collapse itself (see the effect below).
+  const descRef = useRef(null);
+  const [synopsisExpanded, setSynopsisExpanded] = useState(false);
+  const [synopsisOverflows, setSynopsisOverflows] = useState(false);
+  // Forces the metadata line (specifically its "ends by" time) to recompute
+  // every 60s rather than freezing at fetch time — the value itself is never
+  // read, its only job is to trigger the re-render (spec §2.4).
+  const [, setMetaTick] = useState(0);
   const [tasteProfile, setTasteProfile] = useState(() => {
     try { return JSON.parse(localStorage.getItem('streaming-taste-profile')) || { solo: {}, p1: {}, p2: {} }; }
     catch { return { solo: {}, p1: {}, p2: {} }; }
@@ -600,7 +612,7 @@ function App() {
     setTasteProfile({ solo: {}, p1: {}, p2: {} });
     setPlayerNames({ p1: 'You', p2: 'Partner' });
     setResult(null);
-    setPickReason(null);
+    setPickChips([]);
     setHasSearched(false);
     setPartnerUid(null);
     setPartnerName(null);
@@ -928,6 +940,28 @@ function App() {
     return () => { cancelled = true; };
   }, [result, replayResult, cinemaSource]);
 
+  // Synopsis clamp overflow check (spec §2.3) — measured once per new result,
+  // right after the clamped layout paints. Deliberately NOT re-run when
+  // synopsisExpanded changes (expanding removes the clamp, which would make
+  // scrollHeight === clientHeight and wrongly hide the "less" toggle).
+  useEffect(() => {
+    setSynopsisExpanded(false);
+    const raf = requestAnimationFrame(() => {
+      const el = descRef.current;
+      if (el) setSynopsisOverflows(el.scrollHeight > el.clientHeight + 1);
+    });
+    return () => cancelAnimationFrame(raf);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [result]);
+
+  // Re-render every 60s while a result is showing so its "ends by" time
+  // never freezes on a card left open (spec §2.4).
+  useEffect(() => {
+    if (!result) return;
+    const interval = setInterval(() => setMetaTick(t => t + 1), 60000);
+    return () => clearInterval(interval);
+  }, [result]);
+
   // `isRetry` flag avoids reading state from a closure (which would be stale
   // because this function is called from a [] -deps effect on mount). Instead
   // we pass an explicit "already retried" signal so the second failure surfaces
@@ -1015,50 +1049,91 @@ function App() {
     return moodIds.every(id => selectedGenres[player]?.includes(id));
   };
 
-  const generatePickReason = (picked, activeGenreIds, isHiddenGems, currentMode) => {
+  // Match-reason CHIPS (replaces the old single-string .pick-reason banner).
+  // One chip per satisfied filter instead of one collapsed sentence — mood/
+  // era matches (MOODS already carries its own emoji for both, so no special
+  // "era" branch is needed), a service-confirmation chip, and format/rating
+  // chips only when the user tightened them from the defaults (both formats /
+  // minRating 6 = untouched, so no chip).
+  //
+  // Couples mode attributes each mood chip to whichever person(s) actually
+  // picked it, using couplePair.a/b + playerNames — both already computed in
+  // this same component for the compat/shared-zone UI, so no new state.
+  const buildMatchChips = (picked, activeGenreIds, isHiddenGems, currentMode) => {
     if (isHiddenGems) {
-      return `💎 Hidden gem — high quality`;
+      return [{ key: 'hidden-gem', icon: '💎', label: 'Hidden gem', kind: 'solo' }];
     }
-
     if (currentMode === 'theater') {
-      return `🎟️ Currently in US theaters`;
+      return [{ key: 'theater', icon: '🎟️', label: 'In US theaters', kind: 'solo' }];
     }
 
-    // Find which active moods match this result.
-    // Use `every` on the selection check so a mood only qualifies if the user
-    // explicitly activated it (all its IDs are present) — not just because
-    // one shared genre ID (e.g. Drama=18 appears in both Emotional and
-    // Thoughtful per the canonical map) causes a false match against a mood
-    // the user never selected. Drama alone → Emotional only; Drama +
-    // Documentary → Thoughtful (and Emotional, since Drama still satisfies it).
-    const activeMoodLabels = MOODS
-      .filter(mood =>
+    const chips = [];
+
+    if (currentMode === 'couple') {
+      // Same `every`/`some` matching rule as the old solo logic (a mood only
+      // qualifies if the user fully activated it AND the result actually
+      // carries at least one of its genre ids).
+      const p1Moods = MOODS.filter(m =>
+        m.ids.every(id => couplePair.a.includes(id)) && m.ids.some(id => picked.genres.includes(id))
+      );
+      const p2Moods = MOODS.filter(m =>
+        m.ids.every(id => couplePair.b.includes(id)) && m.ids.some(id => picked.genres.includes(id))
+      );
+      const p2Labels = new Set(p2Moods.map(m => m.label));
+      const p1Labels = new Set(p1Moods.map(m => m.label));
+
+      p1Moods.forEach(m => {
+        if (p2Labels.has(m.label)) {
+          chips.push({ key: `shared-${m.label}`, icon: m.emoji, label: m.label, kind: 'shared' });
+        } else {
+          chips.push({ key: `p1-${m.label}`, icon: m.emoji, label: `${playerNames.p1}: ${m.label}`, kind: 'p1' });
+        }
+      });
+      p2Moods.forEach(m => {
+        if (!p1Labels.has(m.label)) {
+          chips.push({ key: `p2-${m.label}`, icon: m.emoji, label: `${playerNames.p2}: ${m.label}`, kind: 'p2' });
+        }
+      });
+    } else {
+      const activeMoods = MOODS.filter(mood =>
         mood.ids.every(id => activeGenreIds.includes(id)) &&
         mood.ids.some(id => picked.genres.includes(id))
-      )
-      .map(m => m.label)
-      .slice(0, 2);
+      );
+      activeMoods.forEach(m => chips.push({ key: m.label, icon: m.emoji, label: m.label, kind: 'solo' }));
 
-    // Fall back to genre names if no mood match. O(1) lookup via the
-    // memoised genreById Map (was .find() inside .map() = O(n²)).
-    const matchedGenreNames = picked.genres
-      .filter(id => activeGenreIds.includes(id))
-      .map(id => genreById.get(id)?.name)
-      .filter(Boolean)
-      .slice(0, 2);
-
-    const label = activeMoodLabels.length > 0
-      ? activeMoodLabels.join(' & ')
-      : matchedGenreNames.join(' & ');
-
-    if (label && currentMode === 'couple') {
-      return `Picked because you both like ${label}`;
-    }
-    if (label) {
-      return `Matches your ${label} mood`;
+      // Fall back to matched genre names if no mood match (mirrors the old
+      // generatePickReason fallback). O(1) lookup via the memoised genreById.
+      if (chips.length === 0) {
+        picked.genres
+          .filter(id => activeGenreIds.includes(id))
+          .map(id => genreById.get(id)?.name)
+          .filter(Boolean)
+          .slice(0, 2)
+          .forEach(name => chips.push({ key: name, icon: null, label: name, kind: 'solo' }));
+      }
     }
 
-    return `Top pick from your filters · ${picked.votes} ratings`;
+    if (picked.service) {
+      chips.push({ key: 'service', icon: null, label: `On your ${picked.service}`, kind: 'service' });
+    }
+
+    if (selectedFormats.length === 1) {
+      chips.push({
+        key: 'format', icon: null,
+        label: selectedFormats[0] === 'Movie' ? 'Movies only' : 'Series only',
+        kind: 'solo',
+      });
+    }
+    if (minRating > 6) {
+      const step = RATING_STEPS.find(s => s.value === minRating);
+      if (step) chips.push({ key: 'rating', icon: null, label: step.label, kind: 'solo' });
+    }
+
+    if (chips.length === 0) {
+      chips.push({ key: 'fallback', icon: null, label: `Top pick from your filters · ${picked.votes} ratings`, kind: 'solo' });
+    }
+
+    return chips;
   };
 
   // ── Memoised derived values ───────────────────────────────────────────────
@@ -2016,6 +2091,7 @@ function App() {
       if (consent) safeSet('streaming-seen', JSON.stringify(updated));
       return updated;
     });
+    trackPickMarkedSeen({ tmdbId: id });
     setTryAnotherCount(c => c + 1);
     pickContent(false);
   };
@@ -2336,7 +2412,7 @@ function App() {
     setNoMoodSelected(false);
     setLoading(true);
     setResult(null);
-    setPickReason(null);
+    setPickChips([]);
     setFetchError(false);
     setFetchErrorType(null);
 
@@ -2636,10 +2712,10 @@ function App() {
       }
       if (!isCurrent()) return;
       setResult(picked);
-      setPickReason(
+      setPickChips(
         coinFlip
-          ? '🎲 Chosen by fate — no algorithm, pure chance'
-          : generatePickReason(picked, activeGenresForFetch, hiddenGems, mode)
+          ? [{ key: 'coin-flip', icon: '🎲', label: 'Chosen by fate — no algorithm', kind: 'solo' }]
+          : buildMatchChips(picked, activeGenresForFetch, hiddenGems, mode)
       );
       trackPickGenerated({
         service:     picked.service,
@@ -2907,7 +2983,7 @@ function App() {
 
   // Format runtime for the pick-card metadata row (P2.2):
   //   movies → "1h 42min"  /  "45min"  /  "2h"
-  //   series → "8 episodes · ~45min each"  /  "8 episodes"  /  "~45min each"
+  //   series → "8 episodes · ~45 min/ep"  /  "8 episodes"  /  "~45 min/ep"
   // Returns null if neither dataset is available — the meta line skips it.
   const formatRuntimePiece = (type, info) => {
     if (!info) return null;
@@ -2925,23 +3001,43 @@ function App() {
       bits.push(`${info.episodes} episode${info.episodes === 1 ? '' : 's'}`);
     }
     if (Number.isFinite(info.avgEpisodeMin) && info.avgEpisodeMin > 0) {
-      bits.push(`~${info.avgEpisodeMin}min each`);
+      bits.push(`~${info.avgEpisodeMin} min/ep`);
     }
     return bits.length > 0 ? bits.join(' · ') : null;
   };
 
-  // Builds the unified meta line per PM spec 2.2:
-  //   "2023 · Movie · 1h 42min · ★ 8.2"
-  //   "2023 · Series · 8 episodes · ~45min each · ★ 8.2"
-  // Pieces fall off gracefully if their data isn't loaded yet.
+  // End-time for movies only (spec §2.4) — "now + runtime", rounded UP to the
+  // next 5 minutes, locale-aware 12/24h via toLocaleTimeString. Series omit
+  // this entirely (per-episode runtime makes an end-time ambiguous — binge
+  // vs. one episode). `metaTick` (below) forces this to recompute every 60s
+  // so a card left open doesn't freeze on a stale end-time from fetch time.
+  const formatEndTime = (runtimeMin) => {
+    if (!Number.isFinite(runtimeMin) || runtimeMin <= 0) return null;
+    const FIVE_MIN_MS = 5 * 60000;
+    const endMs = Date.now() + runtimeMin * 60000;
+    const rounded = Math.ceil(endMs / FIVE_MIN_MS) * FIVE_MIN_MS;
+    return new Date(rounded).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  };
+
+  // Builds the unified meta line per PM spec 2.2, updated per the result-card
+  // handoff spec §2.4/§4.3:
+  //   "2023 · Movie · 1h 42min · ends by 11:55 PM · TMDB 8.2"
+  //   "2023 · Series · 8 episodes · ~45 min/ep · TMDB 8.2"
+  // Pieces fall off gracefully if their data isn't loaded yet. The score
+  // reads as plain "TMDB {n}" text rather than a star glyph — the star is
+  // reserved for the user's own rating elsewhere (History row), not TMDB's.
   const formatMetaLine = (item, info) => {
     const parts = [];
     if (item.year)  parts.push(item.year);
     if (item.type)  parts.push(item.type);
     const runtimePiece = formatRuntimePiece(item.type, info);
     if (runtimePiece) parts.push(runtimePiece);
+    if (item.type === 'Movie') {
+      const endTime = formatEndTime(info?.runtimeMin);
+      if (endTime) parts.push(`ends by ${endTime}`);
+    }
     if (Number.isFinite(parseFloat(item.rating)) && item.rating > 0) {
-      parts.push(`★ ${item.rating}`);
+      parts.push(`TMDB ${item.rating}`);
     }
     return parts.join(' · ');
   };
@@ -4035,19 +4131,42 @@ function App() {
                   <div
                     className="svc-badge"
                     style={{
-                      background: `${getServiceColor(result.service)}22`,
-                      color: getServiceColor(result.service)
+                      background: `${getServiceColor(result.service)}33`,
+                      color: getServiceColor(result.service),
+                      borderColor: `${getServiceColor(result.service)}66`,
                     }}
                   >
                     {result.service}
                   </div>
                 )}
               </div>
+              {/* Match-reason chips (spec §2.1) — sits directly under the
+                  title/metadata, above the genre tags and synopsis. Capped
+                  at 5 chips + a "+N more" pill as a lightweight stand-in for
+                  literal 2-row DOM measurement — keeps the same bounded,
+                  non-sprawling result without a ResizeObserver. */}
+              {pickChips.length > 0 && (
+                <div className="match-chips">
+                  {pickChips.slice(0, 5).map(chip => (
+                    <span key={chip.key} className={`match-chip match-chip-${chip.kind}`}>
+                      {chip.icon && <span aria-hidden="true">{chip.icon} </span>}
+                      {chip.label}
+                      {chip.kind === 'service' && <span className="match-chip-check" aria-hidden="true"> ✓</span>}
+                    </span>
+                  ))}
+                  {pickChips.length > 5 && (
+                    <span className="match-chip match-chip-more">+{pickChips.length - 5} more</span>
+                  )}
+                </div>
+              )}
               <div className="pills">
-                {result.genres.slice(0, 3).map(genreId => {
+                {result.genres.slice(0, 3).map((genreId, i) => {
                   const genre = genreById.get(genreId);
                   return genre && (
-                    <span key={genreId} className="pill">{genre.name}</span>
+                    <React.Fragment key={genreId}>
+                      {i > 0 && <span className="pill-sep" aria-hidden="true"> · </span>}
+                      <span className="pill">{genre.name}</span>
+                    </React.Fragment>
                   );
                 })}
               </div>
@@ -4062,27 +4181,30 @@ function App() {
                   </span>
                 </div>
               )}
-              {pickReason && (
-                <div className="pick-reason">{pickReason}</div>
+              <div ref={descRef} className={`desc${synopsisExpanded ? ' desc-expanded' : ''}`}>
+                {result.description}
+              </div>
+              {synopsisOverflows && (
+                <button
+                  type="button"
+                  className="desc-toggle"
+                  onClick={() => {
+                    const next = !synopsisExpanded;
+                    setSynopsisExpanded(next);
+                    if (next) trackResultSynopsisExpanded({ tmdbId: result.id });
+                  }}
+                  aria-expanded={synopsisExpanded}
+                >
+                  {synopsisExpanded ? 'less' : 'more'}
+                </button>
               )}
-              <div className="desc">{result.description}</div>
               <div className="act-row">
-                {coupleSession ? (
-                  // During a session only the initiator drives re-picks (the
-                  // partner waits for the new broadcast).
-                  sessionRole === 'initiator' && (
-                    <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); handleSessionTryAnother(); }}>
-                      Try another
-                    </button>
-                  )
-                ) : (
-                  <button className="act" onClick={() => { setTryAnotherCount(c => c + 1); pickContent(false); }}>
-                    Try another
-                  </button>
-                )}
+                {/* Primary — the win condition, full-width and unmistakable
+                    (spec §2.5). Couples' Secret Vote is the mode's analogous
+                    primary action, so it gets the same treatment. */}
                 {mode === 'couple' ? (
                   <button
-                    className="act primary ballot-trigger"
+                    className="act-primary"
                     onClick={openBallot}
                     title={partnerUid
                       ? `Vote on this pick — it appears live on ${(partnerName || 'your partner').split(' ')[0]}'s phone`
@@ -4091,40 +4213,84 @@ function App() {
                     <span aria-hidden="true">🗳️</span> Secret Vote
                   </button>
                 ) : (
-                  <button className="act primary" onClick={() => { setTryAnotherCount(0); setCinemaSource('pick'); setCinemaMode(true); saveToHistory(result); }}>
+                  <button
+                    className="act-primary"
+                    onClick={() => {
+                      const matchedMoods = pickChips
+                        .filter(c => ['solo', 'p1', 'p2', 'shared'].includes(c.kind))
+                        .map(c => c.label);
+                      trackPickAccepted({ tmdbId: result.id, mode, matchedMoods, service: result.service });
+                      setTryAnotherCount(0);
+                      setCinemaSource('pick');
+                      setCinemaMode(true);
+                      saveToHistory(result);
+                    }}
+                  >
                     Watching this <span aria-hidden="true">✓</span>
                   </button>
                 )}
-                <button
-                  className={`act save-btn ${isSaved(result) ? 'saved' : ''}`}
-                  onClick={() => toggleSaveForLater(result)}
-                  disabled={!isSaved(result) && savedForLater.length >= 20}
-                  aria-label={
-                    isSaved(result)
-                      ? 'Remove from saved'
-                      : savedForLater.length >= 20
-                        ? 'Saved list is full — remove a pick to save another'
-                        : 'Save for later'
-                  }
-                  aria-pressed={isSaved(result)}
-                  title={
-                    !isSaved(result) && savedForLater.length >= 20
-                      ? 'Saved list is full (20 max)'
-                      : undefined
-                  }
-                >
-                  {isSaved(result) ? '★' : '☆'}
-                </button>
-                <button
-                  className="act share-btn"
-                  onClick={() => handleShare(result)}
-                  aria-label="Share this pick"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-                    <line x1="22" y1="2" x2="11" y2="13" />
-                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                  </svg>
-                </button>
+                {/* Secondary — equal thirds, every control carries a visible
+                    text label (spec §2.5: "no bare icons"). */}
+                <div className="act-secondary-row">
+                  {coupleSession ? (
+                    // During a session only the initiator drives re-picks (the
+                    // partner waits for the new broadcast).
+                    sessionRole === 'initiator' && (
+                      <button
+                        className="act"
+                        onClick={() => {
+                          trackPickRejected({ tmdbId: result.id, rejectionCountThisSession: tryAnotherCount + 1 });
+                          setTryAnotherCount(c => c + 1);
+                          handleSessionTryAnother();
+                        }}
+                      >
+                        Try another
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      className="act"
+                      onClick={() => {
+                        trackPickRejected({ tmdbId: result.id, rejectionCountThisSession: tryAnotherCount + 1 });
+                        setTryAnotherCount(c => c + 1);
+                        pickContent(false);
+                      }}
+                    >
+                      Try another
+                    </button>
+                  )}
+                  <button
+                    className={`act save-btn ${isSaved(result) ? 'saved' : ''}`}
+                    onClick={() => toggleSaveForLater(result)}
+                    disabled={!isSaved(result) && savedForLater.length >= 20}
+                    aria-label={
+                      isSaved(result)
+                        ? 'Remove from saved'
+                        : savedForLater.length >= 20
+                          ? 'Saved list is full — remove a pick to save another'
+                          : 'Save for later'
+                    }
+                    aria-pressed={isSaved(result)}
+                    title={
+                      !isSaved(result) && savedForLater.length >= 20
+                        ? 'Saved list is full (20 max)'
+                        : undefined
+                    }
+                  >
+                    <span aria-hidden="true">🔖</span> {isSaved(result) ? 'Saved' : 'Save'}
+                  </button>
+                  <button
+                    className="act share-btn"
+                    onClick={() => handleShare(result)}
+                    aria-label="Share this pick"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+                      <line x1="22" y1="2" x2="11" y2="13" />
+                      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                    </svg>
+                    Share
+                  </button>
+                </div>
               </div>
               {/* Pre-watch veto — quieter than "Try another" because it
                   permanently bans the title from future picks. */}
