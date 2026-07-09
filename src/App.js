@@ -1162,7 +1162,7 @@ function App() {
   // liveMatchCount untouched (see getMatchCount's comment) — the summary line
   // just keeps showing the last known number instead of flashing to zero.
   //
-  // Mirrors showCtaBar's own condition (computed later, after the render's
+  // Mirrors showPickForm's own condition (computed later, after the render's
   // auth-guard early returns, so it can't be referenced here directly) — the
   // bar and this fetch must only be active on the same screens. Genre source
   // is `activeGenres` — the SAME memo pickContent itself searches with (solo's
@@ -2957,15 +2957,16 @@ function App() {
   }
   if (!user) return <AuthGate />;
 
-  // The sticky CTA bar (and its reserved bottom padding) only renders where
-  // there's an active pick-form to submit — not in theater mode, not while a
-  // couple session already has the picker running automatically, and — now
-  // that Couples has a fork — not on the fork screen or the live-flow
-  // compose/sent screens (spec §3.1: solo always, couples quick-pick only).
-  const showCtaBar = !coupleSession && mode !== 'theater' && (mode !== 'couple' || coupleFlow === 'quick');
+  // The filter sections (Format/Rating/Content Rating/Services) and the
+  // sticky CTA bar only render where there's an active pick-form to submit —
+  // not in theater mode, not while a couple session already has the picker
+  // running automatically, and — now that Couples has a fork — not on the
+  // fork screen or the live-flow compose/sent screens (spec §3.1: solo
+  // always, couples quick-pick only).
+  const showPickForm = !coupleSession && mode !== 'theater' && (mode !== 'couple' || coupleFlow === 'quick');
 
   return (
-    <div className={`app${showCtaBar ? ' app-cta-padded' : ''}`}>
+    <div className={`app${showPickForm ? ' app-cta-padded' : ''}`}>
       {/* Skip link — visually hidden until focused. Lets keyboard users
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -3693,7 +3694,7 @@ function App() {
         />
       )}
 
-      {mode !== 'theater' && (
+      {showPickForm && (
       <div className="row2">
         <div className="fcard">
           <div className="label" id="format-label">Format</div>
@@ -3737,7 +3738,7 @@ function App() {
       </div>
       )}
 
-      {mode !== 'theater' && (
+      {showPickForm && (
         <div className="section">
           <div className="label" id="cert-label">Content Rating</div>
           <div className="cert-row" role="radiogroup" aria-labelledby="cert-label">
@@ -3769,7 +3770,7 @@ function App() {
       {/* Runtime filter removed in P2.2 — users now see runtime on the pick
           card metadata row and decide in context, not pre-filter. */}
 
-      {mode !== 'theater' && (
+      {showPickForm && (
         <div className="section">
           <div className="label" id="services-label">Your Services</div>
           {/* Horizontal scroll, never wraps — fixes the orphaned last pill
@@ -3797,7 +3798,7 @@ function App() {
         </div>
       )}
 
-      {mode !== 'theater' && <div className="divider" />}
+      {showPickForm && <div className="divider" />}
 
       {/* Note: we intentionally don't surface a "X titles available" count here.
           Users shouldn't be primed by the inventory size of their filters —
@@ -3810,7 +3811,7 @@ function App() {
           come from the shared result card's "Try another") and in theater
           mode. Reachable from any scroll position; `.app-cta-padded` above
           reserves the matching bottom space so it never covers the footer. */}
-      {showCtaBar && (
+      {showPickForm && (
         <div className="cta-bar">
           <div className="cta-bar-inner">
             <div className={`cta-bar-summary${zeroMatches ? ' cta-bar-zero' : ''}`}>
