@@ -1,4 +1,4 @@
-import { pickLabel } from './timeOfDay';
+import { pickLabel, timeOfDay } from './timeOfDay';
 
 const SERVICE_COLORS = {
   'Netflix':      '#E50914',
@@ -233,10 +233,18 @@ export async function generateShareCard({ result, mode, playerNames }) {
   // ── Mode pill ─────────────────────────────────────────────────────────
   // Time-of-day-aware so a share generated at 9am doesn't say
   // "Tonight's Pick". Theater stays fixed since it labels the surface,
-  // not the time.
+  // not the time. Couple mode names the pair directly (using the bucket
+  // from timeOfDay() rather than pickLabel(), which bakes in "Our") so
+  // playerNames — previously received but unused here — actually surfaces.
+  const timeLabel = {
+    morning:   'Morning Pick',
+    afternoon: 'Afternoon Pick',
+    evening:   'Evening Pick',
+    tonight:   'Pick Tonight',
+  }[timeOfDay()];
   const modeText =
     mode === 'theater' ? '🎟️  In Theaters'
-    : mode === 'couple' ? `💑  ${pickLabel('couple')}`
+    : mode === 'couple' ? `💑  ${playerNames?.p1 || 'You'} & ${playerNames?.p2 || 'Partner'}'s ${timeLabel}`
     : `🎬  ${pickLabel('solo')}`;
 
   ctx.font = '600 22px system-ui, -apple-system, sans-serif';

@@ -5,8 +5,8 @@
 //
 // Buckets:
 //    5 am – 12 pm  →  morning
-//   12 pm –  6 pm  →  afternoon
-//    6 pm –  9 pm  →  evening
+//   12 pm –  5 pm  →  afternoon
+//    5 pm –  9 pm  →  evening
 //    9 pm –  5 am  →  tonight
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -18,8 +18,8 @@
 export function timeOfDay(hour) {
   const h = typeof hour === 'number' ? hour : new Date().getHours();
   if (h >= 5  && h < 12) return 'morning';
-  if (h >= 12 && h < 18) return 'afternoon';
-  if (h >= 18 && h < 21) return 'evening';
+  if (h >= 12 && h < 17) return 'afternoon';
+  if (h >= 17 && h < 21) return 'evening';
   return 'tonight';
 }
 

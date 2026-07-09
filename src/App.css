@@ -1833,6 +1833,8 @@ button.sequel-badge {
   touch-action: manipulation;
 }
 .history-menu-item:hover { background: #232323; }
+.history-menu-item:disabled { color: #666; cursor: not-allowed; }
+.history-menu-item:disabled:hover { background: none; }
 
 /* Clear confirmation (spec §4.4) — same inline-block idiom used throughout
    this session's Settings work, not a separate overlay. */
@@ -2295,8 +2297,8 @@ button.sequel-badge {
 .cinema-stamp {
   position: absolute;
   top: 38px;
-  left: -38px;
-  right: -38px;
+  left: -22px;
+  width: 60%;
   background: #EF9F27;
   color: #0a0a0a;
   font-size: 13px;

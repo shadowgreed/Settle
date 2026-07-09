@@ -15,6 +15,7 @@ import {
   trackPartnerUnlinked,
   trackPickAccepted, trackPickRejected, trackPickMarkedSeen, trackResultSynopsisExpanded,
   trackHistoryItemRated, trackHistoryRateNudgeTapped, trackHistoryCleared,
+  trackMoreLikeThisTapped,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -487,6 +488,27 @@ function App() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const historyMenuRef = useRef(null);
 
+  // Per-row "More like this" overflow menu (spec §4.6) — second use of the
+  // header's ⋮ menu pattern. Only one row menu can be open at a time, so a
+  // single key (not a ref map) is enough; keyed the same way as the row's
+  // scroll-target id so it stays unique across repeat-watched titles.
+  const [openRowMenu, setOpenRowMenu] = useState(null);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === 'undefined' || navigator.onLine
+  );
+  const [showNoSimilarToast, setShowNoSimilarToast] = useState(false);
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
   // Close the ⋮ menu on an outside click (it has no backdrop of its own).
   useEffect(() => {
     if (!showHistoryMenu) return;
@@ -499,11 +521,23 @@ function App() {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [showHistoryMenu]);
 
+  // Row menus are rendered in a list rather than behind one fixed ref, so a
+  // class check stands in for the header menu's single-ref containment test.
+  useEffect(() => {
+    if (!openRowMenu) return;
+    const onDocClick = (e) => {
+      if (!e.target.closest('.history-row-menu-wrap')) setOpenRowMenu(null);
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [openRowMenu]);
+
   // Reset menu/confirm state whenever the sheet closes or the tab switches —
   // a stale "Clear saved?" confirm shouldn't survive into the Watched tab.
   useEffect(() => {
     setShowHistoryMenu(false);
     setShowClearConfirm(false);
+    setOpenRowMenu(null);
   }, [showHistory, historyTab]);
 
   // ── Auth & cloud sync ──────────────────────────────────────────────────────
@@ -2974,6 +3008,67 @@ function App() {
     trackHistoryItemRated({ tmdbId: entryId, rating: 'cleared', source: 'row' });
   };
 
+  // "More like this" (spec §4.6) — seeds the result card with a TMDB
+  // recommendation for `entry` instead of running a fresh discover query.
+  // Mirrors the tail end of pickContent()'s success path (result, chips,
+  // pick count, recent-picks dedupe) so the card behind the sheet renders
+  // identically to an organic pick. Falls back to a normal pickContent()
+  // call — with a toast — when no recommendation clears the user's
+  // service filter, per the spec's explicit empty-state instruction.
+  const handleMoreLikeThis = async (entry) => {
+    setOpenRowMenu(null);
+    setShowHistory(false);
+    setLoading(true);
+    setResult(null);
+    setPickChips([]);
+    setFetchError(false);
+    setFetchErrorType(null);
+
+    const myGen = ++pickGenerationRef.current;
+    const isCurrent = () => myGen === pickGenerationRef.current;
+
+    let similar = [];
+    try {
+      similar = await tmdbService.getSimilarTitles(
+        entry.id,
+        entry.type === 'Movie' ? 'movie' : 'tv',
+        selectedServices
+      );
+    } catch (e) {
+      console.error('getSimilarTitles failed:', e);
+    }
+    if (!isCurrent()) return;
+
+    trackMoreLikeThisTapped({ seedTmdbId: entry.id, resultFound: similar.length > 0 });
+
+    if (similar.length === 0) {
+      setLoading(false);
+      setShowNoSimilarToast(true);
+      setTimeout(() => setShowNoSimilarToast(false), 2800);
+      await pickContent();
+      return;
+    }
+
+    const picked = similar[Math.floor(Math.random() * similar.length)];
+    setResult(picked);
+    setPickChips([
+      { key: 'more-like-this', icon: '✨', label: `Because you watched ${entry.title}`, kind: 'solo' },
+    ]);
+    setMatchCount(similar.length);
+    setPickCount(prev => {
+      const next = prev + 1;
+      try { localStorage.setItem('settle_pick_count', String(next)); } catch {}
+      return next;
+    });
+    setRecentPicks(prev => {
+      const updated = [...prev.filter(id => id !== picked.id), picked.id].slice(-100);
+      if (consent) safeSet('streaming-seen', JSON.stringify(updated));
+      return updated;
+    });
+    setLoading(false);
+    setHasSearched(true);
+  };
+
   // ── Watch loop handlers ───────────────────────────────────────────────────
 
   // Step 1 confirmed — they watched it. Advance to the rating step.
@@ -4414,6 +4509,10 @@ function App() {
         <div className="toast">✓ Added to your watch history</div>
       )}
 
+      {showNoSimilarToast && (
+        <div className="toast">No similar titles on your services — here's a fresh pick</div>
+      )}
+
       {/* History panel */}
       {showHistory && (
         <div className="history-overlay" onClick={() => setShowHistory(false)}>
@@ -4653,6 +4752,44 @@ function App() {
                                 </button>
                               </div>
                             )}
+                            {/* "More like this" (spec §4.6) — hidden for
+                                down-rated titles (a bad match shouldn't seed
+                                more of the same) and while offline, since the
+                                lookup needs a live TMDB call. */}
+                            {entry.rated !== 'down' && (
+                              <div className="history-row-menu-wrap history-menu-wrap">
+                                <button
+                                  type="button"
+                                  className="history-menu-btn"
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    const key = `${entry.id}-${entry.watchedAt}`;
+                                    setOpenRowMenu(openRowMenu === key ? null : key);
+                                  }}
+                                  aria-label={`More options for ${entry.title}`}
+                                  aria-haspopup="true"
+                                  aria-expanded={openRowMenu === `${entry.id}-${entry.watchedAt}`}
+                                >
+                                  <span aria-hidden="true">⋮</span>
+                                </button>
+                                {openRowMenu === `${entry.id}-${entry.watchedAt}` && (
+                                  <div className="history-menu" role="menu">
+                                    <button
+                                      type="button"
+                                      className="history-menu-item"
+                                      role="menuitem"
+                                      disabled={!isOnline}
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        handleMoreLikeThis(entry);
+                                      }}
+                                    >
+                                      {isOnline ? '✨ More like this' : '✨ More like this (offline)'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </button>
                       ))}
@@ -4868,6 +5005,7 @@ function App() {
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{ background: getServiceColor(cinemaItem.service) }}
+                    aria-label={`Open ${cinemaItem.title} on ${cinemaItem.service}`}
                     onClick={() => trackDeepLinkOpened({
                       service: cinemaItem.service,
                       titleId: cinemaItem.id,

@@ -486,6 +486,56 @@ class TMDBService {
     });
   }
 
+  // "More like this" (Watch History spec §4.5) — seeds recommendations from
+  // a title the user watched, filtered down to titles available on one of
+  // their currently-selected services. TMDB's recommendations endpoint
+  // doesn't carry provider data, so each candidate's own watch/providers is
+  // checked individually — fired in PARALLEL (not sequential) so a single
+  // tap doesn't wait on up to 20 round trips; the list is naturally short
+  // (page 1 only), so this is a burst, not a sustained load. Stops at the
+  // first `maxResults` available matches, in the recommendations' own order.
+  //
+  // Content-rating (certification) filtering is deliberately skipped here —
+  // the watch/providers endpoint carries no certification data, and a
+  // further per-title fetch would slow down what's a secondary feature for
+  // comparatively little benefit. Scoped simplification, same tolerance
+  // already accepted for getMatchCount's estimate above.
+  async getSimilarTitles(id, type, services = [], maxResults = 5) {
+    if (!Array.isArray(services) || services.length === 0) return [];
+    const providerIds = new Set(services.map(s => PROVIDER_IDS[s]).filter(Boolean));
+    if (providerIds.size === 0) return [];
+
+    const endpoint = type === 'tv' ? 'tv' : 'movie';
+    let candidates;
+    try {
+      const res = await this.api.get(`/${endpoint}/${id}/recommendations`, { params: { page: 1 } });
+      candidates = (res.data?.results || []).slice(0, 20);
+    } catch (e) {
+      console.warn('[TMDB] getSimilarTitles recommendations failed:', e.message);
+      return [];
+    }
+    if (candidates.length === 0) return [];
+
+    const providerChecks = await Promise.allSettled(
+      candidates.map(item => this.api.get(`/${endpoint}/${item.id}/watch/providers`))
+    );
+
+    const idToServiceName = Object.fromEntries(
+      Object.entries(PROVIDER_IDS).map(([name, pid]) => [pid, name])
+    );
+
+    const found = [];
+    for (let i = 0; i < candidates.length && found.length < maxResults; i++) {
+      const check = providerChecks[i];
+      if (check.status !== 'fulfilled') continue;
+      const flatrate = check.value.data?.results?.US?.flatrate || [];
+      const match = flatrate.find(p => providerIds.has(p.provider_id));
+      if (!match) continue;
+      found.push(this.normalizeContent(candidates[i], endpoint, idToServiceName[match.provider_id] || services[0]));
+    }
+    return found;
+  }
+
   // Fetch the best YouTube trailer for a title.
   //
   // Returns a video object { key, name } where `key` is the YouTube video ID,
