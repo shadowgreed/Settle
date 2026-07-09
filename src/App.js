@@ -3079,6 +3079,8 @@ function App() {
           onDeleteAccount={handleDeleteAccount}
           onSavePlayerNames={savePlayerName}
           onTogglePush={handlePushToggle}
+          onShowPrivacy={() => setShowPrivacy(true)}
+          onShowTerms={() => setShowTerms(true)}
         />
       )}
 

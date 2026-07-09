@@ -95,8 +95,7 @@
 .settings-account-provider,
 .settings-section-desc,
 .settings-confirm-text,
-.settings-error,
-.settings-footer-note {
+.settings-error {
   word-break: break-word;
   overflow-wrap: anywhere;
 }
@@ -485,12 +484,22 @@
 
 /* ── Danger section emphasis ──────────────────────────────────────────────── */
 .settings-section-danger {
-  border-top: 0.5px solid #2a1414;
+  /* Neutral divider — the red belongs only in the DANGER ZONE label text,
+     not the hairline itself (accent rule: red = destructive actions only). */
+  border-top: 0.5px solid var(--color-border);
   padding-top: 16px;
-  margin-top: 4px;
+  margin-top: 24px; /* 24 + 16 = 40px combined, per spec §6.1 */
 }
 .settings-section-danger .settings-section-title {
   color: var(--color-danger);
+}
+.settings-danger-zone-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(244, 91, 91, 0.7);
+  margin-bottom: 4px;
 }
 
 /* ── Error + footer ───────────────────────────────────────────────────────── */
@@ -504,13 +513,41 @@
   margin: 0;
 }
 
-.settings-footer-note {
-  font-size: 11px;
-  color: #666;
-  margin: 0;
-  text-align: center;
-  padding-top: 8px;
+/* ── Footer (spec §8) — version, feedback, legal links ────────────────────── */
+.settings-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 40px;
+  padding-top: 16px;
   border-top: 0.5px solid #161616;
+  text-align: center;
+}
+.settings-footer-version {
+  font-size: 12px;
+  color: var(--color-faint);
+  margin: 0;
+}
+.settings-footer-link {
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-dim);
+  cursor: pointer;
+  padding: 10px 4px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  touch-action: manipulation;
+  text-decoration: none;
+}
+.settings-footer-link:hover { color: var(--color-text); }
+.settings-footer-legal {
+  margin: 0;
+  display: flex;
+  align-items: center;
 }
 
 /* ── Account-bar gear button trigger ─────────────────────────────────────── */

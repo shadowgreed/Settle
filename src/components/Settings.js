@@ -1,5 +1,10 @@
 import React, { useState, useRef, useCallback } from 'react';
 import useFocusTrap from '../hooks/useFocusTrap';
+// The one exception to this app's "analytics calls live in App.js" convention
+// — there's no App.js-level handler for "delete confirm step shown" (unlike
+// every other tracked event), so it's tracked directly at the UI transition.
+import { trackAccountDeleteStarted } from '../services/analytics';
+import pkg from '../../package.json';
 import './Settings.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,6 +43,8 @@ export default function Settings({
   onDeleteAccount,
   onSavePlayerNames,
   onTogglePush,
+  onShowPrivacy,
+  onShowTerms,
 }) {
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
@@ -371,6 +378,7 @@ export default function Settings({
 
             {/* Account deletion — visually demarcated as the danger zone. */}
             <section className="settings-section settings-section-danger">
+              <div className="settings-danger-zone-label">Danger Zone</div>
               <div className="settings-section-head">
                 <h4 className="settings-section-title">Delete account</h4>
               </div>
@@ -380,7 +388,7 @@ export default function Settings({
 
               {deleteStage === STAGE.CONFIRM || deleteStage === STAGE.ERROR || deleteStage === STAGE.WORKING ? (
                 <div className="settings-confirm">
-                  <p className="settings-confirm-text">
+                  <p className="settings-confirm-text" id="delete-consequences">
                     This will immediately delete your Settle account, your cloud data, and your sign-in credential. Type <strong>DELETE</strong> to confirm.
                   </p>
                   <input
@@ -393,6 +401,7 @@ export default function Settings({
                     autoCorrect="off"
                     spellCheck={false}
                     aria-label="Type DELETE to confirm"
+                    aria-describedby="delete-consequences"
                     disabled={deleteStage === STAGE.WORKING}
                   />
                   {deleteStage === STAGE.ERROR && deleteError && (
@@ -408,6 +417,7 @@ export default function Settings({
                         setDeleteError('');
                       }}
                       disabled={deleteStage === STAGE.WORKING}
+                      autoFocus
                     >
                       Cancel
                     </button>
@@ -429,6 +439,7 @@ export default function Settings({
                   type="button"
                   className="settings-btn settings-btn-danger-outline"
                   onClick={() => {
+                    trackAccountDeleteStarted();
                     setDeleteStage(STAGE.CONFIRM);
                     setConfirmText('');
                     setDeleteError('');
@@ -440,9 +451,24 @@ export default function Settings({
             </section>
           </div>
 
-          <p className="settings-footer-note">
-            Questions? Email <strong>hello@trysettle.app</strong>
-          </p>
+          <div className="settings-footer">
+            <p className="settings-footer-version">Settle v{pkg.version}</p>
+            <a
+              className="settings-footer-link"
+              href={`mailto:hello@trysettle.app?subject=${encodeURIComponent(`Settle Feedback (v${pkg.version})`)}`}
+            >
+              Send feedback
+            </a>
+            <p className="settings-footer-legal">
+              <button type="button" className="settings-footer-link" onClick={onShowPrivacy}>
+                Privacy Policy
+              </button>
+              <span aria-hidden="true"> · </span>
+              <button type="button" className="settings-footer-link" onClick={onShowTerms}>
+                Terms of Service
+              </button>
+            </p>
+          </div>
         </div>
       </div>
     </div>
