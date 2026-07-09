@@ -2,6 +2,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "build",
   "rewrites": [
+    { "source": "/pick/:id", "destination": "/api/pick/:id" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [

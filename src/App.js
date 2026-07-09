@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
-import { pickLabel, pickVerb, timeOfDay } from './utils/timeOfDay';
+import { pickLabel, timeOfDay } from './utils/timeOfDay';
 import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
@@ -2381,11 +2381,31 @@ function App() {
     }
   };
 
-  // Fallback: share/copy as plain text
+  // Fallback: share/copy as plain text. The URL points at the per-pick
+  // unfurl page (spec §5) — carrying the same personalization params
+  // /api/share-card consumes so the OG image + description match this
+  // exact share, plus UTMs for the PostHog-side landing-page attribution
+  // the spec calls for (no new event needed — just the query params).
   const shareAsText = async (item) => {
-    const verb = pickVerb(mode);
-    const text = `🎬 ${verb} "${item.title}" (${item.year}) on ${item.service}. Found it in seconds with Settle.`;
-    const url  = 'https://trysettle.app';
+    const text = mode === 'couple'
+      ? `We settled on ${item.title} in 30 seconds 🍿`
+      : `Settle picked ${item.title} for me…`;
+
+    const params = new URLSearchParams({
+      title:      item.title || '',
+      year:       item.year || '',
+      type:       item.type || '',
+      rating:     item.rating != null ? String(item.rating) : '',
+      service:    item.service || '',
+      posterPath: item.posterPath || '',
+      story:      buildStoryLine(),
+      daypart:    buildDaypartText(),
+      utm_source:   'pickcard',
+      utm_medium:   'share',
+      utm_campaign: 'text',
+    });
+    const url = `https://trysettle.app/pick/${item.id}?${params.toString()}`;
+
     if (navigator.share) {
       try { await navigator.share({ title: 'Settle', text, url }); } catch {}
     } else {
