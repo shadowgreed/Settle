@@ -286,6 +286,12 @@ function App() {
   // ShowtimesSheet (which film to look up). Null when the sheet is closed.
   const [theaterMovie, setTheaterMovie]     = useState(null);
 
+  // Live match-count estimate for the sticky CTA bar (spec §3.3). null until
+  // the first successful fetch resolves — the summary line omits the
+  // "· N matches" segment until then, and keeps the last known number
+  // through subsequent loads/errors rather than flickering.
+  const [liveMatchCount, setLiveMatchCount] = useState(null);
+
   // "New in your genres" home-screen card (PM roadmap 3.2). Count is the
   // headline number from TMDB; dismissed flag is per-day in localStorage.
   const [newReleasesCount, setNewReleasesCount] = useState(0);
@@ -1055,13 +1061,24 @@ function App() {
       ? 'Movies & Series'
       : selectedFormats[0] === 'Series' ? 'Series' : 'Movies';
     const ratingLabel = (RATING_STEPS.find(s => s.value === minRating) || RATING_STEPS[0]).label;
-    const vibesPlayer = mode === 'couple' ? activePlayer : 'solo';
-    const vibesCount = MOODS.filter(m => isMoodActive(m.ids, vibesPlayer)).length;
-    return `${formatLabel} · ${ratingLabel} · ${vibesCount} vibe${vibesCount === 1 ? '' : 's'}`;
+    // Couples quick-pick reads "N shared vibes" (mood tiles BOTH players have
+    // fully selected) instead of solo's plain "N vibes" (spec §3.3).
+    let vibesSegment;
+    if (mode === 'couple') {
+      const sharedCount = MOODS.filter(m => isMoodActive(m.ids, 'p1') && isMoodActive(m.ids, 'p2')).length;
+      vibesSegment = `${sharedCount} shared vibe${sharedCount === 1 ? '' : 's'}`;
+    } else {
+      const vibesCount = MOODS.filter(m => isMoodActive(m.ids, 'solo')).length;
+      vibesSegment = `${vibesCount} vibe${vibesCount === 1 ? '' : 's'}`;
+    }
+    const matchesSegment = liveMatchCount !== null
+      ? ` · ${liveMatchCount} match${liveMatchCount === 1 ? '' : 'es'}`
+      : '';
+    return `${formatLabel} · ${ratingLabel} · ${vibesSegment}${matchesSegment}`;
   // isMoodActive closes over selectedGenres, which is already a dep — including
   // the function itself would just redefine on every render with no benefit.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFormats, minRating, mode, activePlayer, selectedGenres]);
+  }, [selectedFormats, minRating, mode, selectedGenres, liveMatchCount]);
 
   // O(1) lookups — replaces .find() inside .map() callsites that were O(n²).
   const genreById = useMemo(() => {
@@ -1121,6 +1138,47 @@ function App() {
       .catch(() => { if (!cancelled) setNewReleasesCount(0); });
     return () => { cancelled = true; };
   }, [mode, topSoloIdsKey, servicesKey, newReleasesDismissed]);
+
+  // Live match-count estimate for the sticky CTA bar (spec §3.3). Debounced
+  // 400ms so it doesn't fire on every mood toggle; the `cancelled` guard
+  // (reset by the cleanup on each re-run) discards a response that arrives
+  // after a newer request has already been fired, so an out-of-order network
+  // reply can never clobber a fresher result. Fetch failures leave
+  // liveMatchCount untouched (see getMatchCount's comment) — the summary line
+  // just keeps showing the last known number instead of flashing to zero.
+  //
+  // Mirrors showCtaBar's own condition (computed later, after the render's
+  // auth-guard early returns, so it can't be referenced here directly) — the
+  // bar and this fetch must only be active on the same screens. Genre source
+  // is `activeGenres` — the SAME memo pickContent itself searches with (solo's
+  // own picks, or couples' overlap-else-union) — so the estimate reflects
+  // what a real search would actually query, not just one player's taps.
+  const matchCountActive = !coupleSession && mode !== 'theater' && (mode !== 'couple' || coupleFlow === 'quick');
+  const matchCountGenreKey = activeGenres.join(',');
+  const matchCountFormatsKey = selectedFormats.join(',');
+  const matchCountServicesKey = selectedServices.join(',');
+  useEffect(() => {
+    if (!matchCountActive) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      const genreIds = matchCountGenreKey
+        ? matchCountGenreKey.split(',').map(s => (isNaN(s) ? s : Number(s)))
+        : [];
+      tmdbService.getMatchCount({
+        services: matchCountServicesKey ? matchCountServicesKey.split(',') : [],
+        formats: matchCountFormatsKey ? matchCountFormatsKey.split(',') : [],
+        genreIds,
+        minRating,
+        maxCertification,
+      })
+        .then(c => { if (!cancelled) setLiveMatchCount(c); })
+        .catch(() => { /* keep the last known count — see getMatchCount comment */ });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [
+    matchCountActive, matchCountGenreKey,
+    matchCountFormatsKey, matchCountServicesKey, minRating, maxCertification,
+  ]);
 
   // Handler — tap the "New in your genres" card. Seeds solo mode with the
   // top genres (for visible mood-grid state) AND passes the IDs directly to
@@ -2856,9 +2914,11 @@ function App() {
   if (!user) return <AuthGate />;
 
   // The sticky CTA bar (and its reserved bottom padding) only renders where
-  // there's an active pick-form to submit — not in theater mode, and not
-  // while a couple session already has the picker running automatically.
-  const showCtaBar = !coupleSession && mode !== 'theater';
+  // there's an active pick-form to submit — not in theater mode, not while a
+  // couple session already has the picker running automatically, and — now
+  // that Couples has a fork — not on the fork screen or the live-flow
+  // compose/sent screens (spec §3.1: solo always, couples quick-pick only).
+  const showCtaBar = !coupleSession && mode !== 'theater' && (mode !== 'couple' || coupleFlow === 'quick');
 
   return (
     <div className={`app${showCtaBar ? ' app-cta-padded' : ''}`}>
@@ -3703,11 +3763,18 @@ function App() {
           come from the shared result card's "Try another") and in theater
           mode. Reachable from any scroll position; `.app-cta-padded` above
           reserves the matching bottom space so it never covers the footer. */}
-      {showCtaBar && (
+      {showCtaBar && (() => {
+        // Post-search zero (an actual pickContent run came up empty) is the
+        // authoritative signal when available; otherwise fall back to the
+        // live pre-search estimate. Either way we never show "0 matches" for
+        // a fetch failure — liveMatchCount only updates on success (see
+        // getMatchCount's comment), so `=== 0` here always means a real zero.
+        const zeroMatches = (hasSearched && matchCount === 0) || (!hasSearched && liveMatchCount === 0);
+        return (
         <div className="cta-bar">
           <div className="cta-bar-inner">
-            <div className={`cta-bar-summary${matchCount === 0 && hasSearched ? ' cta-bar-zero' : ''}`}>
-              {matchCount === 0 && hasSearched ? 'No matches — loosen a filter' : ctaSummary}
+            <div className={`cta-bar-summary${zeroMatches ? ' cta-bar-zero' : ''}`}>
+              {zeroMatches ? 'No matches — loosen a filter' : ctaSummary}
             </div>
             <div className="cta-bar-row">
               <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
@@ -3725,7 +3792,8 @@ function App() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {loading && (
         <div className="skeleton-card">

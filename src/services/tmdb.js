@@ -434,6 +434,58 @@ class TMDBService {
     });
   }
 
+  // Live match-count estimate for the sticky CTA bar summary line (spec
+  // §3.3). Fires one page:1 discover call per selected format (Movie/Series),
+  // summing total_results across the selected services in a single OR query
+  // each — an ESTIMATE, not the exact pick-flow result count (it doesn't
+  // dedupe titles across services or apply the client-side post-filter
+  // pickContent uses for hidden gems). Good enough for "does loosening a
+  // filter help" feedback, not meant to be pixel-exact.
+  //
+  // Unlike getNewReleasesCount, failures are NOT swallowed into 0 — the
+  // caller needs to tell "genuinely zero matches" apart from "the fetch
+  // failed," so it can keep showing the last known count instead of
+  // flashing a false "no matches" message. Routes through the same bounded
+  // LRU cache as every other discover call.
+  async getMatchCount({ services = [], formats = ['Movie', 'Series'], genreIds = [], minRating = 0, maxCertification = null } = {}) {
+    if (!Array.isArray(services) || services.length === 0) return 0;
+    if (!Array.isArray(formats) || formats.length === 0) return 0;
+
+    const providerIds = services.map(s => PROVIDER_IDS[s]).filter(Boolean);
+    if (providerIds.length === 0) return 0;
+
+    const cacheKey = `matchcount-${providerIds.join(',')}-${formats.join(',')}-${genreIds.join(',')}-${minRating}-${maxCertification}`;
+    return this.getCached(cacheKey, async () => {
+      const baseParams = {
+        with_watch_providers: providerIds.join('|'),
+        watch_region: 'US',
+        'vote_average.gte': minRating,
+        'vote_count.gte': 50,
+        page: 1,
+      };
+      if (genreIds.length > 0) baseParams.with_genres = genreIds.join('|');
+
+      const queries = [];
+      if (formats.includes('Movie')) {
+        const params = { ...baseParams };
+        if (maxCertification) {
+          params.certification_country = 'US';
+          params['certification.lte'] = maxCertification;
+        }
+        queries.push(this.api.get('/discover/movie', { params }));
+      }
+      if (formats.includes('Series')) {
+        queries.push(this.api.get('/discover/tv', { params: baseParams }));
+      }
+
+      // Let a failure propagate — getCached won't cache a rejected promise,
+      // and the caller (App.js) falls back to the last known good count
+      // instead of treating "fetch failed" as "zero matches".
+      const responses = await Promise.all(queries);
+      return responses.reduce((sum, r) => sum + (r.data?.total_results || 0), 0);
+    });
+  }
+
   // Fetch the best YouTube trailer for a title.
   //
   // Returns a video object { key, name } where `key` is the YouTube video ID,
