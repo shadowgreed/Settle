@@ -10,6 +10,8 @@ import {
   trackPushPromptShown, trackPushAccepted, trackPushDenied, trackPushUnsubscribed,
   trackLocationPermissionResult, trackZipEntered,
   trackMoodMigrationEasyWatchToFun,
+  trackModeSelected, trackCoupleFlowSelected, trackPartnerRenamed,
+  trackRatingStepSelected, trackMatchCountShown, trackCtaTapped, trackZeroMatchesShown,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -164,6 +166,19 @@ function snapRatingStep(value) {
     if (step.value <= n) snapped = step.value;
   }
   return snapped;
+}
+
+// Short, non-reversible digest of the current filter combo — used only as an
+// analytics dimension (match_count_shown / zero_matches_shown) so dashboards
+// can group by "which filter combo" without genre IDs/services becoming
+// separate tracked properties. Not cryptographic; collisions are harmless
+// here (worst case, two different combos share a bucket in a chart).
+function hashFilters(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = (h * 31 + str.charCodeAt(i)) | 0;
+  }
+  return h.toString(36);
 }
 
 // Maps decade-mood IDs to TMDB date-range query parameters. Multiple decade
@@ -1160,6 +1175,9 @@ function App() {
   useEffect(() => {
     if (!matchCountActive) return;
     let cancelled = false;
+    const filtersHash = hashFilters(
+      `${matchCountServicesKey}|${matchCountFormatsKey}|${matchCountGenreKey}|${minRating}|${maxCertification}`
+    );
     const timer = setTimeout(() => {
       const genreIds = matchCountGenreKey
         ? matchCountGenreKey.split(',').map(s => (isNaN(s) ? s : Number(s)))
@@ -1171,7 +1189,11 @@ function App() {
         minRating,
         maxCertification,
       })
-        .then(c => { if (!cancelled) setLiveMatchCount(c); })
+        .then(c => {
+          if (cancelled) return;
+          setLiveMatchCount(c);
+          trackMatchCountShown({ count: c, filtersHash });
+        })
         .catch(() => { /* keep the last known count — see getMatchCount comment */ });
     }, 400);
     return () => { cancelled = true; clearTimeout(timer); };
@@ -1179,6 +1201,25 @@ function App() {
     matchCountActive, matchCountGenreKey,
     matchCountFormatsKey, matchCountServicesKey, minRating, maxCertification,
   ]);
+
+  // Post-search zero (an actual pickContent run came up empty) is the
+  // authoritative signal when available; otherwise fall back to the live
+  // pre-search estimate. Either way this never reads "0 matches" off a fetch
+  // failure — liveMatchCount only updates on success (see getMatchCount).
+  const zeroMatches = (hasSearched && matchCount === 0) || (!hasSearched && liveMatchCount === 0);
+
+  // Fire the zero-matches analytics event once per false→true transition,
+  // not on every render while it stays true.
+  const wasZeroMatchesRef = useRef(false);
+  useEffect(() => {
+    if (zeroMatches && !wasZeroMatchesRef.current) {
+      const filtersHash = hashFilters(
+        `${matchCountServicesKey}|${matchCountFormatsKey}|${matchCountGenreKey}|${minRating}|${maxCertification}`
+      );
+      trackZeroMatchesShown({ filtersHash });
+    }
+    wasZeroMatchesRef.current = zeroMatches;
+  }, [zeroMatches, matchCountServicesKey, matchCountFormatsKey, matchCountGenreKey, minRating, maxCertification]);
 
   // Handler — tap the "New in your genres" card. Seeds solo mode with the
   // top genres (for visible mood-grid state) AND passes the IDs directly to
@@ -1441,6 +1482,9 @@ function App() {
 
   const savePlayerName = (player, value) => {
     const name = value.trim() || (player === 'p1' ? 'You' : 'Partner');
+    if (name !== playerNames[player]) {
+      trackPartnerRenamed({ person: player === 'p1' ? 1 : 2 });
+    }
     const updated = { ...playerNames, [player]: name };
     setPlayerNames(updated);
     if (consent) safeSet('streaming-player-names', JSON.stringify(updated));
@@ -3170,21 +3214,21 @@ function App() {
       <div id="main-content" className="mode-tabs" role="group" aria-label="Mode" tabIndex={-1}>
         <button
           className={`mtab ${mode === 'solo' ? 'on' : ''}`}
-          onClick={() => { setMode('solo'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          onClick={() => { trackModeSelected({ mode: 'solo' }); setMode('solo'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
           aria-pressed={mode === 'solo'}
         >
           Solo <span aria-hidden="true">👤</span>
         </button>
         <button
           className={`mtab ${mode === 'couple' ? 'on' : ''}`}
-          onClick={() => { setMode('couple'); setActivePlayer('p1'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          onClick={() => { trackModeSelected({ mode: 'couple' }); setMode('couple'); setActivePlayer('p1'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
           aria-pressed={mode === 'couple'}
         >
           Couples <span aria-hidden="true">💑</span>
         </button>
         <button
           className={`mtab ${mode === 'theater' ? 'on theater-tab' : ''}`}
-          onClick={() => { setMode('theater'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
+          onClick={() => { trackModeSelected({ mode: 'theater' }); setMode('theater'); setResult(null); setHasSearched(false); setFetchError(false); setMatchCount(0); }}
           aria-pressed={mode === 'theater'}
         >
           In Theaters <span aria-hidden="true">🎟️</span>
@@ -3345,7 +3389,10 @@ function App() {
               <button
                 type="button"
                 className="fork-card fork-card-live"
-                onClick={() => (partnerUid ? setCoupleFlow('live') : setShowSessionIntro(true))}
+                onClick={() => {
+                  trackCoupleFlowSelected({ flow: 'live' });
+                  partnerUid ? setCoupleFlow('live') : setShowSessionIntro(true);
+                }}
               >
                 <span className="fork-card-icon" aria-hidden="true">💑</span>
                 <span className="fork-card-title">Pick together — live</span>
@@ -3355,7 +3402,7 @@ function App() {
               <button
                 type="button"
                 className="fork-card fork-card-quick"
-                onClick={() => setCoupleFlow('quick')}
+                onClick={() => { trackCoupleFlowSelected({ flow: 'quick' }); setCoupleFlow('quick'); }}
               >
                 <span className="fork-card-icon" aria-hidden="true">📱</span>
                 <span className="fork-card-title">Quick pick on this phone</span>
@@ -3470,7 +3517,7 @@ function App() {
                 onClick={() => setActivePlayer('p1')}
                 role="tab"
                 aria-selected={activePlayer === 'p1'}
-                aria-label={`Select ${playerNames.p1}`}
+                aria-label={`${playerNames.p1}, ${selectedGenres.p1.length} picks`}
               >
                 <span className="player-tab-emoji" aria-hidden="true">🍿</span>
                 {editingPlayer === 'p1' ? null : (
@@ -3511,7 +3558,7 @@ function App() {
                 onClick={() => setActivePlayer('p2')}
                 role="tab"
                 aria-selected={activePlayer === 'p2'}
-                aria-label={`Select ${playerNames.p2}`}
+                aria-label={`${playerNames.p2}, ${selectedGenres.p2.length} picks`}
               >
                 <span className="player-tab-emoji" aria-hidden="true">🎬</span>
                 {editingPlayer === 'p2' ? null : (
@@ -3677,7 +3724,7 @@ function App() {
                   type="button"
                   key={step.label}
                   className={`rating-chip ${active ? 'rating-on' : ''}`}
-                  onClick={() => setMinRating(step.value)}
+                  onClick={() => { trackRatingStepSelected({ value: step.value }); setMinRating(step.value); }}
                   role="radio"
                   aria-checked={active}
                 >
@@ -3763,21 +3810,26 @@ function App() {
           come from the shared result card's "Try another") and in theater
           mode. Reachable from any scroll position; `.app-cta-padded` above
           reserves the matching bottom space so it never covers the footer. */}
-      {showCtaBar && (() => {
-        // Post-search zero (an actual pickContent run came up empty) is the
-        // authoritative signal when available; otherwise fall back to the
-        // live pre-search estimate. Either way we never show "0 matches" for
-        // a fetch failure — liveMatchCount only updates on success (see
-        // getMatchCount's comment), so `=== 0` here always means a real zero.
-        const zeroMatches = (hasSearched && matchCount === 0) || (!hasSearched && liveMatchCount === 0);
-        return (
+      {showCtaBar && (
         <div className="cta-bar">
           <div className="cta-bar-inner">
             <div className={`cta-bar-summary${zeroMatches ? ' cta-bar-zero' : ''}`}>
               {zeroMatches ? 'No matches — loosen a filter' : ctaSummary}
             </div>
             <div className="cta-bar-row">
-              <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
+              <button
+                className="pick-btn"
+                onClick={() => {
+                  trackCtaTapped({
+                    mode,
+                    flow: mode === 'couple' ? coupleFlow : null,
+                    vibeCount: MOODS.filter(m => isMoodActive(m.ids, mode === 'couple' ? activePlayer : 'solo')).length,
+                    matchCount: liveMatchCount,
+                  });
+                  pickContent(false);
+                }}
+                disabled={loading}
+              >
                 {loading ? 'Finding...' : mode === 'solo' ? 'Find something for me →' : 'Find something for us →'}
               </button>
               <button
@@ -3792,8 +3844,7 @@ function App() {
             </div>
           </div>
         </div>
-        );
-      })()}
+      )}
 
       {loading && (
         <div className="skeleton-card">

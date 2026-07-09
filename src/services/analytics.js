@@ -181,3 +181,50 @@ export function trackVoteSubmitted({ titleId, vote, service, timeSincePick }) {
     time_since_pick: timeSincePick, // seconds, or null if unavailable
   });
 }
+
+// ── Home redesign events (July 2026 handoff spec §7) ──────────────────────────
+// `ballot_sent` already existed (couple.js) and is unchanged by this batch.
+
+/** Fired on every Solo/Couples/In Theaters tab switch. */
+export function trackModeSelected({ mode }) {
+  track('mode_selected', { mode });
+}
+
+/** Fired when a Couples-mode fork card is tapped (Live vs Quick pick). */
+export function trackCoupleFlowSelected({ flow }) {
+  track('couple_flow_selected', { flow }); // 'live' | 'quick'
+}
+
+/** Fired when a player-tab name edit commits to a new value. No PII — just
+ *  which slot changed, never the name itself. */
+export function trackPartnerRenamed({ person }) {
+  track('partner_renamed', { person }); // 1 | 2
+}
+
+/** Fired when a Min Rating pill is tapped. */
+export function trackRatingStepSelected({ value }) {
+  track('rating_step_selected', { value });
+}
+
+/** Fired whenever the live match-count estimate resolves and updates the
+ *  sticky CTA bar's summary line. `filtersHash` is a short, non-reversible
+ *  join of the filter values driving the count — lets us see which filter
+ *  combos get shown without logging genre IDs/services as separate dims. */
+export function trackMatchCountShown({ count, filtersHash }) {
+  track('match_count_shown', { count, filters_hash: filtersHash });
+}
+
+/** Fired when the sticky CTA bar's primary button is tapped. */
+export function trackCtaTapped({ mode, flow, vibeCount, matchCount }) {
+  track('cta_tapped', {
+    mode,
+    flow,             // 'live' | 'quick' | null (solo)
+    vibe_count: vibeCount,
+    match_count: matchCount,
+  });
+}
+
+/** Fired when the CTA bar's zero-match message renders. */
+export function trackZeroMatchesShown({ filtersHash }) {
+  track('zero_matches_shown', { filters_hash: filtersHash });
+}
