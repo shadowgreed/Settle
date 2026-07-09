@@ -73,7 +73,7 @@
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
   overflow-y: auto;
   /* iOS Safari fixes:
      - `overflow-x: hidden` prevents long emails/URLs from creating a
@@ -114,12 +114,15 @@
   padding-bottom: 6px;
 }
 
+/* Matches the home screen's "WHAT'S THE VIBE?" section-header treatment
+   exactly (same properties, same --color-faint token) — Settings previously
+   used a different gold (#d9b04a) that didn't match anything else. */
 .settings-group-title {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #d9b04a;
+  color: var(--color-faint);
   margin: 0 0 -4px 0;
 }
 
@@ -289,13 +292,17 @@
    blur/Enter so we don't fire a Firestore write on every keystroke. */
 .settings-names-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, 1fr), not bare 1fr — grid tracks otherwise refuse to shrink
+     below the input's intrinsic content width, overflowing the modal at
+     narrow viewports (the clipped-Player-2 bug). */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 .settings-name-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 .settings-name-label {
   font-size: 10px;
@@ -365,23 +372,22 @@
 
 .settings-btn-danger-outline {
   background: transparent;
-  border-color: #4a1c1c;
-  color: #ff7070;
+  border-color: rgba(244, 91, 91, 0.3);
+  color: var(--color-danger);
 }
 .settings-btn-danger-outline:hover:not(:disabled) {
-  background: #1a0808;
-  border-color: #6a2828;
-  color: #ff9090;
+  background: rgba(244, 91, 91, 0.08);
+  border-color: rgba(244, 91, 91, 0.5);
+  color: var(--color-danger);
 }
 
 .settings-btn-danger {
-  background: #c0070f;
-  border-color: #c0070f;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
   color: #fff;
 }
 .settings-btn-danger:hover:not(:disabled) {
-  background: #d80813;
-  border-color: #d80813;
+  filter: brightness(1.08);
 }
 
 /* ── Inline confirmation block ───────────────────────────────────────────── */
@@ -442,15 +448,15 @@
   margin-top: 4px;
 }
 .settings-section-danger .settings-section-title {
-  color: #ff7070;
+  color: var(--color-danger);
 }
 
 /* ── Error + footer ───────────────────────────────────────────────────────── */
 .settings-error {
   font-size: 13px;
-  color: #ff7070;
-  background: rgba(192, 7, 15, 0.08);
-  border-left: 2px solid #c0070f;
+  color: var(--color-danger);
+  background: rgba(244, 91, 91, 0.08);
+  border-left: 2px solid var(--color-danger);
   padding: 10px 12px;
   border-radius: 0 6px 6px 0;
   margin: 0;

@@ -1,7 +1,8 @@
-/* ── Design tokens (Home redesign, July 2026) ────────────────────────────────
-   Scoped in practice to the home/filter screen (Solo + Couples) — the rest of
-   the app (result card, cinema overlay, onboarding, settings, history panel)
-   still uses literal hex values and is unaffected by this token layer. */
+/* ── Design tokens (Home redesign, July 2026 + Settings redesign) ────────────
+   :root custom properties are global to the whole document regardless of
+   which stylesheet declares them — Settings.css and CoupleLink.css reference
+   these directly with no import. The result card, cinema overlay, onboarding,
+   and history panel still use literal hex values and are unaffected. */
 :root {
   --color-bg: #0A0A0C;
   --color-surface: #141418;
@@ -14,6 +15,7 @@
   --color-faint: #5C5C66;
   --color-person-1: #4C7DFF;
   --color-person-2: #FF5C9E;
+  --color-danger: #F45B5B;
   --radius-pill: 9999px;
   --radius-card: 16px;
 }

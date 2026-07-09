@@ -20,6 +20,13 @@
   flex-wrap: wrap;
 }
 
+.couplelink-explainer {
+  font-size: 13px;
+  color: var(--color-dim);
+  margin: 10px 0 0;
+  line-height: 1.4;
+}
+
 .couplelink-btn {
   flex: 1;
   min-width: 100px;
@@ -34,8 +41,8 @@
 .couplelink-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .couplelink-btn.primary {
-  background: var(--accent, #e50914);
-  color: #fff;
+  background: var(--color-accent);
+  color: #1A1206;
 }
 .couplelink-btn.primary:hover:not(:disabled) { opacity: 0.88; }
 
@@ -48,7 +55,7 @@
 
 .couplelink-error {
   font-size: 0.8rem;
-  color: #ff6b6b;
+  color: var(--color-danger);
   margin: 0 0 10px;
 }
 
@@ -135,7 +142,7 @@
   outline: none;
   transition: border-color 0.15s;
 }
-.couplelink-input:focus { border-color: var(--accent, #e50914); }
+.couplelink-input:focus { border-color: var(--color-accent); }
 .couplelink-input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: normal; }
 
 /* Linked state */
@@ -186,4 +193,4 @@
   flex-shrink: 0;
   transition: border-color 0.15s, color 0.15s;
 }
-.couplelink-unlink:hover { border-color: #ff6b6b; color: #ff6b6b; }
+.couplelink-unlink:hover { border-color: var(--color-danger); color: var(--color-danger); }

@@ -155,6 +155,9 @@ export default function CoupleLink({
           Enter a code
         </button>
       </div>
+      <p className="couplelink-explainer">
+        Your partner enters the code on their phone. Codes expire in 24 hours.
+      </p>
     </div>
   );
 }

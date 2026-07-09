@@ -259,18 +259,18 @@ export default function Settings({
                 </section>
               )}
 
-              {/* Couples player names — visible to all users (even solo, in
-                  case they want to set names up before opening Couples mode). */}
+              {/* Your names — visible to all users (even solo, in case they
+                  want to set names up before opening Couples mode). */}
               <section className="settings-section">
                 <div className="settings-section-head">
-                  <h4 className="settings-section-title">Couples player names</h4>
+                  <h4 className="settings-section-title">Your names</h4>
                 </div>
                 <p className="settings-section-desc">
                   Used by Couples mode and shareable pick cards.
                 </p>
                 <div className="settings-names-grid">
                   <label className="settings-name-field">
-                    <span className="settings-name-label">Player 1</span>
+                    <span className="settings-name-label">You</span>
                     <input
                       type="text"
                       className="settings-name-input"
@@ -279,11 +279,11 @@ export default function Settings({
                       onBlur={commitP1}
                       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                       maxLength={20}
-                      aria-label="Player 1 name"
+                      aria-label="Your name"
                     />
                   </label>
                   <label className="settings-name-field">
-                    <span className="settings-name-label">Player 2</span>
+                    <span className="settings-name-label">Partner</span>
                     <input
                       type="text"
                       className="settings-name-input"
@@ -292,7 +292,7 @@ export default function Settings({
                       onBlur={commitP2}
                       onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                       maxLength={20}
-                      aria-label="Player 2 name"
+                      aria-label="Partner name"
                     />
                   </label>
                 </div>

@@ -181,6 +181,20 @@ function hashFilters(str) {
   return h.toString(36);
 }
 
+// One-time migration for the old 'Him'/'Her' defaults (Settings redesign,
+// July 2026) — the empty-state fallback already changed to 'You'/'Partner',
+// but a returning user's ALREADY-STORED value is a literal string, not a
+// fallback, so it never picked up that change on its own. Only an EXACT
+// match to the old default is rewritten; any custom name (even one that
+// happens to be "Him") is preserved untouched, per spec.
+function migrateLegacyPlayerNames(names) {
+  if (!names || typeof names !== 'object') return names;
+  const migrated = { ...names };
+  if (migrated.p1 === 'Him') migrated.p1 = 'You';
+  if (migrated.p2 === 'Her') migrated.p2 = 'Partner';
+  return migrated;
+}
+
 // Maps decade-mood IDs to TMDB date-range query parameters. Multiple decade
 // IDs combine by spanning the min `gte` and max `lte` (e.g. '80s + '90s
 // becomes 1980-01-01 → 1999-12-31).
@@ -264,7 +278,10 @@ function App() {
   const [showStreakHistory, setShowStreakHistory] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [playerNames, setPlayerNames] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'You', p2: 'Partner' }; }
+    try {
+      const stored = JSON.parse(localStorage.getItem('streaming-player-names'));
+      return migrateLegacyPlayerNames(stored) || { p1: 'You', p2: 'Partner' };
+    }
     catch { return { p1: 'You', p2: 'Partner' }; }
   });
   const [editingPlayer, setEditingPlayer] = useState(null);
@@ -493,7 +510,7 @@ function App() {
     if (Array.isArray(data.recentPicks))   setRecentPicks(data.recentPicks);
     if (Array.isArray(data.savedForLater)) setSavedForLater(data.savedForLater);
     if (Array.isArray(data.watchHistory))  setWatchHistory(data.watchHistory);
-    if (data.playerNames && typeof data.playerNames === 'object') setPlayerNames(data.playerNames);
+    if (data.playerNames && typeof data.playerNames === 'object') setPlayerNames(migrateLegacyPlayerNames(data.playerNames));
     if (data.couplePartnerUid) setPartnerUid(data.couplePartnerUid);
     if (data.consent != null) {
       setConsent(data.consent);
