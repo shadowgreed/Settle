@@ -31,6 +31,12 @@ export default function CoupleLink({
   onGenerateCode,       // async () => string  — calls /api/couple/code
   onVerifyCode,         // async (code) => { partnerUid, partnerName } — calls /api/couple/verify + saves link
   onUnlink,             // async () => void
+  // Idle-state description ("Link with your partner to watch together on two
+  // phones") is the only explanation of this feature when CoupleLink renders
+  // standalone in Settings — but it's redundant when CoupleSessionIntro's own
+  // title + 3 steps already cover the same ground. Default true so Settings
+  // is unaffected; CoupleSessionIntro passes false.
+  showIntro = true,
 }) {
   const isLinked = !!partnerName;
   const [view, setView]   = useState('idle');  // 'idle' | 'showing-code' | 'entering-code'
@@ -215,9 +221,11 @@ export default function CoupleLink({
   // ── Idle state (not linked) ────────────────────────────────────────────────
   return (
     <div className="couplelink-idle">
-      <p className="couplelink-description">
-        Link with your partner to watch together on two phones.
-      </p>
+      {showIntro && (
+        <p className="couplelink-description">
+          Link with your partner to watch together on two phones.
+        </p>
+      )}
       {error && <p className="couplelink-error" role="alert">{error}</p>}
       <div className="couplelink-actions">
         <button className="couplelink-btn primary" onClick={handleGetCode} disabled={busy}>

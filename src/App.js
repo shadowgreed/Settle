@@ -4947,8 +4947,14 @@ function App() {
 
       {cinemaMode && (cinemaSource === 'history' ? replayResult : result) && (() => {
         const cinemaItem = cinemaSource === 'history' ? replayResult : result;
+        // Shared by the backdrop tap and the ✕ button (spec §2.4) — dismissing
+        // either way just closes the modal. `result`/`pickChips` are never
+        // touched here, so the card behind it is already in its accepted
+        // state (the pick was saved to history when "Watching this" was
+        // tapped, before this modal ever opened) — no re-fetch needed.
+        const closeCinemaModal = () => { setCinemaMode(false); setReplayResult(null); };
         return (
-        <div className="cinema-overlay" onClick={() => { setCinemaMode(false); setReplayResult(null); }}>
+        <div className="cinema-overlay" onClick={closeCinemaModal}>
           <div
             ref={cinemaCardRef}
             className="cinema-card"
@@ -4958,6 +4964,9 @@ function App() {
             aria-labelledby="cinema-title"
             tabIndex={-1}
           >
+            <button className="cinema-close" onClick={closeCinemaModal} aria-label="Close">
+              <span aria-hidden="true">✕</span>
+            </button>
             <div className="cinema-poster-wrap">
               {cinemaItem.posterPath ? (
                 <img
@@ -4998,6 +5007,14 @@ function App() {
               {cinemaItem.year} · {cinemaItem.type} ·{' '}
               <span style={{ color: getServiceColor(cinemaItem.service) }}>{cinemaItem.service}</span>
             </div>
+            {/* Runtime + end-time (spec §2.5) — reuses the exact card
+                component/formatting (one source per the spec) rather than a
+                second implementation. runtimeInfo is only fetched for the
+                current `result`, not a History replay, so this is scoped to
+                a fresh pick — a replay would show stale or missing figures. */}
+            {cinemaSource === 'pick' && runtimeInfo && (
+              <div className="cinema-runtime-meta">{formatMetaLine(cinemaItem, runtimeInfo)}</div>
+            )}
             <div className="cinema-rating" aria-label={`Rated ${cinemaItem.rating} out of 10`}>
               <span className="stars" aria-hidden="true">{starsFromRating(cinemaItem.rating)}</span>
               <span className="cinema-rating-num" aria-hidden="true">{cinemaItem.rating}/10</span>

@@ -13,8 +13,8 @@ import './CoupleSessionIntro.css';
 
 const STEPS = [
   { icon: '📱', title: 'Two phones', body: 'You each use your own phone, side by side or miles apart.' },
-  { icon: '🔗', title: 'Link once',  body: 'Share a 6-character code with your partner. One time only.' },
-  { icon: '🎭', title: 'Pick & vote', body: 'Each choose your moods, then a secret vote settles it together.' },
+  { icon: '🔗', title: 'Link once',  body: "Share a 6-character code with your partner. You only do this once — you stay linked." },
+  { icon: '🗳️', title: 'Pick & vote', body: 'Each choose your moods, then a secret vote settles it together.' },
 ];
 
 export default function CoupleSessionIntro({
@@ -53,11 +53,15 @@ export default function CoupleSessionIntro({
 
         <div className="csi-icon" aria-hidden="true">🎬</div>
         <h2 id="csi-title" className="csi-title">Watch together, on two phones</h2>
-        <p className="csi-sub">
-          {linked
-            ? "You're linked — start a session and it appears live on both screens."
-            : 'A couple session needs you both, each on your own phone.'}
-        </p>
+        {/* Not-linked subtitle removed (spec §1.2) — it repeated the title
+            verbatim and the three steps below already carry the explanation.
+            The linked-state line stays: it describes what "Start" does next,
+            which isn't said anywhere else. */}
+        {linked && (
+          <p className="csi-sub">
+            You're linked — start a session and it appears live on both screens.
+          </p>
+        )}
 
         {/* How it works — three quick beats, no wall of text */}
         {!linked && (
@@ -82,6 +86,7 @@ export default function CoupleSessionIntro({
             onGenerateCode={onGenerateCode}
             onVerifyCode={onVerifyCode}
             onUnlink={onUnlink}
+            showIntro={false}
           />
         </div>
 

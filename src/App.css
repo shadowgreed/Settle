@@ -2268,12 +2268,34 @@ button.sequel-badge {
 }
 
 .cinema-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 14px;
   animation: cinemaCardIn 0.55s cubic-bezier(0.34, 1.4, 0.64, 1) forwards;
 }
+
+/* Explicit dismissal (spec §2.4) — same treatment as the linking modal's
+   .csi-close so both overlays share one "how to close this" convention. */
+.cinema-close {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: rgba(20, 20, 20, 0.85);
+  border: none;
+  color: #ccc;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 8px;
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 50%;
+  line-height: 1;
+  z-index: 3;
+  touch-action: manipulation;
+}
+.cinema-close:hover { color: #f5f5f5; background: rgba(30, 30, 30, 0.95); }
 
 @keyframes cinemaCardIn {
   from { opacity: 0; transform: scale(0.82) translateY(30px); }
@@ -2362,6 +2384,14 @@ button.sequel-badge {
   color: #999;
   text-align: center;
   animation: cinemaFadeUp 0.4s ease 0.4s both;
+}
+
+.cinema-runtime-meta {
+  font-size: 12px;
+  color: var(--color-dim);
+  text-align: center;
+  margin-top: -6px;
+  animation: cinemaFadeUp 0.4s ease 0.45s both;
 }
 
 .cinema-rating {
