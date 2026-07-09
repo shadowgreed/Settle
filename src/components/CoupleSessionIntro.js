@@ -12,7 +12,7 @@ import './CoupleSessionIntro.css';
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STEPS = [
-  { icon: '📱', title: 'Two phones', body: "You each use your own phone — his and hers, side by side." },
+  { icon: '📱', title: 'Two phones', body: 'You each use your own phone, side by side or miles apart.' },
   { icon: '🔗', title: 'Link once',  body: 'Share a 6-character code with your partner. One time only.' },
   { icon: '🎭', title: 'Pick & vote', body: 'Each choose your moods, then a secret vote settles it together.' },
 ];

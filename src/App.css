@@ -1700,6 +1700,20 @@ button.sequel-badge {
   animation: toastIn 0.3s ease, toastOut 0.4s ease 2.4s forwards;
 }
 
+/* Collision avoidance (spec §2.3) — measured against the real rendered
+   geometry at 375×667 (iPhone SE): the CTA bar occupies ~122px of the
+   viewport bottom, and the cinema-card's action row clears at ~128.5px
+   when centered in the same viewport. Offsets below add headroom on top
+   of those measurements rather than the spec's minimum 12px, since modal
+   content height varies (longer titles, the theater "Get tickets" variant). */
+.toast.toast-above-cta {
+  bottom: calc(134px + env(safe-area-inset-bottom));
+}
+
+.toast.toast-above-modal {
+  bottom: calc(150px + env(safe-area-inset-bottom));
+}
+
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
@@ -2236,6 +2250,8 @@ button.sequel-badge {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.93);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -2294,26 +2310,41 @@ button.sequel-badge {
   font-weight: 500;
 }
 
+/* Corner-ribbon (spec §2.1) — a dedicated clipping box in the poster's
+   corner, sized to ~45% of the poster width so the ribbon never crosses
+   into the title area. The ribbon strip inside is oversized and rotated
+   45° so both ends exit the wrapper's bounds (clean cut at the box edge)
+   rather than clipping mid-letter the way the old full-width span did. */
+.cinema-stamp-wrap {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100px;
+  height: 100px;
+  overflow: hidden;
+  z-index: 2;
+}
+
 .cinema-stamp {
   position: absolute;
-  top: 38px;
-  left: -22px;
-  width: 60%;
+  top: 20px;
+  left: -34px;
+  width: 168px;
   background: #EF9F27;
   color: #0a0a0a;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.02em;
   text-align: center;
-  padding: 8px 0;
-  transform: rotate(-20deg) scale(0);
+  padding: 6px 0;
+  transform: rotate(-45deg) scale(0);
   transform-origin: center;
   animation: stampIn 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.65s forwards;
 }
 
 @keyframes stampIn {
-  from { transform: rotate(-20deg) scale(2.2); opacity: 0; }
-  to   { transform: rotate(-20deg) scale(1);   opacity: 1; }
+  from { transform: rotate(-45deg) scale(2.2); opacity: 0; }
+  to   { transform: rotate(-45deg) scale(1);   opacity: 1; }
 }
 
 .cinema-title {
@@ -3141,6 +3172,12 @@ button.sequel-badge {
   .cinema-poster-placeholder { width: 200px; height: 300px; }
   .cinema-title { font-size: 20px; max-width: 260px; }
 
+  /* Ribbon wrapper scales with the poster so its reach stays ~45% of the
+     current poster width; the ribbon's own top/left scale with it so the
+     diagonal still crosses the wrapper's corner correctly. */
+  .cinema-stamp-wrap { width: 90px; height: 90px; }
+  .cinema-stamp { top: 18px; left: -31px; }
+
   .history-panel { border-radius: 16px 16px 0 0; }
 
   .onboarding-overlay { padding: 1.25rem; }
@@ -3196,6 +3233,14 @@ button.sequel-badge {
   .cinema-poster,
   .cinema-poster-placeholder { width: 170px; height: 255px; }
   .cinema-title { font-size: 18px; max-width: 240px; }
+
+  /* A strict 45%-of-poster wrapper (76px) clips the longest English string
+     ("Late-night Pick 🎬") below the 12px type-size floor the spec sets as
+     a hard minimum — reusing the 90px size from the mid breakpoint instead
+     trades a slightly wider reach (~53% vs. 45%) for zero clipped letters,
+     which the spec treats as the higher-priority constraint. */
+  .cinema-stamp-wrap { width: 90px; height: 90px; }
+  .cinema-stamp { top: 18px; left: -31px; }
 
   /* Secret ballot vote buttons tighten */
   .ballot-votes { gap: 12px; }

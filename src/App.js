@@ -3265,6 +3265,14 @@ function App() {
   // always, couples quick-pick only).
   const showPickForm = !coupleSession && mode !== 'theater' && (mode !== 'couple' || coupleFlow === 'quick');
 
+  // Toast collision avoidance (spec §2.3) — all three page-level toasts share
+  // this class so none of them land on top of the sticky CTA bar or a
+  // full-screen modal's own action row.
+  const toastPositionClass =
+    (cinemaMode || showShareModal) ? ' toast-above-modal'
+    : showPickForm                 ? ' toast-above-cta'
+    : '';
+
   return (
     <div className={`app${showPickForm ? ' app-cta-padded' : ''}`}>
       {/* Skip link — visually hidden until focused. Lets keyboard users
@@ -3273,8 +3281,16 @@ function App() {
 
       {/* Account bar — sticky nav (Netflix-style). Transparent at rest;
           frosted-glass once the user scrolls past 10 px. Sign-out lives
-          inside Settings next to the account name. */}
-      <div className={`account-bar${navScrolled ? ' scrolled' : ''}`}>
+          inside Settings next to the account name.
+          inert + aria-hidden while the confirmation modal is open (spec §2.2)
+          — useFocusTrap only cycles Tab focus, it doesn't stop a screen
+          reader's swipe/rotor navigation from reaching content behind the
+          modal, which inert does natively. */}
+      <div
+        className={`account-bar${navScrolled ? ' scrolled' : ''}`}
+        inert={cinemaMode || undefined}
+        aria-hidden={cinemaMode || undefined}
+      >
         <img className="account-brand" src={settleWordmark} alt="Settle" draggable="false" />
         <div className="account-bar-right">
           {streakInfo ? (
@@ -4115,7 +4131,7 @@ function App() {
           mode. Reachable from any scroll position; `.app-cta-padded` above
           reserves the matching bottom space so it never covers the footer. */}
       {showPickForm && (
-        <div className="cta-bar">
+        <div className="cta-bar" inert={cinemaMode || undefined} aria-hidden={cinemaMode || undefined}>
           <div className="cta-bar-inner">
             <div className={`cta-bar-summary${zeroMatches ? ' cta-bar-zero' : ''}`}>
               {zeroMatches ? 'No matches — loosen a filter' : ctaSummary}
@@ -4212,7 +4228,11 @@ function App() {
       )}
 
       {result && !loading && (
-        <div className="result show">
+        <div
+          className="result show"
+          inert={cinemaMode || undefined}
+          aria-hidden={cinemaMode || undefined}
+        >
           <div className="result-inner">
             <div className="poster-wrap">
               <div className="poster">
@@ -4506,11 +4526,11 @@ function App() {
 
       {/* Toast */}
       {showToast && (
-        <div className="toast">✓ Added to your watch history</div>
+        <div className={`toast${toastPositionClass}`}>✓ Added to your watch history</div>
       )}
 
       {showNoSimilarToast && (
-        <div className="toast">No similar titles on your services — here's a fresh pick</div>
+        <div className={`toast${toastPositionClass}`}>No similar titles on your services — here's a fresh pick</div>
       )}
 
       {/* History panel */}
@@ -4943,7 +4963,7 @@ function App() {
                 <img
                   className="cinema-poster"
                   src={tmdbService.getPosterUrl(cinemaItem.posterPath, 'w500')}
-                  alt=""
+                  alt={`${cinemaItem.title} poster`}
                 />
               ) : (
                 <div
@@ -4954,7 +4974,24 @@ function App() {
                   {cinemaItem.service}
                 </div>
               )}
-              {cinemaSource === 'pick' && <div className="cinema-stamp" aria-hidden="true">{pickLabel(mode)} 🎬</div>}
+              {/* Corner-ribbon (spec §2.1) — a small clipping wrapper in the
+                  poster's corner, not the poster itself, so the ribbon's ends
+                  terminate cleanly at the wrapper's edges instead of clipping
+                  mid-letter. Hidden entirely without a real poster (nothing to
+                  anchor the corner to). aria-label drops the "Our " couple
+                  prefix so VoiceOver hears one clean phrase, not the full
+                  visual string twice. */}
+              {cinemaSource === 'pick' && cinemaItem.posterPath && (
+                <div className="cinema-stamp-wrap">
+                  <div
+                    className="cinema-stamp"
+                    role="img"
+                    aria-label={pickLabel(mode).replace(/^Our /, '')}
+                  >
+                    {pickLabel(mode)} <span aria-hidden="true">🎬</span>
+                  </div>
+                </div>
+              )}
             </div>
             <h2 id="cinema-title" className="cinema-title">{cinemaItem.title}</h2>
             <div className="cinema-meta">
@@ -5323,7 +5360,7 @@ function App() {
 
       {/* Share copied toast */}
       {shareCopied && (
-        <div className="toast" role="status">Link copied to clipboard!</div>
+        <div className={`toast${toastPositionClass}`} role="status">Link copied to clipboard!</div>
       )}
 
       {/* Consent banner */}
