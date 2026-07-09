@@ -3,7 +3,7 @@ import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
 import { generateShareCard } from './utils/shareCard';
-import { pickLabel, pickVerb, moodGreeting } from './utils/timeOfDay';
+import { pickLabel, pickVerb } from './utils/timeOfDay';
 import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
@@ -142,6 +142,30 @@ const MOODS = [
 ];
 const ANIME_KEYWORD = '210024';
 
+// Stepped rating filter (replaces the old 0-10 drag slider). Values are exact
+// TMDB vote_average floors; labels are what the pill shows. minRating stays a
+// plain number so every discoverContent call site is unaffected by this UI
+// change — only the control that sets it changed.
+const RATING_STEPS = [
+  { label: 'Any',         value: 0 },
+  { label: 'Good 6+',     value: 6 },
+  { label: 'Great 7+',    value: 7 },
+  { label: 'Top-tier 8+', value: 8 },
+];
+
+// Legacy slider values (e.g. a stored 6.4 or 7.9 from the old 0-10 drag
+// control) snap DOWN to the nearest step so nobody's filter silently gets
+// stricter after this migration.
+function snapRatingStep(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  let snapped = RATING_STEPS[0].value;
+  for (const step of RATING_STEPS) {
+    if (step.value <= n) snapped = step.value;
+  }
+  return snapped;
+}
+
 // Maps decade-mood IDs to TMDB date-range query parameters. Multiple decade
 // IDs combine by spanning the min `gte` and max `lte` (e.g. '80s + '90s
 // becomes 1980-01-01 → 1999-12-31).
@@ -199,7 +223,7 @@ function App() {
     return { solo: [], p1: [], p2: [], theater: [], session: [], ...saved };
   });
   const [selectedFormats, setSelectedFormats] = useState(() => loadPrefs().formats || ['Movie', 'Series']);
-  const [minRating, setMinRating] = useState(() => loadPrefs().minRating ?? 6.0);
+  const [minRating, setMinRating] = useState(() => snapRatingStep(loadPrefs().minRating ?? 6.0));
   const [genres, setGenres] = useState([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -454,7 +478,7 @@ function App() {
       if (Array.isArray(p.services))         setSelectedServices(p.services);
       if (p.genres && typeof p.genres === 'object') setSelectedGenres(g => ({ ...g, ...p.genres }));
       if (Array.isArray(p.formats))          setSelectedFormats(p.formats);
-      if (p.minRating != null)               setMinRating(p.minRating);
+      if (p.minRating != null)               setMinRating(snapRatingStep(p.minRating));
       if ('maxCertification' in p)           setMaxCertification(p.maxCertification);
       // p.maxRuntime intentionally ignored — filter removed in P2.2.
     }
@@ -1028,6 +1052,22 @@ function App() {
     const union = [...new Set([...a, ...b])];
     return Math.round((overlap.length / union.length) * 100);
   }, [mode, couplePair, coupleSession]);
+
+  // Summary line for the sticky CTA bar — "{Format} · {Rating label} · {N}
+  // vibes[ · {M} matches]". The matches segment is appended by the live
+  // match-count feature (Phase 3); until then it's just format/rating/vibes.
+  const ctaSummary = useMemo(() => {
+    const formatLabel = selectedFormats.length === 2
+      ? 'Movies & Series'
+      : selectedFormats[0] === 'Series' ? 'Series' : 'Movies';
+    const ratingLabel = (RATING_STEPS.find(s => s.value === minRating) || RATING_STEPS[0]).label;
+    const vibesPlayer = mode === 'couple' ? activePlayer : 'solo';
+    const vibesCount = MOODS.filter(m => isMoodActive(m.ids, vibesPlayer)).length;
+    return `${formatLabel} · ${ratingLabel} · ${vibesCount} vibe${vibesCount === 1 ? '' : 's'}`;
+  // isMoodActive closes over selectedGenres, which is already a dep — including
+  // the function itself would just redefine on every render with no benefit.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFormats, minRating, mode, activePlayer, selectedGenres]);
 
   // O(1) lookups — replaces .find() inside .map() callsites that were O(n²).
   const genreById = useMemo(() => {
@@ -2833,8 +2873,13 @@ function App() {
   }
   if (!user) return <AuthGate />;
 
+  // The sticky CTA bar (and its reserved bottom padding) only renders where
+  // there's an active pick-form to submit — not in theater mode, and not
+  // while a couple session already has the picker running automatically.
+  const showCtaBar = !coupleSession && mode !== 'theater';
+
   return (
-    <div className="app">
+    <div className={`app${showCtaBar ? ' app-cta-padded' : ''}`}>
       {/* Skip link — visually hidden until focused. Lets keyboard users
           bypass the account bar + mode tabs and jump to the pick form. */}
       <a href="#main-content" className="skip-link">Skip to main content</a>
@@ -3104,6 +3149,23 @@ function App() {
         </button>
       </div>
 
+      {/* Solo context banner (spec §3.8) — reflects the current mood picks
+          back at the user so the configuration reads at a glance even before
+          scrolling to the grid. Solo only; Couples gets its own progress
+          banner in the quick-pick flow. */}
+      {mode === 'solo' && (() => {
+        const activeMoods = MOODS.filter(m => isMoodActive(m.ids, 'solo'));
+        const shown = activeMoods.slice(0, 6);
+        const extra = activeMoods.length - shown.length;
+        return (
+          <div className="solo-context-banner" aria-live="polite">
+            {activeMoods.length === 0
+              ? 'Pick a mood or two — recs sharpen with each one ✨'
+              : <>Tonight's read: {shown.map(m => m.emoji).join(' ')}{extra > 0 ? ` +${extra}` : ''} — nice combo</>}
+          </div>
+        );
+      })()}
+
       {welcomeBack && (
         <div className="welcome-back" role="status">
           <span aria-hidden="true">↩ </span>Preferences restored from your last session
@@ -3117,22 +3179,37 @@ function App() {
         const genreListId = `${moodPlayer}-genre-list`;
         return (
           <div className="section">
-            <div className="label" id="mood-greeting-label">
-              {moodGreeting()}
+            <div className="mood-section-label" id="mood-greeting-label">
+              What's the vibe?
             </div>
             <div className="mood-grid" role="group" aria-labelledby="mood-greeting-label">
-              {MOODS
-                .map(mood => (
-                  <button
-                    key={mood.label}
-                    className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
-                    onClick={() => handleMoodClick(mood.ids, moodPlayer)}
-                    aria-pressed={isMoodActive(mood.ids, moodPlayer)}
-                  >
-                    <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
-                    <span className="mood-label">{mood.label}</span>
-                  </button>
-                ))}
+              {MOODS.slice(0, 8).map(mood => (
+                <button
+                  key={mood.label}
+                  className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
+                  onClick={() => handleMoodClick(mood.ids, moodPlayer)}
+                  aria-pressed={isMoodActive(mood.ids, moodPlayer)}
+                >
+                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                  <span className="mood-label">{mood.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="era-divider" role="separator">
+              <span className="era-divider-label">Era</span>
+            </div>
+            <div className="mood-grid mood-grid-era" role="group" aria-label="Decades">
+              {MOODS.slice(8).map(mood => (
+                <button
+                  key={mood.label}
+                  className={`mood-btn ${isMoodActive(mood.ids, moodPlayer) ? 'mood-on' : ''}`}
+                  onClick={() => handleMoodClick(mood.ids, moodPlayer)}
+                  aria-pressed={isMoodActive(mood.ids, moodPlayer)}
+                >
+                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                  <span className="mood-label">{mood.label}</span>
+                </button>
+              ))}
             </div>
             <button
               className="show-genres-toggle"
@@ -3318,7 +3395,23 @@ function App() {
           {/* Active player mood + genre grid */}
           <div className={`couple-genre-panel ${activePlayer === 'p1' ? 'p1-panel' : 'p2-panel'}`}>
             <div className="mood-grid" role="group" aria-label={`Moods for ${activePlayer === 'p1' ? playerNames.p1 : playerNames.p2}`}>
-              {MOODS.map(mood => (
+              {MOODS.slice(0, 8).map(mood => (
+                <button
+                  key={mood.label}
+                  className={`mood-btn ${isMoodActive(mood.ids, activePlayer) ? 'mood-on' : ''}`}
+                  onClick={() => handleMoodClick(mood.ids, activePlayer)}
+                  aria-pressed={isMoodActive(mood.ids, activePlayer)}
+                >
+                  <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                  <span className="mood-label">{mood.label}</span>
+                </button>
+              ))}
+            </div>
+            <div className="era-divider" role="separator">
+              <span className="era-divider-label">Era</span>
+            </div>
+            <div className="mood-grid mood-grid-era" role="group" aria-label="Decades">
+              {MOODS.slice(8).map(mood => (
                 <button
                   key={mood.label}
                   className={`mood-btn ${isMoodActive(mood.ids, activePlayer) ? 'mood-on' : ''}`}
@@ -3436,25 +3529,23 @@ function App() {
           </div>
         </div>
         <div className="fcard">
-          <label className="label" htmlFor="min-rating-input">Min Rating</label>
-          <div className="range-row">
-            <div className="range-wrap">
-              <input
-                id="min-rating-input"
-                type="range"
-                min="0"
-                max="10"
-                step="0.5"
-                value={minRating}
-                onChange={(e) => setMinRating(parseFloat(e.target.value))}
-                aria-valuemin={0}
-                aria-valuemax={10}
-                aria-valuenow={minRating}
-                aria-valuetext={`${minRating.toFixed(1)} out of 10`}
-              />
-              <span className="range-hint" aria-hidden="true">drag to adjust</span>
-            </div>
-            <span className="rval" aria-hidden="true">{minRating.toFixed(1)}</span>
+          <div className="label" id="rating-label">Min Rating</div>
+          <div className="rating-row" role="radiogroup" aria-labelledby="rating-label">
+            {RATING_STEPS.map(step => {
+              const active = minRating === step.value;
+              return (
+                <button
+                  type="button"
+                  key={step.label}
+                  className={`rating-chip ${active ? 'rating-on' : ''}`}
+                  onClick={() => setMinRating(step.value)}
+                  role="radio"
+                  aria-checked={active}
+                >
+                  {step.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -3466,9 +3557,9 @@ function App() {
           <div className="cert-row" role="radiogroup" aria-labelledby="cert-label">
             {[
               { label: 'All', value: null, aria: 'All' },
-              { label: '🧒 Family', value: 'PG', aria: 'Family (PG)' },
-              { label: 'PG-13', value: 'PG-13', aria: 'PG-13' },
-              { label: 'R & under', value: 'R', aria: 'R and under' }
+              { label: '🧒 Family', value: 'PG', aria: 'Family' },
+              { label: 'Teen', value: 'PG-13', aria: 'Teen' },
+              { label: 'Mature', value: 'R', aria: 'Mature' }
             ].map(opt => {
               const active = maxCertification === opt.value;
               return (
@@ -3495,22 +3586,27 @@ function App() {
       {mode !== 'theater' && (
         <div className="section">
           <div className="label" id="services-label">Your Services</div>
-          <div className="chip-grid" role="group" aria-labelledby="services-label">
-            {SERVICES.map(service => {
-              const active = selectedServices.includes(service.name);
-              return (
-                <button
-                  type="button"
-                  key={service.name}
-                  className={`chip ${active ? 'svc-on' : ''}`}
-                  onClick={() => toggleService(service.name)}
-                  aria-pressed={active}
-                >
-                  <span className="sdot" style={{ background: service.color }} aria-hidden="true" />
-                  {service.name}
-                </button>
-              );
-            })}
+          {/* Horizontal scroll, never wraps — fixes the orphaned last pill
+              (e.g. Max) on narrow screens. Right-edge fade is a visual
+              affordance that more content exists off-screen. */}
+          <div className="services-scroll-wrap">
+            <div className="chip-grid services-row" role="group" aria-labelledby="services-label">
+              {SERVICES.map(service => {
+                const active = selectedServices.includes(service.name);
+                return (
+                  <button
+                    type="button"
+                    key={service.name}
+                    className={`chip ${active ? 'svc-on' : ''}`}
+                    onClick={() => toggleService(service.name)}
+                    aria-pressed={active}
+                  >
+                    <span className="sdot" style={{ background: service.color }} aria-hidden="true" />
+                    {service.name}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -3523,19 +3619,32 @@ function App() {
           `matchCount` is still tracked in state so the empty-state branch
           below can fire when the filter combo produces zero results. */}
 
-      {/* Hidden during an active couple session — the pick is generated
-          automatically once both partners lock in, and re-picks come from the
-          shared result card's "Try another". */}
-      {!coupleSession && mode !== 'theater' && (
-        <div className="btn-row">
-          <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
-            {loading ? 'Finding...' : 'Find something for us →'}
-          </button>
-          {mode !== 'theater' && (
-            <button className="hidden-gem-btn" onClick={() => pickContent(true)} disabled={loading}>
-              <span aria-hidden="true">💎</span> Hidden Gem
-            </button>
-          )}
+      {/* Sticky bottom CTA — hidden during an active couple session (the pick
+          is generated automatically once both partners lock in, and re-picks
+          come from the shared result card's "Try another") and in theater
+          mode. Reachable from any scroll position; `.app-cta-padded` above
+          reserves the matching bottom space so it never covers the footer. */}
+      {showCtaBar && (
+        <div className="cta-bar">
+          <div className="cta-bar-inner">
+            <div className={`cta-bar-summary${matchCount === 0 && hasSearched ? ' cta-bar-zero' : ''}`}>
+              {matchCount === 0 && hasSearched ? 'No matches — loosen a filter' : ctaSummary}
+            </div>
+            <div className="cta-bar-row">
+              <button className="pick-btn" onClick={() => pickContent(false)} disabled={loading}>
+                {loading ? 'Finding...' : mode === 'solo' ? 'Find something for me →' : 'Find something for us →'}
+              </button>
+              <button
+                className="hidden-gem-btn"
+                onClick={() => pickContent(true)}
+                disabled={loading}
+                aria-label="Hidden Gem"
+                title="Hidden Gem"
+              >
+                <span aria-hidden="true">💎</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

@@ -81,7 +81,23 @@ export default function CoupleSessionSelect({
         <>
           <p className="csess-cue">Pick your moods — {partner} picks theirs on their phone.</p>
           <div className="mood-grid" role="group" aria-label="Your moods">
-            {moods.map(mood => (
+            {moods.slice(0, 8).map(mood => (
+              <button
+                key={mood.label}
+                className={`mood-btn ${isMoodActive(mood.ids) ? 'mood-on' : ''}`}
+                onClick={() => onToggleMood(mood.ids)}
+                aria-pressed={isMoodActive(mood.ids)}
+              >
+                <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                <span className="mood-label">{mood.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="era-divider" role="separator">
+            <span className="era-divider-label">Era</span>
+          </div>
+          <div className="mood-grid mood-grid-era" role="group" aria-label="Decades">
+            {moods.slice(8).map(mood => (
               <button
                 key={mood.label}
                 className={`mood-btn ${isMoodActive(mood.ids) ? 'mood-on' : ''}`}

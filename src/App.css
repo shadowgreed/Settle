@@ -1,3 +1,23 @@
+/* ── Design tokens (Home redesign, July 2026) ────────────────────────────────
+   Scoped in practice to the home/filter screen (Solo + Couples) — the rest of
+   the app (result card, cinema overlay, onboarding, settings, history panel)
+   still uses literal hex values and is unaffected by this token layer. */
+:root {
+  --color-bg: #0A0A0C;
+  --color-surface: #141418;
+  --color-surface-hi: #1D1D23;
+  --color-border: #2A2A32;
+  --color-accent: #F0A030;
+  --color-accent-deep: #D98A1B;
+  --color-text: #F2F2F4;
+  --color-dim: #93939C;
+  --color-faint: #5C5C66;
+  --color-person-1: #4C7DFF;
+  --color-person-2: #FF5C9E;
+  --radius-pill: 9999px;
+  --radius-card: 16px;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -49,6 +69,13 @@ body {
   padding: 0 1rem 2rem;
   max-width: 680px;
   margin: 0 auto;
+}
+
+/* Reserve space above the fixed sticky CTA bar so the footer/result card
+   never sits underneath it. Toggled via JS only on views where the bar
+   actually renders (solo, couples quick-pick — not theater/active session). */
+.app.app-cta-padded {
+  padding-bottom: 176px;
 }
 
 /* ── Account bar ─────────────────────────────────────────────────────────── */
@@ -237,6 +264,29 @@ button.sequel-badge {
   margin-bottom: 8px;
 }
 
+/* Mood grid section header — "What's the vibe?" (spec §3.7), replaces the
+   old time-of-day greeting. */
+.mood-section-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--color-faint);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* Solo context banner (spec §3.8) — sits directly under the mode tabs. */
+.solo-context-banner {
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 12px 16px;
+  font-size: 14px;
+  color: var(--color-dim);
+  margin-bottom: 14px;
+  transition: opacity 150ms ease;
+}
+
 .section {
   margin-bottom: 1.5rem;
 }
@@ -245,6 +295,36 @@ button.sequel-badge {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+/* Services row — horizontal scroll, never wraps (spec §3.6). Kept as a
+   modifier on .chip-grid rather than the genre-expand grid, which should
+   keep wrapping. */
+.services-scroll-wrap {
+  position: relative;
+}
+.services-scroll-wrap::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 24px;
+  background: linear-gradient(to right, transparent, var(--color-bg));
+  pointer-events: none;
+}
+.chip-grid.services-row {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 24px; /* clears the fade mask so the last pill isn't covered */
+}
+.chip-grid.services-row::-webkit-scrollbar {
+  display: none;
+}
+.chip-grid.services-row .chip {
+  flex-shrink: 0;
 }
 
 .chip {
@@ -340,84 +420,54 @@ button.sequel-badge {
   cursor: pointer;
   padding: 10px 14px;
   border-radius: 14px;
-  border: 0.5px solid #333;
-  background: transparent;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hi);
   font-size: 12px;
-  color: #b8b8b8;
-  transition: all 0.15s;
+  color: var(--color-dim);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
   min-height: 40px;
   display: inline-flex;
   align-items: center;
   touch-action: manipulation;
 }
 
+.tog:active { transform: scale(0.98); }
+
 .tog.on {
-  background: #f5f5f5;
-  color: #0a0a0a;
-  border-color: #f5f5f5;
+  background: var(--color-text);
+  color: #111;
+  border-color: var(--color-text);
 }
 
-.range-row {
+/* Stepped rating pills (replaces the old 0-10 drag slider) */
+.rating-row {
   display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.rating-chip {
+  cursor: pointer;
+  padding: 8px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hi);
+  font-size: 12px;
+  color: var(--color-dim);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  min-height: 40px;
+  display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 2px 0;
+  touch-action: manipulation;
+  white-space: nowrap;
 }
 
-.range-wrap {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: 10px;
-}
+.rating-chip:active { transform: scale(0.98); }
 
-.range-hint {
-  font-size: 10px;
-  color: #555;
-  letter-spacing: 0.04em;
-  text-align: center;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-input[type="range"] {
-  width: 100%;
-  -webkit-appearance: none;
-  appearance: none;
-  height: 6px;
-  border-radius: 3px;
-  background: #2a2a2a;
-  background-clip: content-box;
-  outline: none;
-  display: block;
-}
-
-input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #f5f5f5;
-  cursor: pointer;
-  border: 2px solid #f5f5f5;
-}
-
-input[type="range"]::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: #f5f5f5;
-  cursor: pointer;
-  border: 2px solid #f5f5f5;
-}
-
-.rval {
-  font-size: 13px;
-  font-weight: 500;
-  min-width: 28px;
-  color: #f5f5f5;
+.rating-chip.rating-on {
+  background: var(--color-text);
+  color: #111;
+  border-color: var(--color-text);
 }
 
 .divider {
@@ -426,32 +476,68 @@ input[type="range"]::-moz-range-thumb {
   margin: 0 0 1.5rem;
 }
 
-.btn-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
+/* ── Sticky bottom CTA bar ────────────────────────────────────────────────── */
+.cta-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: center;
+  padding: 20px 20px max(24px, calc(env(safe-area-inset-bottom) + 24px));
+  background: linear-gradient(to top, var(--color-bg) 0%, var(--color-bg) 65%, transparent 100%);
+  pointer-events: none; /* re-enabled on the inner content */
+}
+
+.cta-bar-inner {
+  width: 100%;
+  max-width: 680px; /* matches .app */
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  margin-top: 1.25rem;
-  margin-bottom: 1.5rem;
+  pointer-events: all;
+}
+
+.cta-bar-summary {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-dim);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cta-bar-summary.cta-bar-zero {
+  color: var(--color-accent);
+}
+
+.cta-bar-row {
+  display: flex;
+  gap: 8px;
 }
 
 .pick-btn {
-  padding: 8px 13px;
-  border-radius: 12px;
+  flex: 1 1 auto;
+  height: 52px;
+  border-radius: var(--radius-pill);
   border: none;
-  background: #f5f5f5;
-  color: #0a0a0a;
-  font-size: 14px;
-  font-weight: 500;
+  background: var(--color-accent);
+  color: #1A1206;
+  font-size: 16px;
+  font-weight: 700;
   cursor: pointer;
+  box-shadow: 0 4px 24px rgba(240, 160, 48, 0.27);
   transition: opacity 0.15s, transform 0.1s;
 }
 
 .pick-btn:hover:not(:disabled) {
-  opacity: 0.85;
+  opacity: 0.92;
 }
 
 .pick-btn:active:not(:disabled) {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 
 .pick-btn:disabled {
@@ -460,20 +546,23 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .hidden-gem-btn {
-  padding: 13px 18px;
-  border-radius: 12px;
-  border: 0.5px solid #333;
-  background: transparent;
-  font-size: 13px;
-  color: #999;
+  flex: 0 0 56px;
+  height: 52px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-hi);
+  font-size: 20px;
+  color: var(--color-dim);
   cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 
 .hidden-gem-btn:hover:not(:disabled) {
-  background: #151515;
-  color: #f5f5f5;
+  border-color: var(--color-text);
+  color: var(--color-text);
 }
 
 .hidden-gem-btn:disabled {
@@ -912,23 +1001,26 @@ input[type="range"]::-moz-range-thumb {
 }
 .cert-chip {
   padding: 10px 16px;
-  border-radius: 20px;
-  border: 0.5px solid #333;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border);
   font-size: 12px;
-  color: #c8c8c8;
+  color: var(--color-dim);
   cursor: pointer;
-  transition: all 0.15s;
-  background: #111;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.1s;
+  background: var(--color-surface-hi);
   min-height: 40px;
   display: inline-flex;
   align-items: center;
   touch-action: manipulation;
 }
-.cert-chip:hover { border-color: #555; color: #fff; }
+.cert-chip:active { transform: scale(0.98); }
+.cert-chip:hover { border-color: var(--color-text); color: var(--color-text); }
+/* Standard selected treatment — no more indigo fill on "All" (or any cert
+   pill); this row now matches every other filter pill on the screen. */
 .cert-chip.cert-on {
-  background: #1a1a2e;
-  border-color: #4a4aaa;
-  color: #a0a0ff;
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: #111;
   font-weight: 600;
 }
 
@@ -1145,6 +1237,24 @@ input[type="range"]::-moz-range-thumb {
   border-left: 2px solid rgba(236, 72, 153, 0.5);
 }
 
+/* Couples selected-state mood cards use person-tint instead of solo's white
+   fill (spec §3.7 state table) — the panel border-left already carries the
+   identity, this reinforces it on every selected tile. */
+.p1-panel .mood-btn.mood-on {
+  background: rgba(76, 125, 255, 0.13);
+  border-color: var(--color-person-1);
+}
+.p1-panel .mood-btn.mood-on .mood-label {
+  color: var(--color-text);
+}
+.p2-panel .mood-btn.mood-on {
+  background: rgba(255, 92, 158, 0.13);
+  border-color: var(--color-person-2);
+}
+.p2-panel .mood-btn.mood-on .mood-label {
+  color: var(--color-text);
+}
+
 /* ── Mood buttons ── */
 .mood-grid {
   display: grid;
@@ -1153,30 +1263,63 @@ input[type="range"]::-moz-range-thumb {
   margin-bottom: 10px;
 }
 
+/* Row 3 — decade tiles get their own 3-column grid (spec §3.7) */
+.mood-grid.mood-grid-era {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+/* Divider between moods and decades — hairline both sides of a centered
+   "Era" label, matching the section-header style used elsewhere. */
+.era-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0;
+}
+.era-divider::before,
+.era-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 0.5px;
+  background: var(--color-border);
+}
+.era-divider-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--color-faint);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
 .mood-btn {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 5px;
   padding: 12px 6px;
-  border-radius: 12px;
-  border: 0.5px solid #222;
-  background: #0f0f0f;
+  border-radius: var(--radius-card);
+  border: 1.5px solid var(--color-border);
+  background: var(--color-surface);
   cursor: pointer;
-  transition: all 0.18s;
+  transition: background 0.18s, border-color 0.18s, transform 0.12s ease-out;
   font-family: inherit;
-  min-height: 56px;
+  min-height: 64px;
   touch-action: manipulation;
 }
 
 .mood-btn:hover {
-  border-color: #444;
-  background: #161616;
+  border-color: var(--color-faint);
+  background: var(--color-surface-hi);
 }
 
+/* Solo selected state — white fill (spec's "filter selected" treatment).
+   The 1.0 → 1.02 scale on selection is the transition itself, not a
+   press effect — .mood-btn's base transition (120ms ease-out) animates it. */
 .mood-btn.mood-on {
-  border-color: #f5f5f5;
-  background: #f5f5f5;
+  border-color: var(--color-text);
+  background: var(--color-text);
+  transform: scale(1.02);
 }
 
 .mood-emoji {
@@ -1187,12 +1330,12 @@ input[type="range"]::-moz-range-thumb {
 .mood-label {
   font-size: 10px;
   font-weight: 500;
-  color: #888;
+  color: var(--color-dim);
   letter-spacing: 0.02em;
 }
 
 .mood-btn.mood-on .mood-label {
-  color: #0a0a0a;
+  color: #111;
 }
 
 .show-genres-toggle {
@@ -1329,6 +1472,7 @@ input[type="range"]::-moz-range-thumb {
 
 @media (prefers-reduced-motion: reduce) {
   .shared-zone, .shared-chip { animation: none; }
+  .mood-btn { transition: background 0s, border-color 0s; transform: none !important; }
 }
 
 .shared-zone-label {
