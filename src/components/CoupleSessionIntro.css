@@ -121,12 +121,23 @@
 }
 .csi-start:hover { opacity: 0.9; }
 
-/* Footer fallback note */
-.csi-foot {
+/* Escape hatch (spec §1.4) — a real button, ≥44pt hit area padded onto the
+   hit area rather than the visual so the text stays the same small size
+   as the old fallback note it replaces. */
+.csi-skip {
+  display: block;
+  width: 100%;
   margin: 16px 0 0;
-  font-size: 12px;
-  color: #777;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--color-dim, #999);
   text-align: center;
   line-height: 1.45;
+  cursor: pointer;
+  padding: 12px 4px;
+  min-height: 44px;
+  touch-action: manipulation;
 }
-.csi-foot strong { color: #aaa; }
+.csi-skip:hover { color: #ccc; }

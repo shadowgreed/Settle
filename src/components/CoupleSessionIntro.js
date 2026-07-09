@@ -24,6 +24,7 @@ export default function CoupleSessionIntro({
   onUnlink,
   onStart,
   onClose,
+  onSkipToQuickPick,
 }) {
   const modalRef = useRef(null);
   useFocusTrap(modalRef, true);
@@ -96,10 +97,14 @@ export default function CoupleSessionIntro({
           </button>
         )}
 
+        {/* Escape hatch (spec §1.4) — a real tap target, not just instructions
+            for one the user has to go perform themselves. Keeps the session
+            alive (Quick Pick) instead of a dead end when a partner can't
+            link right now, giving linking a second chance later. */}
         {!linked && (
-          <p className="csi-foot">
-            Not together right now? You can still pick on this one phone — just choose <strong>Couples</strong> and pass it back and forth.
-          </p>
+          <button type="button" className="csi-skip" onClick={onSkipToQuickPick}>
+            Not together right now? Pick on this phone instead →
+          </button>
         )}
       </div>
     </div>

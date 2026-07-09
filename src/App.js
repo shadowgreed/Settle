@@ -16,6 +16,7 @@ import {
   trackPickAccepted, trackPickRejected, trackPickMarkedSeen, trackResultSynopsisExpanded,
   trackHistoryItemRated, trackHistoryRateNudgeTapped, trackHistoryCleared,
   trackMoreLikeThisTapped,
+  trackLinkModalOpened, trackLinkModalSkippedToQuickPick, trackConfirmModalDismissed,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -272,6 +273,13 @@ function App() {
   const [cinemaMode, setCinemaMode] = useState(false);
   const [cinemaSource, setCinemaSource] = useState('pick'); // 'pick' | 'history'
   const [replayResult, setReplayResult] = useState(null); // history replay only — never touches main result
+  // Per-open flag for trackConfirmModalDismissed's `openedService` property —
+  // did they tap Open on Service/Get tickets before dismissing? Reset on
+  // every fresh open so a stale true from a prior pick can't leak in.
+  const [cinemaOpenedService, setCinemaOpenedService] = useState(false);
+  useEffect(() => {
+    if (cinemaMode) setCinemaOpenedService(false);
+  }, [cinemaMode]);
   const [watchHistory, setWatchHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem('streaming-history')) || []; }
     catch { return []; }
@@ -3329,7 +3337,14 @@ function App() {
           )}
           <button
             className="account-settings-btn"
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              setShowSettings(true);
+              // Settings always shows the Partner section's linking UI when
+              // signed in (partnerLinkSlot below), so this mirrors the
+              // couples-fork call site's condition for "the linking UI is
+              // actually visible", not just "Settings opened".
+              if (user) trackLinkModalOpened({ source: 'settings' });
+            }}
             aria-label="Settings"
             title="Settings"
           >
@@ -3380,6 +3395,11 @@ function App() {
           onUnlink={handleUnlinkPartner}
           onStart={() => { setShowSessionIntro(false); setCoupleFlow('live'); }}
           onClose={() => setShowSessionIntro(false)}
+          onSkipToQuickPick={() => {
+            setShowSessionIntro(false);
+            setCoupleFlow('quick');
+            trackLinkModalSkippedToQuickPick();
+          }}
         />
       )}
 
@@ -3711,7 +3731,12 @@ function App() {
                 className="fork-card fork-card-live"
                 onClick={() => {
                   trackCoupleFlowSelected({ flow: 'live' });
-                  partnerUid ? setCoupleFlow('live') : setShowSessionIntro(true);
+                  if (partnerUid) {
+                    setCoupleFlow('live');
+                  } else {
+                    setShowSessionIntro(true);
+                    trackLinkModalOpened({ source: 'couples_fork' });
+                  }
                 }}
               >
                 <span className="fork-card-icon" aria-hidden="true">💑</span>
@@ -4952,9 +4977,13 @@ function App() {
         // touched here, so the card behind it is already in its accepted
         // state (the pick was saved to history when "Watching this" was
         // tapped, before this modal ever opened) — no re-fetch needed.
-        const closeCinemaModal = () => { setCinemaMode(false); setReplayResult(null); };
+        const closeCinemaModal = (via) => {
+          trackConfirmModalDismissed({ via, openedService: cinemaOpenedService });
+          setCinemaMode(false);
+          setReplayResult(null);
+        };
         return (
-        <div className="cinema-overlay" onClick={closeCinemaModal}>
+        <div className="cinema-overlay" onClick={() => closeCinemaModal('backdrop')}>
           <div
             ref={cinemaCardRef}
             className="cinema-card"
@@ -4964,7 +4993,7 @@ function App() {
             aria-labelledby="cinema-title"
             tabIndex={-1}
           >
-            <button className="cinema-close" onClick={closeCinemaModal} aria-label="Close">
+            <button className="cinema-close" onClick={() => closeCinemaModal('x')} aria-label="Close">
               <span aria-hidden="true">✕</span>
             </button>
             <div className="cinema-poster-wrap">
@@ -5038,6 +5067,7 @@ function App() {
                           mode,
                           surface: 'cinema_mode',
                         });
+                        setCinemaOpenedService(true);
                         handleTheaterMoviePick(cinemaItem);
                       }}
                       style={{ background: getServiceColor(cinemaItem.service) }}
@@ -5060,12 +5090,15 @@ function App() {
                     rel="noopener noreferrer"
                     style={{ background: getServiceColor(cinemaItem.service) }}
                     aria-label={`Open ${cinemaItem.title} on ${cinemaItem.service}`}
-                    onClick={() => trackDeepLinkOpened({
-                      service: cinemaItem.service,
-                      titleId: cinemaItem.id,
-                      mode,
-                      surface: 'cinema_mode',
-                    })}
+                    onClick={() => {
+                      trackDeepLinkOpened({
+                        service: cinemaItem.service,
+                        titleId: cinemaItem.id,
+                        mode,
+                        surface: 'cinema_mode',
+                      });
+                      setCinemaOpenedService(true);
+                    }}
                   >
                     ▶ Open on {cinemaItem.service}
                   </a>

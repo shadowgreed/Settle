@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { trackLinkCodeGenerated, trackLinkCodeShared } from '../services/analytics';
 import './CoupleLink.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ export default function CoupleLink({
       setExpiresAt(Date.now() + CODE_TTL_MS);
       setNow(Date.now());
       setView('showing-code');
+      trackLinkCodeGenerated();
     } catch (e) {
       setError(e?.message || 'Could not generate a code. Try again.');
     } finally {
@@ -86,6 +88,18 @@ export default function CoupleLink({
     navigator.clipboard?.writeText(code).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    trackLinkCodeShared({ method: 'copy' });
+  };
+
+  // Web Share API — the critical piece of the code-display state (spec §1.6):
+  // a code you can't send is a code that gets mistyped. Falls back silently
+  // when unavailable (desktop); Copy remains the universal path either way.
+  const handleShareCode = () => {
+    navigator.share({
+      title: 'Settle',
+      text: `Join me on Settle — enter code ${code}. https://trysettle.app`,
+    }).catch(() => {});
+    trackLinkCodeShared({ method: 'share_sheet' });
   };
 
   // ── P2 path: verify ────────────────────────────────────────────────────────
@@ -168,11 +182,23 @@ export default function CoupleLink({
           Share this code with your partner. It expires in 24 hours.
         </p>
         <div className="couplelink-code-block">
-          <span className="couplelink-code">{code}</span>
+          <button
+            type="button"
+            className="couplelink-code"
+            onClick={handleCopyCode}
+            aria-label="Copy code"
+          >
+            {code}
+          </button>
           <button className="couplelink-copy" onClick={handleCopyCode} aria-label="Copy code">
-            {copied ? '✓ Copied' : 'Copy'}
+            {copied ? 'Copied ✓' : 'Copy'}
           </button>
         </div>
+        {'share' in navigator && (
+          <button type="button" className="couplelink-share" onClick={handleShareCode}>
+            Send to your partner
+          </button>
+        )}
         <p className="couplelink-waiting">Waiting for your partner to enter it…</p>
         {expiresAt && (
           <p className="couplelink-expiry">{formatExpiry(expiresAt - now)}</p>

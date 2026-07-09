@@ -284,3 +284,34 @@ export function trackMoreLikeThisTapped({ seedTmdbId, resultFound }) {
 export function trackHistoryCleared({ itemCount }) {
   track('history_cleared', { item_count: itemCount });
 }
+
+// ── Linking + confirmation modal events (July 2026 handoff spec) ─────────────
+
+/** Fired when the partner-linking modal (CoupleSessionIntro) is opened, or
+ *  when the equivalent linking UI becomes visible in Settings. */
+export function trackLinkModalOpened({ source }) {
+  track('link_modal_opened', { source }); // 'settings' | 'couples_fork' | 'other'
+}
+
+/** Fired when a new invite code is successfully generated. */
+export function trackLinkCodeGenerated() {
+  track('link_code_generated');
+}
+
+/** Fired when the code is sent to a partner, by either path. */
+export function trackLinkCodeShared({ method }) {
+  track('link_code_shared', { method }); // 'share_sheet' | 'copy'
+}
+
+/** Fired when the linking modal's escape hatch routes into Quick Pick
+ *  instead of completing the link. */
+export function trackLinkModalSkippedToQuickPick() {
+  track('link_modal_skipped_to_quickpick');
+}
+
+/** Fired when the pick-confirmation modal is dismissed. `openedService`
+ *  distinguishes a completed hand-off (they tapped Open on Service/Get
+ *  tickets first) from a bare dismissal. */
+export function trackConfirmModalDismissed({ via, openedService }) {
+  track('confirm_modal_dismissed', { via, opened_service: !!openedService }); // via: 'x' | 'backdrop'
+}

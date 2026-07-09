@@ -77,12 +77,19 @@
 }
 
 .couplelink-code {
+  /* Now a <button> (spec §1.6 — tap the code itself to copy, not just the
+     separate Copy button), so the usual button chrome is reset first. */
+  background: none;
+  border: none;
+  cursor: pointer;
   font-family: 'SF Mono', 'Fira Code', monospace;
   font-size: 1.5rem;
   font-weight: 700;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.2em;
   color: var(--text-primary, #fff);
   flex: 1;
+  text-align: left;
+  padding: 0;
 }
 
 .couplelink-copy {
@@ -98,6 +105,20 @@
   transition: background 0.15s;
 }
 .couplelink-copy:hover { background: rgba(255,255,255,0.18); }
+
+.couplelink-share {
+  background: var(--color-accent);
+  color: #1A1206;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.couplelink-share:hover { opacity: 0.88; }
 
 .couplelink-waiting {
   font-size: 0.8rem;
