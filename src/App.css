@@ -1754,18 +1754,139 @@ button.sequel-badge {
   flex-shrink: 0;
 }
 
+.history-header-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .history-title {
   font-size: 15px;
   font-weight: 600;
   color: #f5f5f5;
+  margin: 0;
 }
 
-.history-count {
-  font-size: 12px;
-  font-weight: 400;
-  color: #9a9a9a;
-  margin-left: 4px;
+/* Subtitle replaces the old bare "(N/30)" fraction (spec §4.1) — the real
+   meaning (a 30-watch cap) is spelled out in words instead. */
+.history-subtitle {
+  font-size: 13px;
+  color: var(--color-dim, #93939C);
+  margin: 0;
 }
+
+.history-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ⋮ overflow menu (spec §4.4) — first use of this pattern, reused again for
+   each row's own menu (More like this / Remove). */
+.history-menu-wrap {
+  position: relative;
+}
+
+.history-menu-btn {
+  background: transparent;
+  border: none;
+  color: #b8b8b8;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 6px;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+  touch-action: manipulation;
+}
+.history-menu-btn:hover { color: #f5f5f5; background: #1a1a1a; }
+
+.history-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 10;
+  min-width: 180px;
+  background: #161616;
+  border: 0.5px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.history-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  color: #e0e0e0;
+  padding: 10px 12px;
+  min-height: 40px;
+  border-radius: 6px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.history-menu-item:hover { background: #232323; }
+
+/* Clear confirmation (spec §4.4) — same inline-block idiom used throughout
+   this session's Settings work, not a separate overlay. */
+.history-clear-confirm {
+  margin: 0 18px 12px;
+  padding: 12px;
+  background: rgba(244, 91, 91, 0.06);
+  border: 0.5px solid rgba(244, 91, 91, 0.3);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-clear-confirm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f5f5f5;
+  margin: 0;
+}
+.history-clear-confirm-body {
+  font-size: 13px;
+  color: var(--color-dim, #93939C);
+  line-height: 1.5;
+  margin: 0;
+}
+.history-clear-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.history-clear-confirm-cancel,
+.history-clear-confirm-yes {
+  flex: 1;
+  min-height: 40px;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  border: 1px solid;
+}
+.history-clear-confirm-cancel {
+  background: none;
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.history-clear-confirm-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.35); }
+.history-clear-confirm-yes {
+  background: var(--color-danger, #F45B5B);
+  border-color: var(--color-danger, #F45B5B);
+  color: #fff;
+}
+.history-clear-confirm-yes:hover { filter: brightness(1.08); }
 
 .history-close {
   background: transparent;
@@ -1907,58 +2028,58 @@ button.sequel-badge {
   gap: 5px;
 }
 
-.history-vote {
-  font-size: 15px;
-  line-height: 1;
-}
-
 .vote-up  { filter: drop-shadow(0 0 4px rgba(34,197,94,0.5)); }
 .vote-down { filter: drop-shadow(0 0 4px rgba(239,68,68,0.5)); }
 
-.vote-pending {
-  font-size: 12px;
-  color: #888;
-  letter-spacing: 1px;
-}
-
-.history-rating {
-  font-size: 12px;
-  color: #b8b8b8;
+/* Per-row rating controls (spec §4.2) — every Watched row gets tappable
+   thumbs directly, not display-only. Ghost pair (unrated) vs. solid single
+   thumb (rated, reuses the existing .vote-up/.vote-down glow) that un-rates
+   on tap. */
+.history-vote-pair {
   display: flex;
+  gap: 4px;
+}
+
+.history-vote-btn {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
   align-items: center;
-  gap: 3px;
-}
-
-.history-stars { color: #EF9F27; }
-
-.history-clear {
-  margin: 8px 18px 16px;
-  padding: 11px;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+  background: none;
+  border: 1px solid transparent;
   border-radius: 8px;
-  border: 0.5px solid #333;
-  background: transparent;
-  color: #b8b8b8;
-  font-size: 13px;
   cursor: pointer;
-  transition: all 0.15s;
-  flex-shrink: 0;
-  font-family: inherit;
+  touch-action: manipulation;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
 }
 
-.history-clear:hover {
-  border-color: #555;
-  color: #f5f5f5;
+.history-vote-ghost {
+  opacity: 0.4;
+  border-color: #333;
+}
+.history-vote-ghost:hover {
+  opacity: 0.8;
+  background: #151515;
 }
 
-/* Armed state — first tap turns the button into an explicit warning; the
-   second tap (within the window) actually erases. */
-.history-clear.history-clear-armed,
-.history-clear.history-clear-armed:hover {
-  border-color: rgba(255, 107, 107, 0.6);
-  color: #ff8080;
-  background: rgba(255, 107, 107, 0.08);
-  font-weight: 600;
+/* Deliberately distinct from .vote-up/.vote-down (the WatchLoop popup's own
+   64px circular buttons, App.css ~2117-2132) — same colors, own selectors,
+   so a future change to one button system can't silently bleed into the
+   other. */
+.history-vote-solid-up {
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(34,197,94,0.5));
 }
+.history-vote-solid-up:hover { background: rgba(74, 222, 128, 0.12); border-color: #4ade80; }
+
+.history-vote-solid-down {
+  opacity: 1;
+  filter: drop-shadow(0 0 4px rgba(239,68,68,0.5));
+}
+.history-vote-solid-down:hover { background: rgba(239, 68, 68, 0.12); border-color: #ef4444; }
 
 /* Couple-match badge on watch-history entries */
 .history-couple-badge {
@@ -3144,6 +3265,26 @@ button.sequel-badge {
 }
 .mood-nudge-btn:hover { color: #7bbdff; }
 
+/* Rate-nudge banner (spec §4.2) — sits under the tabs, tied to live unrated
+   count, disappears on its own once everything is rated. */
+.history-rate-nudge {
+  display: block;
+  width: calc(100% - 36px);
+  margin: 10px 18px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(240, 160, 48, 0.08);
+  border: 1px solid rgba(240, 160, 48, 0.33);
+  color: var(--color-accent, #F0A030);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.history-rate-nudge:hover { background: rgba(240, 160, 48, 0.14); }
+
 /* ─────────────────────────────────────────────────────────────
    History panel — tab switcher
    ──────────────────────────────────────────────────────────── */
@@ -3240,7 +3381,7 @@ button.sequel-badge {
   opacity: 0.9;
 }
 
-.partner-saved-star {
+.partner-saved-bookmark {
   color: #EF9F27;
   font-size: 0.9rem;
 }

@@ -14,6 +14,7 @@ import {
   trackRatingStepSelected, trackMatchCountShown, trackCtaTapped, trackZeroMatchesShown,
   trackPartnerUnlinked,
   trackPickAccepted, trackPickRejected, trackPickMarkedSeen, trackResultSynopsisExpanded,
+  trackHistoryItemRated, trackHistoryRateNudgeTapped, trackHistoryCleared,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -479,12 +480,31 @@ function App() {
 
   // History panel tab — 'watched' | 'saved'
   const [historyTab, setHistoryTab] = useState('watched');
-  // Two-tap guard for the destructive Clear buttons — 'history' | 'saved' |
-  // null. First tap arms ("Tap again…"), second tap within ~3.5s executes;
-  // otherwise it quietly disarms. These wipes also overwrite the cloud copy,
-  // so a single accidental tap was unrecoverable.
-  const [confirmClear, setConfirmClear] = useState(null);
-  const confirmClearTimer = useRef(null);
+  // Clear history/saved — relocated into the header's ⋮ overflow menu with a
+  // real confirmation dialog (spec §4.4), replacing the old two-tap
+  // arm/timeout pattern on a full-width bottom button.
+  const [showHistoryMenu, setShowHistoryMenu] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const historyMenuRef = useRef(null);
+
+  // Close the ⋮ menu on an outside click (it has no backdrop of its own).
+  useEffect(() => {
+    if (!showHistoryMenu) return;
+    const onDocClick = (e) => {
+      if (historyMenuRef.current && !historyMenuRef.current.contains(e.target)) {
+        setShowHistoryMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [showHistoryMenu]);
+
+  // Reset menu/confirm state whenever the sheet closes or the tab switches —
+  // a stale "Clear saved?" confirm shouldn't survive into the Watched tab.
+  useEffect(() => {
+    setShowHistoryMenu(false);
+    setShowClearConfirm(false);
+  }, [showHistory, historyTab]);
 
   // ── Auth & cloud sync ──────────────────────────────────────────────────────
   // undefined = auth still initialising, null = signed out, object = signed in
@@ -2852,18 +2872,23 @@ function App() {
     });
   };
 
-  const handleVote = (vote) => {
-    if (!ratingPopup) return;
+  // Core rating logic, extracted from the old handleVote so it can be called
+  // for ANY history entry — not just the one currently active in the
+  // WatchLoop popup. `source` distinguishes the popup flow from a direct
+  // History-row tap for analytics only; the taste-profile/watchHistory
+  // writes are identical either way.
+  const rateHistoryEntry = (entry, vote, source = 'row') => {
+    if (!entry) return;
     // Use functional setState to avoid reading from a potentially stale closure.
-    const popupId = ratingPopup.id;
-    const popupWatchedAt = ratingPopup.watchedAt;
+    const entryId = entry.id;
+    const entryWatchedAt = entry.watchedAt;
     setWatchHistory(prev => {
-      const updated = prev.map(entry =>
-        entry.id === popupId && entry.watchedAt === popupWatchedAt
+      const updated = prev.map(e =>
+        e.id === entryId && e.watchedAt === entryWatchedAt
           // Also clear `trailerCredited` so a future re-rate on the same
           // entry doesn't reverse the trailer credit a second time.
-          ? { ...entry, rated: vote, trailerCredited: false }
-          : entry
+          ? { ...e, rated: vote, trailerCredited: false }
+          : e
       );
       if (consent) safeSet('streaming-history', JSON.stringify(updated));
       return updated;
@@ -2872,28 +2897,81 @@ function App() {
       // If the trailer applied a soft signal earlier, reverse it FIRST so the
       // explicit vote replaces (rather than compounds with) the +0.5 credit.
       // The flag lives on the history entry, so this works across sessions.
-      const entryMode =
-        ratingPopup.mode === 'theater' ? 'solo' : (ratingPopup.mode || 'solo');
-      if (ratingPopup.trailerCredited) {
-        reverseTrailerSignal(ratingPopup.genres || [], entryMode);
+      const entryMode = entry.mode === 'theater' ? 'solo' : (entry.mode || 'solo');
+      if (entry.trailerCredited) {
+        reverseTrailerSignal(entry.genres || [], entryMode);
       }
-      updateTasteProfile(ratingPopup.genres || [], vote, ratingPopup.mode);
+      updateTasteProfile(entry.genres || [], vote, entry.mode);
     }
     // Feedback funnel event. time_since_pick measures how long after the
     // pick was first surfaced the user came back to vote — long gaps
     // typically indicate "actually watched the thing", short gaps indicate
     // a snap reject. PM uses this to distinguish quality from rejection.
-    const timeSincePick = ratingPopup.watchedAt
-      ? Math.round((Date.now() - new Date(ratingPopup.watchedAt).getTime()) / 1000)
+    const timeSincePick = entry.watchedAt
+      ? Math.round((Date.now() - new Date(entry.watchedAt).getTime()) / 1000)
       : null;
     trackVoteSubmitted({
-      titleId:        popupId,
+      titleId:        entryId,
       vote,
-      service:        ratingPopup.service,
+      service:        entry.service,
       timeSincePick,
     });
+    // history_item_rated is specifically for History-panel-initiated rating
+    // changes (row tap or menu) — the WatchLoop popup path already has its
+    // own trackVoteSubmitted call above, so it's excluded here.
+    if (source !== 'popup' && (vote === 'up' || vote === 'down')) {
+      trackHistoryItemRated({ tmdbId: entryId, rating: vote, source });
+    }
+  };
+
+  const handleVote = (vote) => {
+    if (!ratingPopup) return;
+    rateHistoryEntry(ratingPopup, vote, 'popup');
     setRatingPopup(null);
     setWatchLoopStep(null);
+  };
+
+  // Tapping a solid thumb reverts a History row to the ghost pair (spec
+  // §4.2). Reverses the EXACT prior weight rather than calling
+  // updateTasteProfile with the flipped vote — an undone 'up' must subtract
+  // VOTE_UP_WEIGHT (2), not VOTE_DOWN_WEIGHT (1); an undone 'down' must add
+  // VOTE_DOWN_WEIGHT back. Floor-at-0 clamping (same as updateTasteProfile
+  // itself) means this can slightly under/over-correct if a genre's score
+  // was already at the floor — the same tolerance the additive scoring
+  // system already accepts elsewhere.
+  const unrateHistoryEntry = (entry) => {
+    const priorVote = entry.rated;
+    if (priorVote === 'up' || priorVote === 'down') {
+      const entryMode = entry.mode === 'theater' ? 'solo' : (entry.mode || 'solo');
+      const players =
+        entryMode === 'couple' ? ['p1', 'p2'] :
+        entryMode === 'p1'     ? ['p1'] :
+        entryMode === 'p2'     ? ['p2'] :
+        ['solo'];
+      const undoAmount = priorVote === 'up' ? VOTE_UP_WEIGHT : -VOTE_DOWN_WEIGHT;
+      setTasteProfile(prev => {
+        const updated = JSON.parse(JSON.stringify(prev));
+        players.forEach(player => {
+          if (!updated[player]) updated[player] = {};
+          (entry.genres || []).forEach(id => {
+            const current = updated[player][id] || 0;
+            updated[player][id] = Math.max(0, current - undoAmount);
+          });
+        });
+        if (consent) safeSet('streaming-taste-profile', JSON.stringify(updated));
+        return updated;
+      });
+    }
+    const entryId = entry.id;
+    const entryWatchedAt = entry.watchedAt;
+    setWatchHistory(prev => {
+      const updated = prev.map(e =>
+        e.id === entryId && e.watchedAt === entryWatchedAt ? { ...e, rated: null } : e
+      );
+      if (consent) safeSet('streaming-history', JSON.stringify(updated));
+      return updated;
+    });
+    trackHistoryItemRated({ tmdbId: entryId, rating: 'cleared', source: 'row' });
   };
 
   // ── Watch loop handlers ───────────────────────────────────────────────────
@@ -2922,30 +3000,31 @@ function App() {
     // handleVote already calls setRatingPopup(null) and setWatchLoopStep(null)
   };
 
-  // First tap arms the button, second tap (within the window) executes.
-  // Switching tabs or closing the panel re-renders with the timer running —
-  // the timeout disarms regardless, so a stale armed state can't linger.
-  const requestClear = (kind, action) => {
-    if (confirmClear === kind) {
-      clearTimeout(confirmClearTimer.current);
-      setConfirmClear(null);
-      action();
-      return;
-    }
-    setConfirmClear(kind);
-    clearTimeout(confirmClearTimer.current);
-    confirmClearTimer.current = setTimeout(() => setConfirmClear(null), 3500);
-  };
-
+  // Clears watch history AND resets the taste profile — the confirmation
+  // copy (spec §4.4) explicitly tells the user both happen, so both must
+  // actually happen; leaving stale taste-profile weight from now-invisible
+  // ratings behind would make the copy inaccurate.
   const clearHistory = () => {
+    const itemCount = watchHistory.length;
     setWatchHistory([]);
-    // Use the same removal path everywhere (was directly calling
-    // localStorage.removeItem here, which bypassed the safeSet/consent
-    // discipline used elsewhere — purely a code-hygiene fix).
-    try { localStorage.removeItem('streaming-history'); } catch {}
+    setTasteProfile({ solo: {}, p1: {}, p2: {} });
+    try {
+      localStorage.removeItem('streaming-history');
+      localStorage.removeItem('streaming-taste-profile');
+    } catch {}
     // Authoritative overwrite — bypass the additive merge so a concurrent tab
     // can't resurrect the entries we just deleted.
-    flushAuthoritativeSync({ watchHistory: [] });
+    flushAuthoritativeSync({ watchHistory: [], tasteProfile: { solo: {}, p1: {}, p2: {} } });
+    trackHistoryCleared({ itemCount });
+  };
+
+  const clearSaved = () => {
+    const itemCount = savedForLater.length;
+    setSavedForLater([]);
+    try { localStorage.removeItem('settle-saved'); } catch {}
+    // Authoritative overwrite (see clearHistory for rationale).
+    flushAuthoritativeSync({ savedForLater: [] });
+    trackHistoryCleared({ itemCount });
   };
 
   // Helper: cancels any pending debounced merge push and immediately pushes
@@ -4348,17 +4427,85 @@ function App() {
             tabIndex={-1}
           >
             <div className="history-header">
-              <h2 id="history-title-heading" className="history-title">
-                {historyTab === 'watched' ? <>Watch History <span className="history-count">({watchHistory.length}/30)</span></> : <>Saved <span className="history-count">({savedForLater.length}/20)</span></>}
-              </h2>
-              <button
-                className="history-close"
-                onClick={() => setShowHistory(false)}
-                aria-label="Close watch history"
-              >
-                <span aria-hidden="true">✕</span>
-              </button>
+              <div className="history-header-text">
+                <h2 id="history-title-heading" className="history-title">
+                  {historyTab === 'watched' ? 'Watch History' : 'Saved'}
+                </h2>
+                <p className="history-subtitle">
+                  {historyTab === 'watched' ? 'Last 30 watches' : 'Up to 20 items'}
+                </p>
+              </div>
+              <div className="history-header-actions">
+                {/* Clear history/saved relocated here from a full-width
+                    bottom button (spec §4.4) — out of the thumb zone, behind
+                    an explicit menu tap instead of a two-tap arm/timeout. */}
+                <div className="history-menu-wrap" ref={historyMenuRef}>
+                  <button
+                    type="button"
+                    className="history-menu-btn"
+                    onClick={() => setShowHistoryMenu(o => !o)}
+                    aria-label="More options"
+                    aria-haspopup="true"
+                    aria-expanded={showHistoryMenu}
+                  >
+                    <span aria-hidden="true">⋮</span>
+                  </button>
+                  {showHistoryMenu && (
+                    <div className="history-menu" role="menu">
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="history-menu-item"
+                        onClick={() => { setShowHistoryMenu(false); setShowClearConfirm(true); }}
+                      >
+                        {historyTab === 'watched' ? 'Clear watch history' : 'Clear saved'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <button
+                  className="history-close"
+                  onClick={() => setShowHistory(false)}
+                  aria-label="Close watch history"
+                >
+                  <span aria-hidden="true">✕</span>
+                </button>
+              </div>
             </div>
+
+            {showClearConfirm && (
+              <div className="history-clear-confirm">
+                <p className="history-clear-confirm-title">
+                  {historyTab === 'watched' ? 'Clear watch history?' : 'Clear saved?'}
+                </p>
+                <p className="history-clear-confirm-body">
+                  {historyTab === 'watched'
+                    ? `This removes all ${watchHistory.length} items and resets your taste profile. Your saved items are kept. This can't be undone.`
+                    : `This removes all ${savedForLater.length} saved items. This can't be undone.`}
+                </p>
+                <div className="history-clear-confirm-actions">
+                  <button
+                    type="button"
+                    className="history-clear-confirm-cancel"
+                    onClick={() => setShowClearConfirm(false)}
+                    autoFocus
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="history-clear-confirm-yes"
+                    onClick={() => {
+                      setShowClearConfirm(false);
+                      if (historyTab === 'watched') clearHistory();
+                      else clearSaved();
+                    }}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Tab switcher */}
             <div className="history-tab-bar" role="tablist">
@@ -4376,9 +4523,34 @@ function App() {
                 className={`history-tab ${historyTab === 'saved' ? 'active' : ''}`}
                 onClick={() => setHistoryTab('saved')}
               >
-                ★ Saved {savedForLater.length > 0 && <span className="history-tab-badge">{savedForLater.length}</span>}
+                🔖 Saved {savedForLater.length > 0 && <span className="history-tab-badge">{savedForLater.length}</span>}
               </button>
             </div>
+
+            {/* Rate-nudge banner (spec §4.2) — a static banner tied to live
+                unrated count, not a dismissible toast: it's simply present
+                whenever ≥1 Watched item has no rating, and disappears on its
+                own once everything is rated. */}
+            {historyTab === 'watched' && (() => {
+              const unratedCount = watchHistory.filter(e => !e.rated || e.rated === 'skip').length;
+              if (unratedCount === 0) return null;
+              return (
+                <button
+                  type="button"
+                  className="history-rate-nudge"
+                  onClick={() => {
+                    trackHistoryRateNudgeTapped({ unratedCount });
+                    const firstUnrated = watchHistory.find(e => !e.rated || e.rated === 'skip');
+                    if (firstUnrated) {
+                      const el = document.getElementById(`history-row-${firstUnrated.id}-${firstUnrated.watchedAt}`);
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    }
+                  }}
+                >
+                  Rate {unratedCount} more to sharpen your recs
+                </button>
+              );
+            })()}
 
             {historyTab === 'watched' ? (
               <>
@@ -4407,6 +4579,7 @@ function App() {
                       {watchHistory.map(entry => (
                         <button
                           key={`${entry.id}-${entry.watchedAt}`}
+                          id={`history-row-${entry.id}-${entry.watchedAt}`}
                           className="history-entry"
                           onClick={() => handleHistoryReplay(entry)}
                           aria-label={`Rewatch ${entry.title}`}
@@ -4434,7 +4607,12 @@ function App() {
                                 </span>
                               )}
                             </div>
-                            <div className="history-entry-meta">{entry.year} · {entry.type}</div>
+                            <div className="history-entry-meta">
+                              {entry.year} · {entry.type}
+                              {Number.isFinite(parseFloat(entry.rating)) && entry.rating > 0 && (
+                                <> · TMDB {entry.rating}</>
+                              )}
+                            </div>
                             <div className="history-entry-bottom">
                               <span className="history-service" style={{
                                 color: entry.service === 'In Theaters' ? '#EF9F27'
@@ -4446,29 +4624,39 @@ function App() {
                             </div>
                           </div>
                           <div className="history-right">
-                            {entry.rated === 'up' && (
-                              <span className="history-vote vote-up" role="img" aria-label="Liked">👍</span>
+                            {entry.rated === 'up' || entry.rated === 'down' ? (
+                              <button
+                                type="button"
+                                className={`history-vote-btn history-vote-solid-${entry.rated}`}
+                                onClick={e => { e.stopPropagation(); unrateHistoryEntry(entry); }}
+                                aria-label={`${entry.rated === 'up' ? 'Liked' : 'Disliked'} ${entry.title} — tap to un-rate`}
+                              >
+                                {entry.rated === 'up' ? '👍' : '👎'}
+                              </button>
+                            ) : (
+                              <div className="history-vote-pair">
+                                <button
+                                  type="button"
+                                  className="history-vote-btn history-vote-ghost"
+                                  onClick={e => { e.stopPropagation(); rateHistoryEntry(entry, 'up'); }}
+                                  aria-label={`Rate ${entry.title} thumbs up`}
+                                >
+                                  👍
+                                </button>
+                                <button
+                                  type="button"
+                                  className="history-vote-btn history-vote-ghost"
+                                  onClick={e => { e.stopPropagation(); rateHistoryEntry(entry, 'down'); }}
+                                  aria-label={`Rate ${entry.title} thumbs down`}
+                                >
+                                  👎
+                                </button>
+                              </div>
                             )}
-                            {entry.rated === 'down' && (
-                              <span className="history-vote vote-down" role="img" aria-label="Disliked">👎</span>
-                            )}
-                            {(!entry.rated || entry.rated === 'skip') && (
-                              <span className="history-vote vote-pending" aria-label="Not rated yet">•••</span>
-                            )}
-                            <div className="history-rating" aria-label={`Rated ${entry.rating} out of 10`}>
-                              <span className="history-stars" aria-hidden="true">★</span>
-                              <span aria-hidden="true"> {entry.rating}</span>
-                            </div>
                           </div>
                         </button>
                       ))}
                     </div>
-                    <button
-                      className={`history-clear ${confirmClear === 'history' ? 'history-clear-armed' : ''}`}
-                      onClick={() => requestClear('history', clearHistory)}
-                    >
-                      {confirmClear === 'history' ? '⚠ Tap again to erase all history' : 'Clear history'}
-                    </button>
                   </>
                 )}
               </>
@@ -4476,9 +4664,9 @@ function App() {
               /* Saved tab */
               savedForLater.length === 0 ? (
                 <div className="history-empty">
-                  <div className="history-empty-icon" aria-hidden="true">★</div>
+                  <div className="history-empty-icon" aria-hidden="true">🔖</div>
                   <div className="history-empty-text">No saved picks yet</div>
-                  <div className="history-empty-sub">Tap ☆ on any result to save it for later</div>
+                  <div className="history-empty-sub">Tap 🔖 on any result to save it for later</div>
                 </div>
               ) : (
                 <>
@@ -4504,7 +4692,12 @@ function App() {
                         </div>
                         <div className="history-info">
                           <div className="history-entry-title">{entry.title}</div>
-                          <div className="history-entry-meta">{entry.year} · {entry.type}</div>
+                          <div className="history-entry-meta">
+                            {entry.year} · {entry.type}
+                            {Number.isFinite(parseFloat(entry.rating)) && entry.rating > 0 && (
+                              <> · TMDB {entry.rating}</>
+                            )}
+                          </div>
                           <div className="history-entry-bottom">
                             <span className="history-service" style={{
                               color: entry.service === 'In Theaters' ? '#EF9F27'
@@ -4520,27 +4713,12 @@ function App() {
                             onClick={e => { e.stopPropagation(); toggleSaveForLater(entry); }}
                             aria-label={`Remove ${entry.title} from saved`}
                           >
-                            ★
+                            🔖
                           </button>
-                          <div className="history-rating" aria-label={`Rated ${entry.rating} out of 10`}>
-                            <span className="history-stars" aria-hidden="true">★</span>
-                            <span aria-hidden="true"> {entry.rating}</span>
-                          </div>
                         </div>
                       </button>
                     ))}
                   </div>
-                  <button
-                    className={`history-clear ${confirmClear === 'saved' ? 'history-clear-armed' : ''}`}
-                    onClick={() => requestClear('saved', () => {
-                      setSavedForLater([]);
-                      localStorage.removeItem('settle-saved');
-                      // Authoritative overwrite (see clearHistory for rationale).
-                      flushAuthoritativeSync({ savedForLater: [] });
-                    })}
-                  >
-                    {confirmClear === 'saved' ? '⚠ Tap again to remove all saved picks' : 'Clear saved'}
-                  </button>
                 </>
               )
             )}
@@ -4582,7 +4760,7 @@ function App() {
                         </div>
                       </div>
                       <div className="history-right">
-                        <span className="partner-saved-star" aria-hidden="true">★</span>
+                        <span className="partner-saved-bookmark" aria-hidden="true">🔖</span>
                       </div>
                     </button>
                   ))}
