@@ -120,7 +120,7 @@ export const buildPayload = (state) => ({
   playerNames:   state.playerNames,
   // displayName is the Firebase Auth identity (Google display name or email
   // prefix). Stored here so linked partners can read a real name rather than
-  // the couples-ballot label (playerNames.p1 = "Him"/"Her" by default).
+  // the couples-ballot label (playerNames.p1 = "You"/"Partner" by default).
   displayName:   state.displayName   || null,
   consent:       state.consent,
   onboarded:     true,
@@ -188,7 +188,7 @@ const readLocalData = () => {
     recentPicks:   safe('streaming-seen', []),
     savedForLater: safe('settle-saved', []),
     watchHistory:  safe('streaming-history', []),
-    playerNames:   safe('streaming-player-names', { p1: 'Him', p2: 'Her' }),
+    playerNames:   safe('streaming-player-names', { p1: 'You', p2: 'Partner' }),
     consent:       localStorage.getItem('sd_consent') === 'true',
     onboarded:     localStorage.getItem('sd_onboarded') === 'true',
     prefs: {

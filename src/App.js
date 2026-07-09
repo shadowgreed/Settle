@@ -220,7 +220,9 @@ function App() {
     const saved = loadPrefs().genres || {};
     // `session` is a transient slot for this device's pick in a live couple
     // session — never persisted, always reset when a session starts.
-    return { solo: [], p1: [], p2: [], theater: [], session: [], ...saved };
+    // `live` is the local scratch slot for the pre-send Live-flow compose
+    // screen (spec §4.2) — cleared once the ballot is sent.
+    return { solo: [], p1: [], p2: [], theater: [], session: [], live: [], ...saved };
   });
   const [selectedFormats, setSelectedFormats] = useState(() => loadPrefs().formats || ['Movie', 'Series']);
   const [minRating, setMinRating] = useState(() => snapRatingStep(loadPrefs().minRating ?? 6.0));
@@ -247,8 +249,8 @@ function App() {
   const [showStreakHistory, setShowStreakHistory] = useState(false);
   const [showToast, setShowToast] = useState(false);
   const [playerNames, setPlayerNames] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'Him', p2: 'Her' }; }
-    catch { return { p1: 'Him', p2: 'Her' }; }
+    try { return JSON.parse(localStorage.getItem('streaming-player-names')) || { p1: 'You', p2: 'Partner' }; }
+    catch { return { p1: 'You', p2: 'Partner' }; }
   });
   const [editingPlayer, setEditingPlayer] = useState(null);
   const [activePlayer, setActivePlayer] = useState('p1');
@@ -344,6 +346,11 @@ function App() {
   const [sessionRole, setSessionRole]         = useState(null);
   const [sessionError, setSessionError]       = useState(null); // visible start-failure message
   const [showSessionIntro, setShowSessionIntro] = useState(false); // "needs 2 phones" explainer
+  // Couples fork (spec §4.1): null shows the two-card fork, 'live' the async
+  // ballot flow, 'quick' the same-device tabs. Deliberately NOT persisted to
+  // localStorage — returning to Couples within the session restores the last
+  // flow (plain useState survives tab switches), a fresh session shows the fork.
+  const [coupleFlow, setCoupleFlow] = useState(null);
   const [awaitingLink, setAwaitingLink]         = useState(false); // P1 is showing a code, waiting for P2
   const sessionPickedForRef = useRef(null); // guards the one-shot auto-pick
   const coupleSessionIdRef  = useRef(null);
@@ -552,7 +559,7 @@ function App() {
     setWatchHistory([]);
     setSavedForLater([]);
     setTasteProfile({ solo: {}, p1: {}, p2: {} });
-    setPlayerNames({ p1: 'Him', p2: 'Her' });
+    setPlayerNames({ p1: 'You', p2: 'Partner' });
     setResult(null);
     setPickReason(null);
     setHasSearched(false);
@@ -1040,19 +1047,6 @@ function App() {
     return couplePair.a.filter(g => couplePair.b.includes(g));
   }, [mode, couplePair]);
 
-  const compatScore = useMemo(() => {
-    if (mode !== 'couple') return null;
-    const { a, b } = couplePair;
-    const inSession = !!(coupleSession && coupleSession.status !== 'closed');
-    if (a.length === 0 && b.length === 0) return null;
-    // In a session, hide the score until BOTH have picked — otherwise it would
-    // flash "0% match" before the partner has chosen anything.
-    if (a.length === 0 || b.length === 0) return inSession ? null : 0;
-    const overlap = a.filter(g => b.includes(g));
-    const union = [...new Set([...a, ...b])];
-    return Math.round((overlap.length / union.length) * 100);
-  }, [mode, couplePair, coupleSession]);
-
   // Summary line for the sticky CTA bar — "{Format} · {Rating label} · {N}
   // vibes[ · {M} matches]". The matches segment is appended by the live
   // match-count feature (Phase 3); until then it's just format/rating/vibes.
@@ -1388,7 +1382,7 @@ function App() {
   };
 
   const savePlayerName = (player, value) => {
-    const name = value.trim() || (player === 'p1' ? 'Him' : 'Her');
+    const name = value.trim() || (player === 'p1' ? 'You' : 'Partner');
     const updated = { ...playerNames, [player]: name };
     setPlayerNames(updated);
     if (consent) safeSet('streaming-player-names', JSON.stringify(updated));
@@ -1539,8 +1533,8 @@ function App() {
   // Generate a code (P1 side). Called by CoupleLink.
   const handleGenerateCode = async () => {
     // Use the Firebase Auth identity (Google display name or email prefix) — not
-    // the couples-ballot label (playerNames.p1 = 'Him' by default), which is
-    // what P2 would see as "Linked with: Him". Fall through to the ballot label
+    // the couples-ballot label (playerNames.p1 = 'You' by default), which is
+    // what P2 would see as "Linked with: You". Fall through to the ballot label
     // only as a last resort, so the code always has something human-readable.
     const displayName =
       user?.displayName ||
@@ -1735,10 +1729,15 @@ function App() {
   }, [coupleSession?.status, coupleSession?.result?.id]);
 
   // Start a session (initiator).
-  const handleStartSession = async () => {
+  // Live-flow "Send ballot" (spec §4.2). Unlike the old handleStartSession,
+  // the Firestore session doc isn't created until the sender has already
+  // chosen their moods in the compose screen (selectedGenres.live) — so
+  // creation and the initiator's own lock-in happen together, in one tap.
+  const handleSendLiveBallot = async () => {
     if (!partnerUid || !user?.uid) return;
+    const chosen = selectedGenres.live || [];
+    if (chosen.length === 0) return;
     setSessionError(null);
-    setSelectedGenres(g => ({ ...g, session: [] }));
     setResult(null);
     setHasSearched(false);
     try {
@@ -1750,14 +1749,16 @@ function App() {
       });
       setSessionRole('initiator');
       setCoupleSessionId(id);
+      await setSessionReady(id, 'initiator', chosen, true);
+      setSelectedGenres(g => ({ ...g, live: [] }));
     } catch (e) {
       // Surface the failure instead of dying silently. The usual cause is the
       // coupleSessions Firestore rules not being deployed (permission-denied).
-      console.error('[CoupleSession] start failed:', e?.code || '', e?.message);
+      console.error('[CoupleSession] send failed:', e?.code || '', e?.message);
       setSessionError(
         e?.code === 'permission-denied'
-          ? "Couldn't start the session — the couples feature isn't fully enabled on the server yet."
-          : "Couldn't start the session. Check your connection and try again."
+          ? "Couldn't send the ballot — the couples feature isn't fully enabled on the server yet."
+          : "Couldn't send the ballot. Check your connection and try again."
       );
     }
   };
@@ -1799,23 +1800,6 @@ function App() {
       catch (e) { console.warn('[CoupleSession] re-broadcast failed:', e.message); }
     }
   };
-
-  // Memoised compatibility banner copy. Reads `compatScore` + `overlapGenres`
-  // (already memos) + playerNames — depends on all three.
-  const statusMsg = useMemo(() => {
-    if (mode !== 'couple') return null;
-    const score = compatScore;
-    const overlap = overlapGenres;
-    const p1 = playerNames.p1;
-    const p2 = playerNames.p2;
-    const pair = `${p1} & ${p2}`;
-    if (score === null) return { text: 'Each pick your genres below', emoji: '👇' };
-    if (score === 0)    return { text: `${pair} — no common ground yet`, emoji: '🤔' };
-    if (overlap.length === 1) return { text: `${pair} — getting warmer...`, emoji: '🌡️' };
-    if (score < 50)    return { text: `${pair} — finding middle ground`, emoji: '🤝' };
-    if (score < 75)    return { text: `${pair} — you're vibing!`, emoji: '✨' };
-    return { text: `${pair} — perfect match!`, emoji: '🔥' };
-  }, [mode, compatScore, overlapGenres, playerNames]);
 
   // ── Save for later ────────────────────────────────────────────────────────
   // "I've seen this" pre-watch veto — adds the current pick's id to
@@ -2857,8 +2841,6 @@ function App() {
     return '';
   };
 
-  // `compatScore` and `statusMsg` are now provided by useMemo above.
-
   // ── Auth guards ────────────────────────────────────────────────────────────
   if (user === undefined) {
     // Firebase auth is still initialising — show the branded loading screen
@@ -2972,7 +2954,7 @@ function App() {
           onGenerateCode={handleGenerateCode}
           onVerifyCode={handleVerifyCode}
           onUnlink={handleUnlinkPartner}
-          onStart={() => { setShowSessionIntro(false); handleStartSession(); }}
+          onStart={() => { setShowSessionIntro(false); setCoupleFlow('live'); }}
           onClose={() => setShowSessionIntro(false)}
         />
       )}
@@ -3258,7 +3240,9 @@ function App() {
         );
       })()}
 
-      {mode === 'couple' && (
+      {mode === 'couple' && (() => {
+        const partnerFirstName = (partnerName || 'your partner').split(' ')[0];
+        return (
         <>
           {/* Streak banner — visible on home screen for returning couples */}
           {streakInfo ? (
@@ -3269,18 +3253,6 @@ function App() {
                 </span>
               </div>
             ) : null}
-
-          {/* Status + compatibility */}
-          <div className="couple-status" role="status" aria-live="polite">
-            <div className="couple-status-text">
-              <span aria-hidden="true">{statusMsg?.emoji}</span> {statusMsg?.text}
-            </div>
-            {compatScore !== null && (
-              <div className={`compat-score ${compatScore >= 75 ? 'high' : compatScore >= 40 ? 'mid' : 'low'}`}>
-                {compatScore}% match
-              </div>
-            )}
-          </div>
 
           {coupleSession && coupleSession.status === 'selecting' ? (
             <CoupleSessionSelect
@@ -3305,8 +3277,130 @@ function App() {
               <span><span aria-hidden="true">🎬</span> Couple pick with {(partnerName || 'your partner').split(' ')[0]}</span>
               <button className="csess-cancel" onClick={handleCancelSession}>End session</button>
             </div>
+          ) : coupleFlow === null ? (
+            // Fork screen (spec §4.1) — two explicit paths instead of one
+            // hybrid screen. A fresh session always lands here; picking a
+            // path persists (in-memory) for the rest of the session.
+            <div className="couple-fork">
+              <button
+                type="button"
+                className="fork-card fork-card-live"
+                onClick={() => (partnerUid ? setCoupleFlow('live') : setShowSessionIntro(true))}
+              >
+                <span className="fork-card-icon" aria-hidden="true">💑</span>
+                <span className="fork-card-title">Pick together — live</span>
+                <span className="fork-card-sub">Each of you picks on your own phone. We find the overlap.</span>
+                <span className="fork-card-link">Send ballot →</span>
+              </button>
+              <button
+                type="button"
+                className="fork-card fork-card-quick"
+                onClick={() => setCoupleFlow('quick')}
+              >
+                <span className="fork-card-icon" aria-hidden="true">📱</span>
+                <span className="fork-card-title">Quick pick on this phone</span>
+                <span className="fork-card-sub">Partner's not around? Enter both sets of moods here.</span>
+              </button>
+            </div>
+          ) : coupleFlow === 'live' ? (
+            // Live-flow compose step (spec §4.2.1) — moods are chosen here,
+            // BEFORE the Firestore session doc exists. Sending creates the
+            // session and submits these moods as the initiator's lock-in in
+            // one action (handleSendLiveBallot).
+            <div className="live-compose">
+              <button type="button" className="couple-back-btn" onClick={() => setCoupleFlow(null)}>
+                <span aria-hidden="true">←</span> Back
+              </button>
+              <div className="live-compose-card">
+                <span className="live-compose-icon" aria-hidden="true">💌</span>
+                <div className="live-compose-title">Pick your moods below, then send</div>
+                <p className="live-compose-body">
+                  {partnerFirstName} gets a push notification and picks on their phone. Results stay secret until you both finish.
+                </p>
+              </div>
+              <div className="couple-genre-panel p1-panel">
+                <div className="mood-grid" role="group" aria-label="Your moods">
+                  {MOODS.slice(0, 8).map(mood => (
+                    <button
+                      key={mood.label}
+                      className={`mood-btn ${isMoodActive(mood.ids, 'live') ? 'mood-on' : ''}`}
+                      onClick={() => handleMoodClick(mood.ids, 'live')}
+                      aria-pressed={isMoodActive(mood.ids, 'live')}
+                    >
+                      <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                      <span className="mood-label">{mood.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="era-divider" role="separator">
+                  <span className="era-divider-label">Era</span>
+                </div>
+                <div className="mood-grid mood-grid-era" role="group" aria-label="Decades">
+                  {MOODS.slice(8).map(mood => (
+                    <button
+                      key={mood.label}
+                      className={`mood-btn ${isMoodActive(mood.ids, 'live') ? 'mood-on' : ''}`}
+                      onClick={() => handleMoodClick(mood.ids, 'live')}
+                      aria-pressed={isMoodActive(mood.ids, 'live')}
+                    >
+                      <span className="mood-emoji" aria-hidden="true">{mood.emoji}</span>
+                      <span className="mood-label">{mood.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="live-send-btn"
+                onClick={handleSendLiveBallot}
+                disabled={(selectedGenres.live || []).length === 0}
+              >
+                Send ballot to {partnerFirstName} →
+              </button>
+              {sessionError && (
+                <p className="start-session-error start-session-error-shake" role="alert">{sessionError}</p>
+              )}
+            </div>
           ) : (
           <>
+          {/* Quick pick — same-device tabs (spec §4.3) */}
+          <button type="button" className="couple-back-btn" onClick={() => setCoupleFlow(null)}>
+            <span aria-hidden="true">←</span> Back
+          </button>
+
+          {/* Progress banner — no percentage anywhere (spec §8.4 acceptance
+              criterion). Three states: nobody's picked, picked but no overlap
+              yet, or N shared vibes with their emojis. */}
+          {(() => {
+            const p1Count = selectedGenres.p1.length;
+            const p2Count = selectedGenres.p2.length;
+            const sharedMoods = MOODS.filter(m => isMoodActive(m.ids, 'p1') && isMoodActive(m.ids, 'p2'));
+            if (sharedMoods.length > 0) {
+              return (
+                <div className="couple-progress-banner couple-progress-shared" role="status" aria-live="polite">
+                  <span className="couple-progress-headline">
+                    <span aria-hidden="true">🎯</span> {sharedMoods.length} shared vibe{sharedMoods.length === 1 ? '' : 's'}
+                  </span>
+                  <span className="couple-progress-emojis" aria-hidden="true">
+                    {sharedMoods.map(m => m.emoji).join(' ')}
+                  </span>
+                </div>
+              );
+            }
+            if (p1Count === 0 && p2Count === 0) {
+              return (
+                <div className="couple-progress-banner" role="status" aria-live="polite">
+                  <span aria-hidden="true">✨</span> Pick a few moods each — we'll find your overlap
+                </div>
+              );
+            }
+            return (
+              <div className="couple-progress-banner" role="status" aria-live="polite">
+                <span aria-hidden="true">🔍</span> {playerNames.p1}: {p1Count} · {playerNames.p2}: {p2Count} — overlap shows here
+              </div>
+            );
+          })()}
+
           {/* Player tab switcher */}
           <div className="player-tabs" role="tablist" aria-label="Player">
             <div className={`player-tab p1-tab ${activePlayer === 'p1' ? 'active' : ''}`}>
@@ -3394,6 +3488,10 @@ function App() {
 
           {/* Active player mood + genre grid */}
           <div className={`couple-genre-panel ${activePlayer === 'p1' ? 'p1-panel' : 'p2-panel'}`}>
+            <div className={`picking-for-header picking-for-${activePlayer}`}>
+              Picking for: {activePlayer === 'p1' ? playerNames.p1 : playerNames.p2}{' '}
+              <span aria-hidden="true">{activePlayer === 'p1' ? '🍿' : '🎬'}</span>
+            </div>
             <div className="mood-grid" role="group" aria-label={`Moods for ${activePlayer === 'p1' ? playerNames.p1 : playerNames.p2}`}>
               {MOODS.slice(0, 8).map(mood => (
                 <button
@@ -3470,30 +3568,11 @@ function App() {
             </div>
           )}
 
-          {/* Hero CTA — the live two-phone session is couple mode's headline
-              feature, so it gets the most confident treatment on the tab. */}
-          <button
-            className="start-session-btn"
-            onClick={partnerUid ? handleStartSession : () => setShowSessionIntro(true)}
-          >
-            <span className="start-session-icon" aria-hidden="true">💑</span>
-            <span className="start-session-text">
-              <span className="start-session-headline">Pick together — live</span>
-              <span className="start-session-sub">
-                {partnerUid
-                  ? `You and ${(partnerName || 'your partner').split(' ')[0]}, each on your own phone`
-                  : 'Watch on two phones — yours and theirs'}
-              </span>
-            </span>
-            <span className="start-session-arrow" aria-hidden="true">→</span>
-          </button>
-          {sessionError && (
-            <p className="start-session-error" role="alert">{sessionError}</p>
-          )}
           </>
           )}
         </>
-      )}
+        );
+      })()}
 
       {/* In Theaters — generic browse-first grid. People heading to the cinema
           already know what they want, so this skips the decision engine: every

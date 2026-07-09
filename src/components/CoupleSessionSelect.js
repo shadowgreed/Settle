@@ -70,12 +70,22 @@ export default function CoupleSessionSelect({
       </div>
 
       {iAmReady ? (
-        // I'm locked in, waiting for partner
-        <div className="csess-waiting">
-          <div className="csess-locked"><span aria-hidden="true">🔒</span> Your moods are locked in</div>
-          <p className="csess-waiting-text">Waiting for {partner} to lock in…</p>
-          <button className="csess-change" onClick={onUnready}>Change my moods</button>
-        </div>
+        role === 'initiator' ? (
+          // Sent state (spec §4.2.3) — reaching here means handleSendLiveBallot
+          // already created the session AND locked in these moods in one action.
+          <div className="csess-waiting csess-sent">
+            <div className="csess-locked"><span aria-hidden="true">🕐</span> Ballot sent to {partner}</div>
+            <p className="csess-waiting-text">We'll ping you the moment they finish picking.</p>
+            <button className="csess-change" onClick={onUnready}>Change my moods</button>
+          </div>
+        ) : (
+          // Partner's own "I'm locked in, waiting for the other side" state.
+          <div className="csess-waiting">
+            <div className="csess-locked"><span aria-hidden="true">🔒</span> Your moods are locked in</div>
+            <p className="csess-waiting-text">Waiting for {partner} to lock in…</p>
+            <button className="csess-change" onClick={onUnready}>Change my moods</button>
+          </div>
+        )
       ) : (
         // Still choosing
         <>

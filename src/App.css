@@ -1128,9 +1128,10 @@ button.sequel-badge {
   gap: 4px;
   padding: 4px 6px;
   border-radius: 10px;
-  border: 0.5px solid #222;
-  background: transparent;
-  transition: all 0.2s;
+  border: 2px solid var(--color-border);
+  background: var(--color-surface);
+  opacity: 0.6;
+  transition: background 0.2s, border-color 0.2s, opacity 0.2s, box-shadow 0.2s;
   font-family: inherit;
   position: relative;
 }
@@ -1171,19 +1172,23 @@ button.sequel-badge {
   background: rgba(255, 255, 255, 0.06);
 }
 
-.p1-tab { color: #2563EB; }
-.p2-tab { color: #EC4899; }
+.p1-tab { color: var(--color-person-1); }
+.p2-tab { color: var(--color-person-2); }
+.p1-tab:not(.active) .player-name,
+.p2-tab:not(.active) .player-name { color: var(--color-dim); }
 
 .p1-tab.active {
-  background: rgba(37, 99, 235, 0.14);
-  border-color: #2563EB;
-  box-shadow: 0 0 14px rgba(37, 99, 235, 0.18);
+  opacity: 1;
+  background: rgba(76, 125, 255, 0.15);
+  border-color: var(--color-person-1);
+  box-shadow: 0 0 14px rgba(76, 125, 255, 0.18);
 }
 
 .p2-tab.active {
-  background: rgba(236, 72, 153, 0.14);
-  border-color: #EC4899;
-  box-shadow: 0 0 14px rgba(236, 72, 153, 0.18);
+  opacity: 1;
+  background: rgba(255, 92, 158, 0.15);
+  border-color: var(--color-person-2);
+  box-shadow: 0 0 14px rgba(255, 92, 158, 0.18);
 }
 
 .player-tab-emoji { font-size: 16px; }
@@ -1212,6 +1217,47 @@ button.sequel-badge {
 .p2-tab .player-tab-count {
   background: rgba(236, 72, 153, 0.15);
 }
+
+/* Quick-pick progress banner (spec §4.3) — replaces the old percentage-based
+   .couple-status/.compat-score. Never shows a percentage. */
+.couple-progress-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 48px;
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--color-dim);
+  text-align: center;
+  margin-bottom: 12px;
+  transition: opacity 150ms ease;
+}
+.couple-progress-banner.couple-progress-shared {
+  background: rgba(240, 160, 48, 0.08);
+  border-color: rgba(240, 160, 48, 0.33);
+  flex-direction: column;
+  gap: 4px;
+}
+.couple-progress-headline {
+  font-weight: 700;
+  color: var(--color-text);
+}
+.couple-progress-emojis {
+  font-size: 18px;
+}
+
+/* "Picking for: {Name} {icon}" header above the active player's mood grid */
+.picking-for-header {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.picking-for-p1 { color: var(--color-person-1); }
+.picking-for-p2 { color: var(--color-person-2); }
 
 .couple-genre-panel {
   border-radius: 10px;
@@ -3124,49 +3170,108 @@ button.sequel-badge {
 /* Hero CTA for couple mode's headline feature (live two-phone session).
    App-amber gradient — the old Netflix-red ghost tint read as another
    brand's tertiary button. */
-.start-session-btn {
+/* ── Couples fork screen (spec §4.1) ─────────────────────────────────────── */
+.couple-fork {
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 12px;
+}
+
+.fork-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   width: 100%;
-  margin-top: 10px;
-  min-height: 56px;
-  padding: 12px 16px;
-  border-radius: 12px;
+  padding: 20px;
+  border-radius: var(--radius-card);
   border: none;
-  background: linear-gradient(135deg, #f4ad45 0%, #e08b1f 100%);
-  color: #0a0a0a;
   text-align: left;
   cursor: pointer;
   font-family: inherit;
-  box-shadow: 0 4px 18px rgba(239, 159, 39, 0.22);
-  transition: filter 0.15s, transform 0.12s, box-shadow 0.15s;
+  transition: transform 0.12s, box-shadow 0.15s, filter 0.15s;
 }
-.start-session-btn:hover {
+.fork-card:active { transform: scale(0.98); }
+
+.fork-card-live {
+  background: linear-gradient(135deg, var(--color-accent) 0%, var(--color-accent-deep) 100%);
+  color: #1A1206;
+  box-shadow: 0 4px 18px rgba(239, 159, 39, 0.22);
+}
+.fork-card-live:hover {
   filter: brightness(1.05);
   box-shadow: 0 5px 22px rgba(239, 159, 39, 0.3);
 }
-.start-session-btn:active { transform: scale(0.99); }
 
-.start-session-icon { font-size: 22px; flex-shrink: 0; }
-.start-session-text {
-  flex: 1 1 auto;
+.fork-card-quick {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+}
+.fork-card-quick:hover {
+  border-color: var(--color-faint);
+}
+.fork-card-quick .fork-card-title { color: var(--color-text); }
+.fork-card-quick .fork-card-sub { color: var(--color-dim); }
+
+.fork-card-icon { font-size: 22px; }
+.fork-card-title { font-size: 18px; font-weight: 700; }
+.fork-card-live .fork-card-sub { font-size: 14px; color: rgba(26, 18, 6, 0.8); }
+.fork-card-sub { font-size: 14px; }
+.fork-card-link { font-size: 14px; font-weight: 600; margin-top: 6px; }
+
+/* ── Shared back button (live-compose + quick-pick) ──────────────────────── */
+.couple-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  color: var(--color-faint);
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 10px 0;
+  margin-bottom: 4px;
+  min-height: 44px;
+  touch-action: manipulation;
+}
+.couple-back-btn:hover { color: var(--color-dim); }
+
+/* ── Live-flow compose card (spec §4.2.1) ────────────────────────────────── */
+.live-compose-card {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  min-width: 0;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 20px;
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  margin-bottom: 14px;
 }
-.start-session-headline {
-  font-size: 15px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
+.live-compose-icon { font-size: 36px; }
+.live-compose-title { font-size: 16px; font-weight: 600; color: var(--color-text); }
+.live-compose-body { font-size: 14px; color: var(--color-dim); }
+
+.live-send-btn {
+  width: 100%;
+  min-height: 52px;
+  margin-top: 14px;
+  padding: 12px 16px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: var(--color-accent);
+  color: #1A1206;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 4px 24px rgba(240, 160, 48, 0.27);
+  transition: opacity 0.15s, transform 0.1s;
 }
-.start-session-sub {
-  font-size: 12px;
-  font-weight: 600;
-  color: rgba(10, 10, 10, 0.65);
-}
-.start-session-arrow { font-size: 18px; font-weight: 700; flex-shrink: 0; }
+.live-send-btn:active:not(:disabled) { transform: scale(0.98); }
+.live-send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .start-session-error {
   margin: 8px 0 0;
@@ -3174,6 +3279,19 @@ button.sequel-badge {
   color: #ff6b6b;
   text-align: center;
   line-height: 1.4;
+}
+.start-session-error-shake {
+  animation: startSessionShake 300ms ease;
+}
+@keyframes startSessionShake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-6px); }
+  40%      { transform: translateX(5px); }
+  60%      { transform: translateX(-4px); }
+  80%      { transform: translateX(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .start-session-error-shake { animation: none; }
 }
 
 /* Couple session "result" banner (shown above the shared pick card) */

@@ -71,16 +71,16 @@ export default function Settings({
   // Local draft state for the player-name editor — committed via
   // onSavePlayerNames on blur (or Enter). Keeps the input snappy without
   // re-rendering the whole app on every keystroke.
-  const [p1Draft, setP1Draft] = useState(playerNames?.p1 || 'Him');
-  const [p2Draft, setP2Draft] = useState(playerNames?.p2 || 'Her');
+  const [p1Draft, setP1Draft] = useState(playerNames?.p1 || 'You');
+  const [p2Draft, setP2Draft] = useState(playerNames?.p2 || 'Partner');
 
   const commitP1 = () => {
-    const trimmed = p1Draft.trim() || 'Him';
+    const trimmed = p1Draft.trim() || 'You';
     if (trimmed !== playerNames?.p1) onSavePlayerNames?.('p1', trimmed);
     setP1Draft(trimmed);
   };
   const commitP2 = () => {
-    const trimmed = p2Draft.trim() || 'Her';
+    const trimmed = p2Draft.trim() || 'Partner';
     if (trimmed !== playerNames?.p2) onSavePlayerNames?.('p2', trimmed);
     setP2Draft(trimmed);
   };
