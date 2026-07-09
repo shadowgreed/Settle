@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { flushSync } from 'react-dom';
 import tmdbService from './services/tmdb';
 import watchmodeService from './services/watchmode';
-import { generateShareCard } from './utils/shareCard';
-import { pickLabel, pickVerb } from './utils/timeOfDay';
+import { pickLabel, pickVerb, timeOfDay } from './utils/timeOfDay';
 import {
   trackAppLoaded, trackPickGenerated, trackConsentRevoked, trackAccountDeleted,
   trackTrailerPlayed, trackDeepLinkOpened, trackVoteSubmitted,
@@ -440,12 +439,11 @@ function App() {
   const [shareCardLoading, setShareCardLoading] = useState(false);
   const [shareCardReady, setShareCardReady] = useState(false);
   const shareItemRef = useRef(null);
-  const shareCanvasRef = useRef(null);
-  // Pre-baked share-blob File ref. Generated proactively when the canvas is
-  // ready so the Share button's click handler can call navigator.share()
-  // with zero awaits between the user gesture and the API call — iOS Safari
-  // requires this strictly, otherwise the share sheet opens but renders as
-  // a blank dark rectangle with no app icons.
+  // Pre-baked share-blob File ref. Generated proactively when the server-
+  // rendered card image arrives so the Share button's click handler can call
+  // navigator.share() with zero awaits between the user gesture and the API
+  // call — iOS Safari requires this strictly, otherwise the share sheet opens
+  // but renders as a blank dark rectangle with no app icons.
   const shareFileRef = useRef(null);
   const sharePreviewRef = useRef(null);
   const [consent, setConsent] = useState(() => localStorage.getItem('sd_consent') === 'true');
@@ -930,17 +928,6 @@ function App() {
     }, 1000);
     return () => clearTimeout(t);
   }, [ballotStep]);
-
-  // Mount tainted canvas directly into DOM when no data URL is available
-  useEffect(() => {
-    const container = sharePreviewRef.current;
-    const canvas = shareCanvasRef.current;
-    if (showShareModal && shareCardReady && !shareCardUrl && canvas && container) {
-      container.innerHTML = '';
-      canvas.className = 'share-preview-img';
-      container.appendChild(canvas);
-    }
-  }, [showShareModal, shareCardReady, shareCardUrl]);
 
   // Check for sequel collection + Watchmode deep link whenever a movie result appears.
   // `cancelled` flag prevents stale promise responses from overwriting newer results
@@ -2315,10 +2302,36 @@ function App() {
 
   const closeShareModal = () => {
     setShowShareModal(false);
+    // The preview <img> now points at a blob: object URL (see handleShare) —
+    // release it so the decoded image data doesn't linger past the sheet's
+    // lifetime. The pre-fetch/error paths never set one, and revoking a
+    // non-blob value is a silent no-op either way.
+    if (shareCardUrl) URL.revokeObjectURL(shareCardUrl);
     setShareCardUrl(null);
     setShareCardReady(false);
-    shareCanvasRef.current = null;
     shareFileRef.current = null;
+  };
+
+  // Daypart badge text for the share card — same bucket/label mapping the
+  // old canvas renderer used, ported here since src/utils/shareCard.js is
+  // being retired in favor of the server-rendered pipeline.
+  const DAYPART_LABELS = { morning: 'Morning Pick', afternoon: 'Afternoon Pick', evening: 'Evening Pick', tonight: 'Pick Tonight' };
+  const buildDaypartText = () => `🎬 ${DAYPART_LABELS[timeOfDay()]}`;
+
+  // The story line (result/history spec's pickChips already answers "why this
+  // pick" — reused verbatim rather than re-deriving the reason). Couples gets
+  // the relationship-framing sentence the spec calls for instead of a mood
+  // chip, falling back to "We" when neither name has been customized.
+  const buildStoryLine = () => {
+    if (mode === 'couple') {
+      const customized = playerNames.p1 !== 'You' || playerNames.p2 !== 'Partner';
+      return customized
+        ? `${playerNames.p1} & ${playerNames.p2} settled on…`
+        : 'We settled on…';
+    }
+    const chip = pickChips.find(c => c.kind !== 'service');
+    if (!chip) return '';
+    return `Matched my ${chip.icon ? chip.icon + ' ' : ''}${chip.label} mood`;
   };
 
   // Opens the share modal and generates the card.
@@ -2331,41 +2344,33 @@ function App() {
     shareItemRef.current = item;
     setShareCardUrl(null);
     setShareCardReady(false);
-    shareCanvasRef.current = null;
     shareFileRef.current = null;
     setShareCardLoading(true);
     setShowShareModal(true);
     try {
-      const resolvedGenres = (item.genres || [])
-        .map(id => genreById.get(id))
+      const genreNames = (item.genres || [])
+        .map(id => genreById.get(id)?.name)
         .filter(Boolean)
-        .slice(0, 4);
-      const canvas = await generateShareCard({ result: { ...item, genres: resolvedGenres }, mode, playerNames });
-      shareCanvasRef.current = canvas;
+        .slice(0, 2);
 
-      // Pre-bake the share File. JPEG @ 0.92 quality halves the file size vs
-      // PNG (1080×1920 PNG can hit 2–3 MB, which the iOS share sheet
-      // sometimes chokes on). Visual fidelity is indistinguishable at this
-      // quality for poster art + flat dark gradients.
-      try {
-        const blob = await new Promise(resolve =>
-          canvas.toBlob(resolve, 'image/jpeg', 0.92)
-        );
-        if (blob) {
-          shareFileRef.current = new File([blob], 'settle-pick.jpg', { type: 'image/jpeg' });
-        }
-      } catch (e) {
-        // Tainted canvas — toBlob will throw. Falls through to text share.
-        console.warn('[ShareCard] toBlob failed:', e?.message);
-      }
+      const params = new URLSearchParams({
+        fmt:        'story',
+        title:      item.title || '',
+        year:       item.year || '',
+        type:       item.type || '',
+        rating:     item.rating != null ? String(item.rating) : '',
+        service:    item.service || '',
+        genres:     genreNames.join(','),
+        posterPath: item.posterPath || '',
+        story:      buildStoryLine(),
+        daypart:    buildDaypartText(),
+      });
 
-      try {
-        setShareCardUrl(canvas.toDataURL('image/jpeg', 0.92));
-      } catch {
-        // Canvas is tainted (poster loaded without CORS) — card still renders,
-        // we'll mount the canvas element directly for preview
-        console.warn('[ShareCard] canvas tainted — mounting directly');
-      }
+      const res = await fetch(`/api/share-card?${params.toString()}`);
+      if (!res.ok) throw new Error(`share-card ${res.status}`);
+      const blob = await res.blob();
+      shareFileRef.current = new File([blob], 'settle-pick.png', { type: 'image/png' });
+      setShareCardUrl(URL.createObjectURL(blob));
       setShareCardReady(true);
     } catch (err) {
       console.error('[ShareCard] generation failed:', err);

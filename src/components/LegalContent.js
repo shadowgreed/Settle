@@ -47,7 +47,7 @@ export function PrivacyBody() {
       <p>We use <strong>PostHog</strong> to collect anonymous, aggregated usage data — for example, which modes are used and how often picks are generated. No personally identifiable information is included. Analytics are only activated after you accept the storage consent prompt. You can also opt out by enabling your browser's "Do Not Track" setting or using a content blocker.</p>
 
       <h3>6. Share Cards</h3>
-      <p>The "Share Pick" feature generates an image entirely within your browser using the HTML Canvas API. No image data is transmitted to our servers or any third party. The poster artwork is fetched from TMDB's CDN directly by your device.</p>
+      <p>The "Share Pick" feature generates the card image on our servers so it can be sized correctly for wherever you're sharing it (a Story, a feed post, a link preview). Generating it involves sending the pick's title, poster, and metadata — plus your matched mood or, in Couples mode, both partner display names — to our servers, which fetch the poster artwork from TMDB on your behalf. This data is used only to render that one image; it is not transmitted to any third party beyond the same TMDB request the app already makes to show you the pick.</p>
 
       <h3>7. Third-Party Services</h3>
       <ul>
