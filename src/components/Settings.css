@@ -155,26 +155,48 @@
   margin: 0;
 }
 
-.settings-hint {
-  font-size: 12px;
-  color: #777;
-  margin: 0;
-  font-style: italic;
-}
-
-/* Inline status chip — "On" / "Off" beside the section title. */
-.settings-status-chip {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 3px 9px;
-  border-radius: 100px;
-  border: 0.5px solid currentColor;
+/* Cloud sync toggle switch (spec §5.1) */
+.settings-toggle {
   flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+  /* Pad the hit area beyond the visual track (44pt minimum, spec §10). */
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
-.settings-status-chip.on  { color: #4ade80; }
-.settings-status-chip.off { color: #777; }
+.settings-toggle-track {
+  width: 44px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-hi);
+  border: 1px solid var(--color-border);
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+  box-sizing: border-box;
+}
+.settings-toggle.on .settings-toggle-track {
+  background: #3DBE7B;
+  border-color: #3DBE7B;
+}
+.settings-toggle-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-dim);
+  transition: transform 150ms ease-out, background 150ms ease-out;
+}
+.settings-toggle.on .settings-toggle-thumb {
+  background: #fff;
+  transform: translateX(18px);
+}
 
 /* ── Account card ────────────────────────────────────────────────────────── */
 .settings-account-card {
@@ -185,6 +207,9 @@
   background: #131313;
   border: 0.5px solid #1f1f1f;
   border-radius: 10px;
+  /* Wraps only when the confirm block doesn't fit beside the avatar+info —
+     see .settings-signout-confirm-row's flex-basis below. */
+  flex-wrap: wrap;
 }
 
 .settings-account-avatar {
@@ -256,12 +281,25 @@
   outline: none;
 }
 
-/* Two-step confirm shown inline after first tap. */
+/* Two-step confirm shown inline after first tap. Forces onto its own full-
+   width row below the avatar+info (via the parent's flex-wrap) once the
+   prompt text is present — there's no room for a sentence beside the avatar. */
+.settings-account-card.confirming .settings-signout-confirm-row {
+  flex: 1 1 100%;
+}
 .settings-signout-confirm-row {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  flex-shrink: 0;
+  gap: 8px;
+}
+.settings-signout-confirm-prompt {
+  font-size: 13px;
+  color: #d8d8d8;
+  margin: 0;
+}
+.settings-signout-confirm-actions {
+  display: flex;
+  gap: 8px;
 }
 .settings-signout-confirm-yes,
 .settings-signout-confirm-cancel {
@@ -269,24 +307,28 @@
   border: 1px solid;
   border-radius: 6px;
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  padding: 4px 10px;
+  padding: 8px 14px;
   cursor: pointer;
   white-space: nowrap;
   touch-action: manipulation;
+  min-height: 36px;
 }
 .settings-signout-confirm-yes {
+  /* Amber, not red — signing out is fully reversible (sign back in), unlike
+     the truly destructive actions (unlink, delete account) the spec
+     reserves --color-danger for. */
   color: #f0c75a;
   border-color: rgba(240, 199, 90, 0.35);
   background: rgba(240, 199, 90, 0.08);
 }
 .settings-signout-confirm-yes:hover { background: rgba(240, 199, 90, 0.16); }
 .settings-signout-confirm-cancel {
-  color: rgba(255, 255, 255, 0.45);
-  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.7);
+  border-color: rgba(255, 255, 255, 0.18);
 }
-.settings-signout-confirm-cancel:hover { color: rgba(255, 255, 255, 0.7); }
+.settings-signout-confirm-cancel:hover { color: #fff; border-color: rgba(255,255,255,0.35); }
 
 /* Couples player-name editor — two side-by-side text fields. Commits on
    blur/Enter so we don't fire a Firestore write on every keystroke. */

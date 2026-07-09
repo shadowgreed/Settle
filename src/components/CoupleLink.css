@@ -106,15 +106,26 @@
   font-style: italic;
 }
 
+.couplelink-expiry {
+  font-size: 12px;
+  color: var(--color-dim);
+  margin: 0;
+}
+
 .couplelink-cancel {
   background: none;
   border: none;
   color: var(--text-secondary, #aaa);
   font-size: 0.82rem;
   cursor: pointer;
-  padding: 0;
   text-decoration: underline;
   align-self: flex-start;
+  /* Pad the hit area, not the visual (spec §10 — 44pt minimum). */
+  min-height: 44px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  touch-action: manipulation;
 }
 .couplelink-cancel:hover { color: var(--text-primary, #fff); }
 
@@ -145,20 +156,29 @@
 .couplelink-input:focus { border-color: var(--color-accent); }
 .couplelink-input::placeholder { color: rgba(255,255,255,0.25); letter-spacing: normal; }
 
-/* Linked state */
+/* Linked state — partner card (spec §3.3) */
 .couplelink-linked {
   display: flex;
   align-items: center;
-  gap: 10px;
-  background: rgba(255,255,255,0.05);
-  border: 1px solid rgba(255,255,255,0.1);
-  border-radius: 10px;
-  padding: 10px 14px;
+  gap: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  padding: 16px;
 }
 
-.couplelink-linked-icon {
-  font-size: 1.3rem;
+.couplelink-linked-avatar {
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(255, 92, 158, 0.2); /* --color-person-2 @ 20% */
+  color: var(--color-person-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .couplelink-linked-info {
@@ -166,31 +186,80 @@
   min-width: 0;
 }
 
-.couplelink-linked-label {
-  font-size: 0.72rem;
-  color: var(--text-secondary, #aaa);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .couplelink-linked-name {
-  font-size: 0.95rem;
+  font-size: 16px;
   font-weight: 600;
-  color: var(--text-primary, #fff);
+  color: var(--color-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.couplelink-linked-status {
+  font-size: 13px;
+  color: #3DBE7B;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 2px;
+}
+
 .couplelink-unlink {
   background: none;
-  border: 1px solid rgba(255,255,255,0.18);
-  color: var(--text-secondary, #aaa);
-  border-radius: 6px;
-  padding: 5px 10px;
-  font-size: 0.8rem;
+  border: none;
+  color: var(--color-danger);
+  font-size: 14px;
   cursor: pointer;
   flex-shrink: 0;
-  transition: border-color 0.15s, color 0.15s;
+  /* Pad the hit area, not the visual — text stays 14px but the tappable
+     area meets the 44pt minimum (spec §10). */
+  min-height: 44px;
+  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  touch-action: manipulation;
 }
-.couplelink-unlink:hover { border-color: var(--color-danger); color: var(--color-danger); }
+.couplelink-unlink:hover { opacity: 0.8; }
+
+/* Unlink confirmation — same inline-block idiom as Settings' STAGE-based
+   confirms, not a separate overlay. */
+.couplelink-unlink-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(244, 91, 91, 0.06);
+  border: 0.5px solid rgba(244, 91, 91, 0.3);
+  border-radius: 8px;
+}
+.couplelink-unlink-confirm-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+.couplelink-unlink-confirm-body {
+  font-size: 13px;
+  color: var(--color-dim);
+  line-height: 1.5;
+  margin: 0;
+}
+.couplelink-unlink-confirm-actions {
+  display: flex;
+  gap: 8px;
+}
+.couplelink-unlink-confirm-yes {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: filter 0.15s;
+}
+.couplelink-unlink-confirm-yes:hover { filter: brightness(1.08); }

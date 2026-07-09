@@ -34,6 +34,7 @@ export default function Settings({
   onClose,
   onSignOut,
   onWithdrawConsent,
+  onEnableConsent,
   onDeleteAccount,
   onSavePlayerNames,
   onTogglePush,
@@ -155,7 +156,7 @@ export default function Settings({
           {/* ══ GROUP: ACCOUNT ════════════════════════════════════════════ */}
           <div className="settings-group">
             <h3 className="settings-group-title">Account</h3>
-            <div className="settings-account-card">
+            <div className={`settings-account-card${confirmingSignOut ? ' confirming' : ''}`}>
               {user?.photoURL ? (
                 <img
                   className="settings-account-avatar"
@@ -183,22 +184,28 @@ export default function Settings({
               {onSignOut && (
                 confirmingSignOut ? (
                   <div className="settings-signout-confirm-row">
-                    <button
-                      type="button"
-                      className="settings-signout-confirm-yes"
-                      onClick={confirmSignOut}
-                      aria-label="Confirm sign out"
-                    >
-                      Sign out
-                    </button>
-                    <button
-                      type="button"
-                      className="settings-signout-confirm-cancel"
-                      onClick={cancelSignOut}
-                      aria-label="Cancel sign out"
-                    >
-                      Cancel
-                    </button>
+                    <p className="settings-signout-confirm-prompt">
+                      Sign out of {user?.displayName || user?.email?.split('@')[0] || 'this account'}?
+                    </p>
+                    <div className="settings-signout-confirm-actions">
+                      <button
+                        type="button"
+                        className="settings-signout-confirm-cancel"
+                        onClick={cancelSignOut}
+                        aria-label="Cancel sign out"
+                        autoFocus
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="settings-signout-confirm-yes"
+                        onClick={confirmSignOut}
+                        aria-label="Confirm sign out"
+                      >
+                        Sign out
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <button
@@ -304,60 +311,61 @@ export default function Settings({
           <div className="settings-group">
             <h3 className="settings-group-title">Privacy &amp; Data</h3>
 
-            {/* Cloud sync toggle */}
+            {/* Cloud sync — single toggle switch (spec §5.1). Turning OFF
+                keeps the existing confirm step; turning ON applies
+                immediately, no confirmation. */}
             <section className="settings-section">
               <div className="settings-section-head">
-                <h4 className="settings-section-title">Cloud sync</h4>
-                <span className={`settings-status-chip ${consent ? 'on' : 'off'}`}>
-                  {consent ? 'On' : 'Off'}
-                </span>
+                <h4 className="settings-section-title" id="cloud-sync-label">Cloud sync</h4>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={consent}
+                  aria-labelledby="cloud-sync-label"
+                  className={`settings-toggle ${consent ? 'on' : 'off'}`}
+                  onClick={() => {
+                    if (consent) setRevokeStage(STAGE.CONFIRM);
+                    else onEnableConsent?.();
+                  }}
+                >
+                  <span className="settings-toggle-track">
+                    <span className="settings-toggle-thumb" />
+                  </span>
+                </button>
               </div>
               <p className="settings-section-desc">
                 {consent
-                  ? 'Your preferences, history, and taste profile are syncing to your account across devices.'
-                  : 'Cloud sync is off. Your data only lives on this device.'}
+                  ? 'Your preferences, history, and taste profile sync to your account across devices.'
+                  : 'Your data stays on this device only. Nothing is uploaded.'}
               </p>
 
-              {consent ? (
-                revokeStage === STAGE.CONFIRM || revokeStage === STAGE.ERROR ? (
-                  <div className="settings-confirm">
-                    <p className="settings-confirm-text">
-                      Stop syncing this account to the cloud? Your existing cloud data stays put — we'll just stop sending new updates from this device.
-                    </p>
-                    {revokeStage === STAGE.ERROR && revokeError && (
-                      <p className="settings-error" role="alert">{revokeError}</p>
-                    )}
-                    <div className="settings-confirm-actions">
-                      <button
-                        type="button"
-                        className="settings-btn settings-btn-ghost"
-                        onClick={() => { setRevokeStage(STAGE.IDLE); setRevokeError(''); }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="settings-btn settings-btn-warn"
-                        onClick={handleConfirmRevoke}
-                        disabled={revokeStage === STAGE.WORKING}
-                      >
-                        {revokeStage === STAGE.WORKING ? 'Working…' : 'Yes, stop syncing'}
-                      </button>
-                    </div>
+              {(revokeStage === STAGE.CONFIRM || revokeStage === STAGE.ERROR) && (
+                <div className="settings-confirm">
+                  <p className="settings-confirm-text">
+                    <strong>Stop cloud sync?</strong> Data already in the cloud stays there until you delete your account. New activity will only be saved on this device.
+                  </p>
+                  {revokeStage === STAGE.ERROR && revokeError && (
+                    <p className="settings-error" role="alert">{revokeError}</p>
+                  )}
+                  <div className="settings-confirm-actions">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn-ghost"
+                      onClick={() => { setRevokeStage(STAGE.IDLE); setRevokeError(''); }}
+                      autoFocus
+                    >
+                      Keep syncing
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn-warn"
+                      onClick={handleConfirmRevoke}
+                      disabled={revokeStage === STAGE.WORKING}
+                    >
+                      {revokeStage === STAGE.WORKING ? 'Working…' : 'Stop sync'}
+                    </button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="settings-btn settings-btn-ghost"
-                    onClick={() => setRevokeStage(STAGE.CONFIRM)}
-                  >
-                    Stop cloud sync
-                  </button>
-                )
-              ) : (
-                <p className="settings-hint">
-                  To re-enable sync, sign out and sign back in — you'll see the consent prompt again.
-                </p>
+                </div>
               )}
             </section>
 

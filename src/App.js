@@ -12,6 +12,7 @@ import {
   trackMoodMigrationEasyWatchToFun,
   trackModeSelected, trackCoupleFlowSelected, trackPartnerRenamed,
   trackRatingStepSelected, trackMatchCountShown, trackCtaTapped, trackZeroMatchesShown,
+  trackPartnerUnlinked,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -623,6 +624,17 @@ function App() {
     setConsent(false);
     safeSet('sd_consent', 'false');
     trackConsentRevoked();
+  };
+
+  // Re-enable cloud sync from Settings. Mirrors handleConsent(true) (the
+  // onboarding-banner accept path) — synchronous, no confirmation, matching
+  // spec §5.3 ("Toggling on applies immediately"). `consent` is already in
+  // the debounced push effect's dependency array (see that effect below), so
+  // flipping it to true is sufficient to trigger an automatic sync on its own
+  // — no separate manual push call needed here.
+  const handleEnableCloudSync = () => {
+    setConsent(true);
+    safeSet('sd_consent', 'true');
   };
 
   // Permanently delete the user's account: wipe Firestore doc → delete the
@@ -1680,6 +1692,7 @@ function App() {
   const handleUnlinkPartner = async () => {
     if (!user?.uid) return;
     await clearPartnerLink(user.uid);
+    trackPartnerUnlinked();
     setPartnerUid(null);
     setPartnerName(null);
     setPartnerSaved([]);
@@ -3062,6 +3075,7 @@ function App() {
           onClose={() => setShowSettings(false)}
           onSignOut={handleSignOut}
           onWithdrawConsent={handleWithdrawConsent}
+          onEnableConsent={handleEnableCloudSync}
           onDeleteAccount={handleDeleteAccount}
           onSavePlayerNames={savePlayerName}
           onTogglePush={handlePushToggle}

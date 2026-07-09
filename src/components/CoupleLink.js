@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import './CoupleLink.css';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,6 +10,21 @@ import './CoupleLink.css';
 //   entering-code      → P2 types in P1's code
 //   linked             → shows partner name + Unlink option
 // ─────────────────────────────────────────────────────────────────────────────
+
+// Matches the real backend TTL (lib/coupleStore.js CODE_TTL_S = 24h). Computed
+// client-side at generation time — no API/response-shape change needed.
+const CODE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function formatExpiry(msRemaining) {
+  if (msRemaining <= 0) return 'Expired';
+  const totalSeconds = Math.floor(msRemaining / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `Expires in ${hours}h ${minutes}m`;
+  if (minutes > 0) return `Expires in ${minutes}m ${seconds}s`;
+  return `Expires in ${seconds}s`;
+}
 
 export default function CoupleLink({
   partnerName,          // string | null — current linked partner's display name
@@ -24,6 +39,25 @@ export default function CoupleLink({
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState(false);
+  const [expiresAt, setExpiresAt] = useState(null);
+  const [now, setNow] = useState(Date.now());
+
+  // Live countdown while the code is on screen — ticks every second and
+  // auto-reverts to idle once the code's real backend TTL has elapsed.
+  useEffect(() => {
+    if (view !== 'showing-code' || !expiresAt) return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [view, expiresAt]);
+
+  useEffect(() => {
+    if (view === 'showing-code' && expiresAt && now >= expiresAt) {
+      setView('idle');
+      setCode('');
+      setExpiresAt(null);
+    }
+  }, [view, expiresAt, now]);
 
   // ── P1 path: generate ──────────────────────────────────────────────────────
   const handleGetCode = async () => {
@@ -32,6 +66,8 @@ export default function CoupleLink({
     try {
       const generated = await onGenerateCode();
       setCode(generated);
+      setExpiresAt(Date.now() + CODE_TTL_MS);
+      setNow(Date.now());
       setView('showing-code');
     } catch (e) {
       setError(e?.message || 'Could not generate a code. Try again.');
@@ -70,16 +106,46 @@ export default function CoupleLink({
 
   // ── Linked state ───────────────────────────────────────────────────────────
   if (isLinked) {
+    if (showUnlinkConfirm) {
+      return (
+        <div className="couplelink-unlink-confirm">
+          <p className="couplelink-unlink-confirm-title">Unlink from {partnerName}?</p>
+          <p className="couplelink-unlink-confirm-body">
+            You'll both lose shared saved items and your couples streak.
+          </p>
+          <div className="couplelink-unlink-confirm-actions">
+            <button
+              type="button"
+              className="couplelink-btn ghost"
+              onClick={() => setShowUnlinkConfirm(false)}
+              autoFocus
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="couplelink-unlink-confirm-yes"
+              onClick={() => { setShowUnlinkConfirm(false); onUnlink(); }}
+            >
+              Unlink
+            </button>
+          </div>
+        </div>
+      );
+    }
+    const initial = (partnerName || '?').trim().charAt(0).toUpperCase();
     return (
       <div className="couplelink-linked">
-        <span className="couplelink-linked-icon" aria-hidden="true">💑</span>
+        <span className="couplelink-linked-avatar" aria-hidden="true">{initial}</span>
         <div className="couplelink-linked-info">
-          <div className="couplelink-linked-label">Linked with</div>
           <div className="couplelink-linked-name">{partnerName}</div>
+          <div className="couplelink-linked-status">
+            <span aria-hidden="true">✓</span> Linked
+          </div>
         </div>
         <button
           className="couplelink-unlink"
-          onClick={onUnlink}
+          onClick={() => setShowUnlinkConfirm(true)}
           aria-label={`Unlink from ${partnerName}`}
         >
           Unlink
@@ -102,8 +168,14 @@ export default function CoupleLink({
           </button>
         </div>
         <p className="couplelink-waiting">Waiting for your partner to enter it…</p>
-        <button className="couplelink-cancel" onClick={() => { setView('idle'); setCode(''); }}>
-          Cancel
+        {expiresAt && (
+          <p className="couplelink-expiry">{formatExpiry(expiresAt - now)}</p>
+        )}
+        <button
+          className="couplelink-cancel"
+          onClick={() => { setView('idle'); setCode(''); setExpiresAt(null); }}
+        >
+          Cancel code
         </button>
       </div>
     );

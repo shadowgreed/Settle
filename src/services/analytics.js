@@ -228,3 +228,17 @@ export function trackCtaTapped({ mode, flow, vibeCount, matchCount }) {
 export function trackZeroMatchesShown({ filtersHash }) {
   track('zero_matches_shown', { filters_hash: filtersHash });
 }
+
+// ── Settings redesign events (July 2026 handoff spec) ─────────────────────────
+
+/** Fired when a user confirms unlinking from their partner in Settings. */
+export function trackPartnerUnlinked() {
+  track('partner_unlinked');
+}
+
+/** Fired when the account-deletion confirmation step (type-to-confirm) is
+ *  first shown — pairs with the existing trackAccountDeleted() to measure
+ *  drop-off between "started" and "completed". */
+export function trackAccountDeleteStarted() {
+  track('account_delete_started');
+}
