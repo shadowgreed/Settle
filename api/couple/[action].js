@@ -23,6 +23,7 @@ const { verifyFirebaseToken } = require('../../lib/firebaseAuth');
 const {
   isEnabled, generateCode, lookupCode, deleteCode, storePendingLink, claimPendingLink,
 } = require('../../lib/coupleStore');
+const { enforceRateLimit } = require('../../lib/rateLimit');
 
 const CODE_RE = /^[A-Z2-9]{6}$/i;
 
@@ -38,6 +39,14 @@ async function handleCode(req, res) {
 
   const uid = await verifyFirebaseToken(req);
   if (!uid) return res.status(401).json({ error: 'unauthorized' });
+
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'couple-code', userMax: 10, ipMax: 30, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Too many requests — please slow down.' });
+  }
 
   const { displayName = '' } = readBody(req);
   const safeName = String(displayName).trim().slice(0, 40);
@@ -59,6 +68,17 @@ async function handlePending(req, res) {
   const uid = await verifyFirebaseToken(req);
   if (!uid) return res.status(401).json({ error: 'unauthorized' });
 
+  // Generous limit — this is polled on every app open, not just once, so it
+  // needs headroom a normal user will never hit. Still worth a backstop since
+  // it's an authenticated Redis read on every call.
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'couple-pending', userMax: 60, ipMax: 120, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(200).json({ partnerUid: null }); // fail-open, same as store-not-configured
+  }
+
   try {
     const partnerUid = await claimPendingLink(uid);
     return res.status(200).json({ partnerUid: partnerUid || null });
@@ -75,6 +95,20 @@ async function handleVerify(req, res) {
 
   const uid = await verifyFirebaseToken(req);
   if (!uid) return res.status(401).json({ error: 'unauthorized' });
+
+  // Security audit fix (SEC-02): this endpoint redeems a 6-char code
+  // (32^6 ≈ 1.07B keyspace) and, on a hit, returns the code owner's uid +
+  // display name AND registers the caller as their pending link — with no
+  // rate limit, a scripted attacker could brute-force live codes, harvest
+  // identities, and hijack the pending-link flow ahead of the real partner.
+  // Tight limits: a real user mistypes a 6-char code at most a few times.
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'couple-verify', userMax: 10, ipMax: 20, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Too many requests — please slow down.' });
+  }
 
   const { code } = readBody(req);
   if (!code || !CODE_RE.test(String(code).trim())) {

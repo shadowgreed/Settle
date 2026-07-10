@@ -22,6 +22,19 @@ rules_version = '2';
 //      has couplePartnerUid == this uid) may READ (not write) this doc.
 //      Required for: seeing partner's savedForLater and playerNames.
 //   2. pendingBallots/{id}: new collection for async couple ballots.
+//
+// Changes from v2 (security audit SEC-01):
+//   3. users/{uid} partner-read is now RECIPROCAL. v2 granted read access the
+//      moment the REQUESTER's own doc claimed couplePartnerUid == target —
+//      a one-sided claim, since anyone who obtains (guesses, brute-forces,
+//      or is otherwise given) a target's uid could write it into their own
+//      couplePartnerUid field and immediately read the target's entire
+//      profile (taste profile, watch history, savedForLater, playerNames)
+//      with zero cooperation from the target. The app's own client code
+//      already computes a `mutual` boolean before treating a link as
+//      confirmed (App.js) — this rule now enforces that same invariant
+//      server-side, where it actually matters, instead of trusting client
+//      JS a malicious caller can simply bypass via the raw Firestore SDK.
 // ─────────────────────────────────────────────────────────────────────────────
 
 service cloud.firestore {
@@ -29,20 +42,23 @@ service cloud.firestore {
 
     // Per-user profile document.
     //   - Owner: full read + write.
-    //   - Linked partner: read-only. This allows each user to see their
-    //     partner's savedForLater and display name without a server-side read.
-    //     The partner relationship is established by the owner writing their
-    //     own couplePartnerUid field — so consent is implicit in the action.
+    //   - Linked partner: read-only, and ONLY once the link is reciprocal —
+    //     both docs must name each other. This allows each user to see their
+    //     partner's savedForLater and display name without a server-side read,
+    //     while closing the one-sided-claim IDOR described above.
     match /users/{userId} {
       allow read: if request.auth != null && (
         request.auth.uid == userId
         ||
-        // Partner-read: requester's own doc must have couplePartnerUid == userId.
-        // The get() call counts as one extra read per security evaluation.
+        // Reciprocal partner-read: the REQUESTER's own doc must claim userId
+        // as their partner, AND userId's doc (the one being read — available
+        // directly as `resource` here, no extra get() needed) must claim the
+        // requester back. A one-sided write no longer grants anything.
         (
           exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
           get(/databases/$(database)/documents/users/$(request.auth.uid))
-              .data.couplePartnerUid == userId
+              .data.couplePartnerUid == userId &&
+          resource.data.couplePartnerUid == request.auth.uid
         )
       );
       allow write: if request.auth != null && request.auth.uid == userId;
