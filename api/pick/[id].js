@@ -20,6 +20,8 @@
  * assembly though, no Satori/image rendering needed here.
  */
 
+const { enforceRateLimit } = require('../../lib/rateLimit');
+
 function escapeHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;')
@@ -35,6 +37,20 @@ function escapeAttr(str) {
 }
 
 module.exports = async function handler(req, res) {
+  // This route's real audience is link-unfurl crawlers (iMessage, WhatsApp,
+  // Discord, Slack, X — see the header comment), so limits here are about
+  // guarding function-invocation volume, not a paid quota (this handler
+  // makes no external calls at all). Set generous relative to the other
+  // endpoints so a legitimate burst of crawler fetches for one shared link
+  // never breaks the actual unfurl.
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'pick-unfurl', userMax: 60, ipMax: 300, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).send('Too many requests — please slow down.');
+  }
+
   const { id } = req.query;
   const title    = req.query.title || 'a pick';
   const story    = req.query.story || '';

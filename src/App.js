@@ -2400,6 +2400,12 @@ function App() {
     trackShareCardOpened({ tmdbId: item.id, mode });
     const ok = await fetchShareCard(item, 'story');
     if (!ok) {
+      // Distinct reason from shareImageCard's fallback branches below —
+      // this one means /api/share-card itself errored (network/5xx) before
+      // the user ever saw the format picker, not a post-render Web Share API
+      // failure. Previously invisible in PostHog: every other branch here
+      // reports a reason, this was the one silent path.
+      trackShareFallbackReason({ reason: 'fetch_failed' });
       closeShareModal();
       shareAsText(item);
     }
