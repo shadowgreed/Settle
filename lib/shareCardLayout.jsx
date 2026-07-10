@@ -33,7 +33,7 @@ const SERVICE_COLORS = {
 };
 
 // Canvas sizes per format (spec §2).
-export const FORMAT_SIZES = {
+const FORMAT_SIZES = {
   story:    { width: 1080, height: 1920 },
   portrait: { width: 1080, height: 1350 },
   square:   { width: 1080, height: 1080 },
@@ -420,10 +420,12 @@ function OgLayout({ item, storyLine, daypartText }) {
  * @param {string} params.daypartText - e.g. "🎬 Evening Pick".
  * @param {string} [params.qrDataUrl] - Story format only (Phase 3).
  */
-export function buildCardElement({ fmt, item, storyLine, daypartText, qrDataUrl }) {
+function buildCardElement({ fmt, item, storyLine, daypartText, qrDataUrl }) {
   if (fmt === 'og') return <OgLayout item={item} storyLine={storyLine} daypartText={daypartText} />;
   if (fmt === 'portrait' || fmt === 'square') {
     return <StackedLayout fmt={fmt} item={item} storyLine={storyLine} daypartText={daypartText} />;
   }
   return <StoryLayout item={item} storyLine={storyLine} daypartText={daypartText} qrDataUrl={qrDataUrl} />;
 }
+
+module.exports = { FORMAT_SIZES, buildCardElement };

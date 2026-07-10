@@ -1,45 +1,44 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/share-card?fmt=story|portrait|square|og&title=&year=&type=&rating=
-//                     &service=&genres=&posterPath=&story=&daypart=
+//                     &service=&genres=&posterPath=&story=&daypart=&tmdb=
 //
 // Server-side render of the shareable pick card (handoff spec §2/§4), using
 // @vercel/og (Satori) against the shared layout in lib/shareCardLayout.jsx.
 //
-// This is the first Edge Function in the codebase — every other api/*.js route
-// is a Node serverless function (CommonJS, (req, res) signature). Edge Functions
-// use the standard Web Request/Response API and ESM, which is why this file is
-// .jsx with `export default` rather than `module.exports`.
+// Node runtime (CommonJS, (req, res) signature) — same convention as every
+// other api/*.js route. This was originally an Edge Function (the first one
+// in the codebase), moved back to Node for two concrete reasons, not style:
+//   1. Getting the rendered PNG under the parent spec's 1MB target needs a
+//      PNG-decode + JPEG-re-encode pass (photographic poster content barely
+//      compresses under lossless PNG). pngjs's decoder requires Node's
+//      native 'zlib' module, which doesn't exist in the Edge runtime — it
+//      would throw on every request, the same class of bug as the font-load
+//      failure this route already shipped once (see the FONT_FETCH_UA
+//      comment below).
+//   2. lib/rateLimit.js / lib/firebaseAuth.js assume a Node
+//      IncomingMessage-shaped req (bracket property access on req.headers),
+//      not the Edge runtime's Web Headers object — Node removes that
+//      mismatch too, though rate limiting isn't wired in by this change.
 //
 // Deliberately takes only display data as query params (title/year/type/etc.),
-// not a TMDB id — the client already has the full result object in memory when
-// the user taps Share (it's the same object the old canvas renderer consumed),
-// so there's no need for this route to re-fetch metadata from the TMDB API.
-// It only fetches the poster IMAGE from TMDB's public image CDN (no API key
-// required for images, unlike the metadata API that api/tmdb.js proxies).
-//
-// No rate limiting here yet — lib/rateLimit.js and lib/firebaseAuth.js both
-// assume a Node IncomingMessage-shaped req (bracket property access on
-// req.headers), which doesn't match the Edge runtime's Web Headers object.
-// Adapting those shared files for dual-runtime use is a real but separate
-// piece of work, flagged rather than silently bundled into this change.
+// not a TMDB id for data lookup — the client already has the full result
+// object in memory when the user taps Share, so there's no need to re-fetch
+// metadata from the TMDB API. `tmdb` IS accepted, but only to build the QR
+// code's /pick/{id} destination — this route only ever fetches the poster
+// IMAGE from TMDB's public image CDN (no API key needed for images, unlike
+// the metadata API api/tmdb.js proxies).
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { ImageResponse } from '@vercel/og';
-// Explicit browser-safe subpath, not the bare 'qrcode' package — the default
-// entry point's toDataURL renders via an actual <canvas> element (through
-// CanvasRenderer), which doesn't exist in the Edge runtime (no DOM). This
-// subpath's toString({type:'svg'}) path is pure string templating with no
-// canvas/zlib dependency, confirmed by reading node_modules/qrcode/lib/
-// browser.js directly rather than assuming the package.json "browser" field
-// resolution would be honored by every bundler.
-import QRCode from 'qrcode/lib/browser.js';
-import { buildCardElement, FORMAT_SIZES } from '../lib/shareCardLayout.jsx';
-import { getShareCardCache, setShareCardCache } from '../lib/shareCardCache.js';
-
-export const config = { runtime: 'edge' };
+const { ImageResponse } = require('@vercel/og');
+const QRCode = require('qrcode');
+const { PNG } = require('pngjs');
+const jpeg = require('jpeg-js');
+const { buildCardElement, FORMAT_SIZES } = require('../lib/shareCardLayout.jsx');
+const { getShareCardCache, setShareCardCache } = require('../lib/shareCardCache.js');
 
 const VALID_FORMATS = new Set(['story', 'portrait', 'square', 'og']);
 const POSTER_FETCH_TIMEOUT_MS = 3000;
+const JPEG_QUALITY = 85; // spec §2's own suggested value; ~3.4MB PNG -> ~0.4MB JPEG at this setting, visually lossless at normal viewing size (verified directly against rendered output, not just measured)
 
 // Server-side length cap mirroring the real client-side convention
 // (src/components/Settings.js maxLength={20} on player-name inputs) — not a
@@ -57,13 +56,13 @@ function clean(str, maxLen) {
 // desktop Chrome UA" trick does NOT work for this: Chrome had WOFF2 support
 // well before version 104, so that UA still gets WOFF2. Older UAs (Chrome 30,
 // Safari 5, Firefox 4, an old iOS Safari) fare no better — they get WOFF1,
-// which Satori also rejects. Empirically verified (see PR discussion) against
-// the live API: only Googlebot's own UA reliably gets genuine
-// format('truetype') — confirmed by fetching the resulting font file and
-// checking its magic bytes (0x00010000, the standard sfnt/TrueType header).
-// This was the actual root cause of the share card silently failing to
-// render — Satori throws synchronously ("No fonts are loaded") when handed
-// an empty fonts array, which an unmatched regex here produced every time.
+// which Satori also rejects. Empirically verified against the live API: only
+// Googlebot's own UA reliably gets genuine format('truetype') — confirmed by
+// fetching the resulting font file and checking its magic bytes (0x00010000,
+// the standard sfnt/TrueType header). This was the actual root cause of the
+// share card silently failing to render — Satori throws synchronously ("No
+// fonts are loaded") when handed an empty fonts array, which an unmatched
+// regex here produced every time.
 const FONT_FETCH_UA = 'Googlebot/2.1 (+http://www.google.com/bot.html)';
 
 let fontsPromise = null;
@@ -79,8 +78,8 @@ async function loadFonts() {
 
 // Single combined CSS request for both weights (not one request per weight)
 // — halves the network round-trips before the actual font-file fetches,
-// which matters for the crawler-facing fmt=og path (bugfix ticket §3.4 —
-// crawlers time out in ~3-5s).
+// which matters for the crawler-facing fmt=og path (crawlers time out in
+// ~3-5s).
 async function loadInterWeights(weights) {
   const cssUrl = `https://fonts.googleapis.com/css2?family=Inter:wght@${weights.join(';')}`;
   const css = await (await fetch(cssUrl, { headers: { 'User-Agent': FONT_FETCH_UA } })).text();
@@ -116,8 +115,9 @@ async function loadInterWeights(weights) {
 
 // Story-format QR (spec §3 item 6) — stories aren't tappable for small
 // accounts, so this is the only working link on that format. Encodes the
-// same personalized /pick/{id} URL the card's own share flow generates,
-// SVG-rendered (no canvas/zlib) and base64-embedded as an <img> data URI.
+// same personalized /pick/{id} URL the card's own share flow generates.
+// Node runtime, so the plain 'qrcode' entry point (canvas-capable) is fine —
+// still asking for SVG output specifically, which needs no canvas either way.
 async function buildQrDataUri(pickUrl) {
   if (!pickUrl) return null;
   try {
@@ -158,35 +158,51 @@ async function loadPosterDataUri(posterPath) {
   }
 }
 
-export default async function handler(request) {
-  const { searchParams, origin } = new URL(request.url);
+// PNG -> JPEG re-encode (parent spec §2's ≤1MB target — @vercel/og only ever
+// emits PNG, and a full-bleed photographic poster compresses poorly
+// losslessly: ~3.4MB for the Story format before this step, ~0.4MB after at
+// quality 85). Pure-JS decode/encode (pngjs + jpeg-js, no native bindings/
+// WASM), verified end-to-end against real rendered output before shipping.
+// Falls back to returning the original PNG if this step ever fails — a
+// bigger-than-spec'd file is a much smaller problem than no file at all.
+function pngToJpeg(pngBuf) {
+  const decoded = PNG.sync.read(pngBuf);
+  const encoded = jpeg.encode({ data: decoded.data, width: decoded.width, height: decoded.height }, JPEG_QUALITY);
+  return encoded.data;
+}
 
-  const fmt = VALID_FORMATS.has(searchParams.get('fmt')) ? searchParams.get('fmt') : 'story';
+module.exports = async function handler(req, res) {
+  const fmt = VALID_FORMATS.has(req.query.fmt) ? req.query.fmt : 'story';
   const { width, height } = FORMAT_SIZES[fmt];
 
   const item = {
-    title:      clean(searchParams.get('title') || 'Untitled', 100),
-    year:       clean(searchParams.get('year') || '', 4),
-    type:       clean(searchParams.get('type') || '', 10),
-    rating:     searchParams.get('rating') || null,
-    service:    clean(searchParams.get('service') || '', 20),
-    genres:     clean(searchParams.get('genres') || '', 60).split(',').map(s => s.trim()).filter(Boolean),
+    title:      clean(req.query.title || 'Untitled', 100),
+    year:       clean(req.query.year || '', 4),
+    type:       clean(req.query.type || '', 10),
+    rating:     req.query.rating || null,
+    service:    clean(req.query.service || '', 20),
+    genres:     clean(req.query.genres || '', 60).split(',').map(s => s.trim()).filter(Boolean),
   };
-  const storyLine   = clean(searchParams.get('story') || '', 80);
-  const daypartText = clean(searchParams.get('daypart') || '🎬 Tonight\'s Pick', 40);
-  const tmdbId      = clean(searchParams.get('tmdb') || '', 20);
-  const posterPath  = searchParams.get('posterPath') || '';
+  const storyLine   = clean(req.query.story || '', 80);
+  const daypartText = clean(req.query.daypart || '🎬 Tonight\'s Pick', 40);
+  const tmdbId      = clean(req.query.tmdb || '', 20);
+  const posterPath  = req.query.posterPath || '';
 
-  const PNG_HEADERS = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' };
+  const proto  = req.headers['x-forwarded-proto'] || 'https';
+  const origin = `${proto}://${req.headers['x-forwarded-host'] || req.headers.host || 'trysettle.app'}`;
+
+  const JPEG_HEADERS = { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400' };
+  const PNG_HEADERS  = { 'Content-Type': 'image/png',  'Cache-Control': 'public, max-age=86400' };
 
   // Cache key covers every input that affects the rendered pixels (spec §4 —
   // "identical shares shouldn't re-render"). A hit skips the font/poster
-  // fetch and the Satori render entirely.
+  // fetch, the Satori render, AND the JPEG re-encode entirely.
   const cacheParams = JSON.stringify({ tmdbId, ...item, storyLine, daypartText, posterPath });
   const cached = await getShareCardCache(fmt, cacheParams);
   if (cached) {
-    const bytes = Uint8Array.from(atob(cached), (c) => c.charCodeAt(0));
-    return new Response(bytes, { headers: PNG_HEADERS });
+    res.setHeader('Content-Type', JPEG_HEADERS['Content-Type']);
+    res.setHeader('Cache-Control', JPEG_HEADERS['Cache-Control']);
+    return res.status(200).send(Buffer.from(cached, 'base64'));
   }
 
   // Story format only (spec §3 item 6). Mirrors the same personalization
@@ -224,10 +240,7 @@ export default async function handler(request) {
     // propagate as an opaque, possibly non-JSON error the client can't
     // usefully branch on. The client already treats any non-2xx as a signal
     // to fall back to a text-only share (src/App.js fetchShareCard).
-    return new Response(JSON.stringify({ error: 'font_load_failed' }), {
-      status: 502,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(502).json({ error: 'font_load_failed' });
   }
 
   const element = buildCardElement({
@@ -238,21 +251,31 @@ export default async function handler(request) {
     qrDataUrl,
   });
 
-  let buf;
+  let pngBuf;
   try {
     const rendered = new ImageResponse(element, { width, height, fonts });
-    buf = await rendered.arrayBuffer();
+    pngBuf = Buffer.from(await rendered.arrayBuffer());
   } catch (e) {
     console.error('[share-card] Satori render failed:', e.message);
-    return new Response(JSON.stringify({ error: 'render_failed' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(500).json({ error: 'render_failed' });
   }
 
-  // Fire-and-forget — a cache-write failure shouldn't fail (or delay) the
-  // response the user is waiting on.
-  setShareCardCache(fmt, cacheParams, Buffer.from(buf).toString('base64')).catch(() => {});
+  let outBuf = pngBuf;
+  let headers = PNG_HEADERS;
+  try {
+    outBuf = pngToJpeg(pngBuf);
+    headers = JPEG_HEADERS;
+    // Fire-and-forget — a cache-write failure shouldn't fail (or delay) the
+    // response the user is waiting on. Only caching the JPEG path keeps the
+    // cache-hit branch above simple (always JPEG, never a mixed format).
+    setShareCardCache(fmt, cacheParams, outBuf.toString('base64')).catch(() => {});
+  } catch (e) {
+    // The render itself succeeded — a PNG a bit over the size target beats
+    // no image at all, so this degrades rather than fails the request.
+    console.error('[share-card] PNG->JPEG re-encode failed, serving PNG:', e.message);
+  }
 
-  return new Response(buf, { headers: PNG_HEADERS });
-}
+  res.setHeader('Content-Type', headers['Content-Type']);
+  res.setHeader('Cache-Control', headers['Cache-Control']);
+  return res.status(200).send(outBuf);
+};

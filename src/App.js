@@ -2369,7 +2369,13 @@ function App() {
       const res = await fetch(`/api/share-card?${params.toString()}`);
       if (!res.ok) throw new Error(`share-card ${res.status}`);
       const blob = await res.blob();
-      shareFileRef.current = new File([blob], 'settle-pick.png', { type: 'image/png' });
+      // Trust the response's actual Content-Type rather than assuming a
+      // format — the server re-encodes to JPEG to hit the parent spec's
+      // ≤1MB target, but falls back to serving PNG if that re-encode step
+      // ever fails, so this must not be hardcoded either way.
+      const contentType = res.headers.get('content-type') || 'image/jpeg';
+      const ext = contentType.includes('png') ? 'png' : 'jpg';
+      shareFileRef.current = new File([blob], `settle-pick.${ext}`, { type: contentType });
       setShareCardUrl(URL.createObjectURL(blob));
       setShareCardReady(true);
       return true;
