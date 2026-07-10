@@ -17,13 +17,14 @@ import {
   trackMoreLikeThisTapped,
   trackLinkModalOpened, trackLinkModalSkippedToQuickPick, trackConfirmModalDismissed,
   trackShareCardOpened, trackShareCardShared, trackShareCardFormatChanged,
+  resetAnalytics,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
   zipToCoords, recordPermissionDecision, shouldRepromptAfterDecline,
   clearCachedCoords,
 } from './services/location';
-import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice, syncPushProfile } from './services/push';
+import { isPushSupported, subscribeToPush, unsubscribeFromPush, isSubscribedOnThisDevice, syncPushProfile, deleteAllPushData } from './services/push';
 import AuthGate from './components/AuthGate';
 import Onboarding from './components/Onboarding';
 import LocationPermission from './components/LocationPermission';
@@ -712,18 +713,29 @@ function App() {
     safeSet('sd_consent', 'true');
   };
 
-  // Permanently delete the user's account: wipe Firestore doc → delete the
-  // Firebase Auth user → clear local data → sign out. Order matters:
-  //   • Firestore delete first so the doc doesn't linger if auth delete fails
-  //   • Auth delete second — Firebase may throw 'auth/requires-recent-login'
+  // Permanently delete the user's account: purge push subscriptions → wipe
+  // Firestore doc → delete the Firebase Auth user → clear local data + reset
+  // analytics identity → sign out. Order matters:
+  //   • Push cleanup first — deleteAllPushData() is best-effort (catches its
+  //     own errors, never throws) and needs a still-valid auth token to call
+  //     the authenticated /api/push/delete-all endpoint, so it must run
+  //     before that token is invalidated. Security audit fix (SEC-03):
+  //     deleteUserData() only ever touched the Firestore doc, leaving every
+  //     device's push subscription live in Upstash under this uid forever.
+  //   • Firestore delete second so the doc doesn't linger if auth delete fails
+  //   • Auth delete third — Firebase may throw 'auth/requires-recent-login'
   //     here; we let the Settings modal surface that error and ask the user
-  //     to sign back in.
+  //     to sign back in. (Retrying is safe — every step above is idempotent.)
+  //   • trackAccountDeleted() before resetAnalytics() so that last event is
+  //     still attributed to the identity being retired, not a fresh one.
   //   • Local clear + signOut last so the AuthGate shows a clean slate.
   const handleDeleteAccount = async () => {
     if (!user) throw new Error('No signed-in user');
+    await deleteAllPushData();          // best-effort, never throws
     await deleteUserData(user.uid);     // throws → caught by Settings
     await deleteCurrentUser();          // throws → caught by Settings
     trackAccountDeleted();
+    await resetAnalytics();             // security audit fix (SEC-03)
     USER_DATA_KEYS.forEach(k => { try { localStorage.removeItem(k); } catch {} });
     setShowSettings(false);
     // deleteCurrentUser() already invalidates the auth session, so the

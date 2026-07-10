@@ -18,7 +18,7 @@
 
 const { verifyFirebaseToken } = require('../../lib/firebaseAuth');
 const {
-  isEnabled, saveSubscription, removeSubscription, scheduleWatchLoop,
+  isEnabled, saveSubscription, removeSubscription, deleteProfile, scheduleWatchLoop,
 } = require('../../lib/pushStore');
 
 function readBody(req) {
@@ -123,10 +123,35 @@ async function handleWatchLoop(req, res) {
   }
 }
 
+// POST /api/push/delete-all — wipe every device's subscription + targeting
+// data for the caller (security audit SEC-03). Unlike handleUnsubscribe,
+// which removes one device by endpoint, this removes the ENTIRE profile in
+// one call regardless of how many devices are subscribed — used by account
+// deletion, which needs to leave nothing behind under the caller's own uid.
+// uid comes only from the verified token, never the body, so a caller can
+// only ever delete their own profile.
+async function handleDeleteAll(req, res) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  const uid = await verifyFirebaseToken(req);
+  if (!uid) return res.status(401).json({ error: 'unauthorized' });
+
+  if (!isEnabled()) return res.status(200).json({ ok: true, skipped: 'store_not_configured' });
+
+  try {
+    await deleteProfile(uid);
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('[push/delete-all]', err.message);
+    return res.status(500).json({ error: 'could not delete push profile' });
+  }
+}
+
 const ACTIONS = {
   subscribe: handleSubscribe,
   unsubscribe: handleUnsubscribe,
   'watch-loop': handleWatchLoop,
+  'delete-all': handleDeleteAll,
 };
 
 module.exports = async function handler(req, res) {

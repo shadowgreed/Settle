@@ -158,6 +158,28 @@ export async function unsubscribeFromPush(uid) {
   }
 }
 
+// Wipe every device's push subscription server-side, plus unsubscribe this
+// device's own browser-level PushManager registration (security audit
+// SEC-03 — account deletion). unsubscribeFromPush only ever removed one
+// device by endpoint via /api/push/unsubscribe; account deletion needs
+// every device gone, which /api/push/delete-all handles server-side in one
+// call since it derives uid from the auth token, not a per-device endpoint.
+export async function deleteAllPushData() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+  } catch (e) {
+    console.warn('[Push] local unsubscribe during account deletion failed:', e.message);
+  }
+  try {
+    const res = await postJson('/api/push/delete-all', {});
+    if (!res.ok) console.warn('[Push] delete-all persist failed:', res.status);
+  } catch (e) {
+    console.warn('[Push] delete-all persist error:', e.message);
+  }
+}
+
 // True if the current device has an active push subscription.
 export async function isSubscribedOnThisDevice() {
   if (!isPushSupported()) return false;

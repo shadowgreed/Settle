@@ -64,6 +64,19 @@ async function track(eventName, properties = {}) {
   if (posthog) posthog.capture(eventName, properties);
 }
 
+/**
+ * Clear the local PostHog identity (security audit SEC-03 — account
+ * deletion). Only acts if PostHog was actually loaded this session
+ * (`posthogPromise` set by a prior consented track() call) — if it was
+ * never loaded, no identity was ever created, so there's nothing to reset
+ * and no reason to load the SDK just to immediately discard it.
+ */
+export async function resetAnalytics() {
+  if (!posthogPromise) return;
+  const posthog = await posthogPromise;
+  if (posthog) posthog.reset();
+}
+
 // ── Tracked genre keys ────────────────────────────────────────────────────────
 // Canonical identifiers for non-numeric (virtual) genres recognised by
 // analytics. Numeric TMDB genre IDs are tracked as-is; these strings are

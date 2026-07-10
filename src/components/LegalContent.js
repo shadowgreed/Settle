@@ -60,7 +60,7 @@ export function PrivacyBody() {
       </ul>
 
       <h3>8. Data Retention &amp; Deletion</h3>
-      <p>You can permanently delete your account and all associated Firestore data yourself, at any time, from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar). The deletion is immediate. If you'd prefer we delete it for you, email <strong>hello@trysettle.app</strong> and we'll process the request within 30 days. Local browser data (localStorage, IndexedDB) is cleared automatically when you sign out, or can be cleared at any time through your browser settings.</p>
+      <p>You can permanently delete your account yourself, at any time, from the in-app <strong>Privacy &amp; Data</strong> settings (gear icon in the account bar). The deletion is immediate and removes your Firestore data, any push notification subscriptions, and your analytics identity. If you'd prefer we delete it for you, email <strong>hello@trysettle.app</strong> and we'll process the request within 30 days. Local browser data (localStorage, IndexedDB) is cleared automatically when you sign out, or can be cleared at any time through your browser settings.</p>
 
       <h3>9. Children's Privacy</h3>
       <p>Settle is not directed at children under 13. We do not knowingly collect personal information from anyone under 13. If you believe a child has provided us with personal data, contact us and we will delete it promptly.</p>
