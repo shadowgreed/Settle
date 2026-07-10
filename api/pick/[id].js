@@ -16,8 +16,8 @@
  * story/daypart) — forwarded here unchanged via the rewrite's query-string
  * passthrough, and re-forwarded again to build the og:image URL.
  *
- * Node runtime (unlike api/share-card.jsx) — this is plain HTML string
- * assembly, no Satori/image rendering needed here.
+ * Node runtime, same as api/share-card.js — this one is plain HTML string
+ * assembly though, no Satori/image rendering needed here.
  */
 
 function escapeHtml(str) {

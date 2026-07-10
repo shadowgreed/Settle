@@ -5,7 +5,7 @@
  * convention) to stay under the Hobby plan's 12-serverless-function cap per
  * deployment — three separate files here plus three under api/push counted
  * against that same limit, and every deployment since the Shareable Pick
- * Card work added api/share-card.jsx + api/pick/[id].js has been failing to
+ * Card work added api/share-card.js + api/pick/[id].js has been failing to
  * build as a result (14 functions total, cap is 12).
  *
  * Dispatches on the URL segment itself (req.query.action — Vercel populates
