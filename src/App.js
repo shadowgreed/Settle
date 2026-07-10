@@ -2621,8 +2621,29 @@ function App() {
         // the no-genre browse path (catches any incidental Comedy).
         const COMEDY_GENRE_ID = 35;
         const excludeStandup = !specialIds.includes('standup');
-        const regularExcludeKeywords =
-          excludeStandup && regularIds.includes(COMEDY_GENRE_ID) ? STANDUP_KEYWORDS : null;
+
+        // Anime exclusion: anime should ONLY ever appear when the user
+        // explicitly selects the Anime mood — never as a side effect of some
+        // other vibe. Unlike stand-up, this can't be gated on any one genre
+        // ID being present: anime titles on TMDB routinely carry Action,
+        // Drama, Fantasy, Sci-Fi, Romance, Comedy, etc. as SECONDARY genres
+        // alongside (or sometimes instead of, per inconsistent tagging)
+        // Animation, so any regular-genre OR query risks matching one of
+        // those. Applied unconditionally to every regular-genre query and
+        // the no-genre browse path (which also covers Hidden Gems, since
+        // that mode wipes activeGenresForFetch to browse with a wide net —
+        // "wide net" still shouldn't mean anime slips in uninvited).
+        const excludeAnime = !specialIds.includes('anime');
+
+        const regularExcludeKeywords = [
+          excludeStandup && regularIds.includes(COMEDY_GENRE_ID) ? STANDUP_KEYWORDS : null,
+          excludeAnime ? ANIME_KEYWORD : null,
+        ].filter(Boolean).join('|') || null;
+
+        const noFilterExcludeKeywords = [
+          excludeStandup ? STANDUP_KEYWORDS : null,
+          excludeAnime ? ANIME_KEYWORD : null,
+        ].filter(Boolean).join('|') || null;
 
         // Combine multiple decades by spanning the union (min gte, max lte).
         const dateGte = decadeIds.length
@@ -2638,8 +2659,9 @@ function App() {
 
             // No genre filter case — fires when nothing is selected OR when
             // only decade moods are selected. The date range still applies.
-            // Stand-up exclusion still fires here so an unfiltered browse
-            // doesn't surface stand-up specials by accident.
+            // Stand-up + anime exclusion still fire here so an unfiltered
+            // browse (including Hidden Gems) doesn't surface either by
+            // accident.
             if (regularIds.length === 0 && specialIds.length === 0) {
               fetchFns.push(() =>
                 tmdbService.discoverContent({
@@ -2648,7 +2670,7 @@ function App() {
                   minRating: hiddenGems ? 0 : minRating,
                   hiddenGems,
                   maxCertification: hiddenGems ? null : maxCertification,
-                  excludeKeywords: excludeStandup ? STANDUP_KEYWORDS : null,
+                  excludeKeywords: noFilterExcludeKeywords,
                   // maxRuntime removed in P2.2 — surfaced on the result card instead.
                   dateGte, dateLte,
                 })
