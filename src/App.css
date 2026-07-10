@@ -321,6 +321,15 @@ button.sequel-badge {
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
   padding-right: 24px; /* clears the fade mask so the last pill isn't covered */
+  /* Setting overflow-x alone makes browsers compute overflow-y as 'auto' too
+     (can't have one axis scrollable and the other 'visible' per spec) — on
+     iOS Safari that auto vertical scrollbox hugs the chips' box tightly
+     enough to clip a sliver off the bottom (and top) of each pill's border/
+     rounded corner. A little breathing room inside the scroll area is the
+     standard fix; the row's own margin-bottom (inherited from .section)
+     still governs spacing to whatever follows. */
+  padding-top: 4px;
+  padding-bottom: 4px;
 }
 .chip-grid.services-row::-webkit-scrollbar {
   display: none;
