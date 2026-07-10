@@ -13,6 +13,10 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  /* Flat 20px alone doesn't clear the status bar / Dynamic Island on iOS —
+     every other overlay in this app (App.css, Onboarding.css) adds
+     safe-area-inset-top for the same reason. */
+  padding-top: max(20px, calc(env(safe-area-inset-top) + 20px));
   animation: settings-fade-in 180ms ease-out;
   /* iOS Safari hardening:
      - `touch-action: none` on the overlay backdrop prevents touch gestures
@@ -576,7 +580,10 @@
 
 /* Narrow viewports — full-width modal with snug margins */
 @media (max-width: 480px) {
-  .settings-overlay { padding: 10px; }
+  .settings-overlay {
+    padding: 10px;
+    padding-top: max(10px, calc(env(safe-area-inset-top) + 10px));
+  }
   .settings-modal   { max-height: min(92vh, 92dvh); }
   .settings-body    { padding: 14px; gap: 18px; }
   .settings-confirm-actions .settings-btn {
