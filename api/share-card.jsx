@@ -52,31 +52,66 @@ function clean(str, maxLen) {
   return str.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, maxLen);
 }
 
-// Google Fonts serves WOFF2 by default, which Satori can't parse — an old
-// enough User-Agent forces the TTF variant. Fetched once per format weight
-// and cached in module scope across warm invocations (mirrors the key-caching
-// pattern already used in lib/firebaseAuth.js).
-const OLD_UA =
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36';
+// Google Fonts serves WOFF2 by default (which Satori can't parse — it needs
+// TTF/OTF) based on User-Agent sniffing. The commonly-cited "just use an old
+// desktop Chrome UA" trick does NOT work for this: Chrome had WOFF2 support
+// well before version 104, so that UA still gets WOFF2. Older UAs (Chrome 30,
+// Safari 5, Firefox 4, an old iOS Safari) fare no better — they get WOFF1,
+// which Satori also rejects. Empirically verified (see PR discussion) against
+// the live API: only Googlebot's own UA reliably gets genuine
+// format('truetype') — confirmed by fetching the resulting font file and
+// checking its magic bytes (0x00010000, the standard sfnt/TrueType header).
+// This was the actual root cause of the share card silently failing to
+// render — Satori throws synchronously ("No fonts are loaded") when handed
+// an empty fonts array, which an unmatched regex here produced every time.
+const FONT_FETCH_UA = 'Googlebot/2.1 (+http://www.google.com/bot.html)';
 
 let fontsPromise = null;
 async function loadFonts() {
   if (fontsPromise) return fontsPromise;
-  fontsPromise = Promise.all([400, 700].map(loadInterWeight)).then(([regular, bold]) => [
-    { name: 'Inter', data: regular, weight: 400, style: 'normal' },
-    { name: 'Inter', data: bold, weight: 700, style: 'normal' },
-  ]);
+  fontsPromise = loadInterWeights([400, 700]);
+  // Don't memoize a rejection — a transient failure on a cold start
+  // shouldn't poison every subsequent request for the rest of this warm
+  // instance's lifetime the way a memoized rejected promise would.
+  fontsPromise.catch(() => { fontsPromise = null; });
   return fontsPromise;
 }
 
-async function loadInterWeight(weight) {
-  const cssUrl = `https://fonts.googleapis.com/css2?family=Inter:wght@${weight}`;
-  const css = await (await fetch(cssUrl, { headers: { 'User-Agent': OLD_UA } })).text();
-  const match = css.match(/src: url\((.+?)\) format\('(opentype|truetype)'\)/);
-  if (!match) throw new Error(`no TTF/OTF resource found for Inter ${weight}`);
-  const res = await fetch(match[1]);
-  if (!res.ok) throw new Error(`font fetch ${res.status} for Inter ${weight}`);
-  return res.arrayBuffer();
+// Single combined CSS request for both weights (not one request per weight)
+// — halves the network round-trips before the actual font-file fetches,
+// which matters for the crawler-facing fmt=og path (bugfix ticket §3.4 —
+// crawlers time out in ~3-5s).
+async function loadInterWeights(weights) {
+  const cssUrl = `https://fonts.googleapis.com/css2?family=Inter:wght@${weights.join(';')}`;
+  const css = await (await fetch(cssUrl, { headers: { 'User-Agent': FONT_FETCH_UA } })).text();
+
+  // Parse per @font-face block (not a single global regex) so each font
+  // file is correctly paired with ITS OWN weight, not assumed from response
+  // order alone.
+  const blocks = css.match(/@font-face\s*\{[^}]+\}/g) || [];
+  const byWeight = {};
+  for (const block of blocks) {
+    const weightMatch = block.match(/font-weight:\s*(\d+)/);
+    const srcMatch = block.match(/src: url\((.+?)\) format\('(opentype|truetype)'\)/);
+    if (weightMatch && srcMatch) byWeight[weightMatch[1]] = srcMatch[1];
+  }
+
+  const buffers = await Promise.all(
+    weights.map(async (weight) => {
+      const url = byWeight[weight];
+      if (!url) throw new Error(`no TTF/OTF resource found for Inter ${weight}`);
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`font fetch ${res.status} for Inter ${weight}`);
+      return res.arrayBuffer();
+    })
+  );
+
+  return weights.map((weight, i) => ({
+    name: 'Inter',
+    data: buffers[i],
+    weight,
+    style: 'normal',
+  }));
 }
 
 // Story-format QR (spec §3 item 6) — stories aren't tappable for small
@@ -167,14 +202,33 @@ export default async function handler(request) {
       }).toString()}`
     : null;
 
-  const [fonts, posterSrc, qrDataUrl] = await Promise.all([
-    loadFonts().catch((e) => {
-      console.warn('[share-card] font load failed, falling back to no custom font:', e.message);
-      return [];
-    }),
+  // One retry on a transient font-fetch failure (network blip, momentary
+  // Google Fonts hiccup) — Satori throws synchronously if handed an empty
+  // fonts array ("No fonts are loaded"), so silently degrading to fonts:[]
+  // isn't an option here the way it is for the poster/QR fallbacks.
+  // loadFonts() itself clears its memoized promise on rejection, so calling
+  // it again here genuinely retries the fetch rather than replaying the
+  // same failure.
+  const fonts = await loadFonts().catch(() => loadFonts()).catch((e) => {
+    console.error('[share-card] font load failed after retry:', e.message);
+    return null;
+  });
+
+  const [posterSrc, qrDataUrl] = await Promise.all([
     loadPosterDataUri(posterPath),
     fmt === 'story' ? buildQrDataUri(pickUrl) : Promise.resolve(null),
   ]);
+
+  if (!fonts) {
+    // Fail clearly rather than letting Satori's "No fonts are loaded" throw
+    // propagate as an opaque, possibly non-JSON error the client can't
+    // usefully branch on. The client already treats any non-2xx as a signal
+    // to fall back to a text-only share (src/App.js fetchShareCard).
+    return new Response(JSON.stringify({ error: 'font_load_failed' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   const element = buildCardElement({
     fmt,
@@ -184,8 +238,17 @@ export default async function handler(request) {
     qrDataUrl,
   });
 
-  const rendered = new ImageResponse(element, { width, height, fonts });
-  const buf = await rendered.arrayBuffer();
+  let buf;
+  try {
+    const rendered = new ImageResponse(element, { width, height, fonts });
+    buf = await rendered.arrayBuffer();
+  } catch (e) {
+    console.error('[share-card] Satori render failed:', e.message);
+    return new Response(JSON.stringify({ error: 'render_failed' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
   // Fire-and-forget — a cache-write failure shouldn't fail (or delay) the
   // response the user is waiting on.

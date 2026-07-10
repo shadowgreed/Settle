@@ -316,7 +316,13 @@ function StoryLayout({ item, storyLine, daypartText, qrDataUrl }) {
 function StackedLayout({ fmt, item, storyLine, daypartText }) {
   const { width, height } = FORMAT_SIZES[fmt];
   const PAD = 64;
-  const posterH = Math.round(height * 0.62);
+  // Square (1080×1080) has far less total height than portrait (1080×1350) to
+  // split the same way — 62% left only ~410px for the text block, not enough
+  // for badge+story+2-line title+meta+service+chips+CTA, and the title
+  // visually overlapped the poster above it (confirmed by rendering both
+  // formats and comparing). Portrait's 62% has real headroom to spare, so it
+  // keeps it; square gets a smaller poster share instead.
+  const posterH = Math.round(height * (fmt === 'square' ? 0.5 : 0.62));
 
   return (
     <div

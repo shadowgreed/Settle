@@ -17,6 +17,7 @@ import {
   trackMoreLikeThisTapped,
   trackLinkModalOpened, trackLinkModalSkippedToQuickPick, trackConfirmModalDismissed,
   trackShareCardOpened, trackShareCardShared, trackShareCardFormatChanged,
+  trackShareFallbackReason,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -2410,16 +2411,12 @@ function App() {
     if (item) await fetchShareCard(item, fmt);
   };
 
-  // Fallback: share/copy as plain text. The URL points at the per-pick
-  // unfurl page (spec §5) — carrying the same personalization params
-  // /api/share-card consumes so the OG image + description match this
-  // exact share, plus UTMs for the PostHog-side landing-page attribution
-  // the spec calls for (no new event needed — just the query params).
-  const shareAsText = async (item) => {
-    const text = mode === 'couple'
-      ? `We settled on ${item.title} in 30 seconds 🍿`
-      : `Settle picked ${item.title} for me…`;
-
+  // The per-pick unfurl-page URL (spec §5) — carries the same personalization
+  // params /api/share-card consumes so the OG image + description match this
+  // exact share, plus UTMs for the PostHog-side landing-page attribution the
+  // spec calls for (no new event needed — just the query params). Shared by
+  // both the text-only fallback and the image-attached share's embedded link.
+  const buildPickUrl = (item, campaign) => {
     const params = new URLSearchParams({
       title:      item.title || '',
       year:       item.year || '',
@@ -2431,9 +2428,19 @@ function App() {
       daypart:    buildDaypartText(),
       utm_source:   'pickcard',
       utm_medium:   'share',
-      utm_campaign: 'text',
+      utm_campaign: campaign,
     });
-    const url = `https://trysettle.app/pick/${item.id}?${params.toString()}`;
+    return `https://trysettle.app/pick/${item.id}?${params.toString()}`;
+  };
+
+  const buildShareSentence = (item) => mode === 'couple'
+    ? `We settled on ${item.title} in 30 seconds 🍿`
+    : `Settle picked ${item.title} for me…`;
+
+  // Fallback: share/copy as plain text.
+  const shareAsText = async (item) => {
+    const text = buildShareSentence(item);
+    const url = buildPickUrl(item, 'text');
 
     if (navigator.share) {
       try {
@@ -2441,6 +2448,7 @@ function App() {
         trackShareCardShared({ fmt: 'text', method: 'share_sheet' });
       } catch {}
     } else {
+      trackShareFallbackReason({ reason: 'no_web_share' });
       try {
         await navigator.clipboard.writeText(`${text}\n${url}`);
         setShareCopied(true);
@@ -2470,12 +2478,24 @@ function App() {
     const file = shareFileRef.current;
     const item = shareItemRef.current;
     if (!file) {
-      // Pre-bake failed (tainted canvas, low-memory abort) — fall back to
+      // Pre-bake failed (render error, low-memory abort) — fall back to
       // text-only share so the user isn't stuck.
+      trackShareFallbackReason({ reason: 'file_missing' });
       shareAsText(item || {});
       return;
     }
-    if (!navigator.canShare?.({ files: [file] })) {
+
+    // Bugfix (share-card delivery ticket §2.3): the link now travels inside
+    // `text`, not as a separate `url` key — iOS Safari has been observed
+    // rejecting/stripping a `{files, url}` combination in canShare/share on
+    // multiple versions. canShare is checked against the EXACT shape that
+    // will be passed to share() below, not just {files}, since that's what
+    // actually determines whether the call will succeed.
+    const text = `${buildShareSentence(item)} ${buildPickUrl(item, shareCardFormat)}`;
+    const data = { files: [file], text };
+
+    if (!navigator.canShare?.(data)) {
+      trackShareFallbackReason({ reason: 'canShare_false' });
       shareAsText(item || {});
       return;
     }
@@ -2491,13 +2511,21 @@ function App() {
     // omitted: it was confusing iOS into displaying a "Sharing 'Title'…"
     // status that delayed sheet dismissal in some flows.
     const fmt = shareCardFormat;
-    navigator.share({ files: [file] })
+    navigator.share(data)
       .then(() => trackShareCardShared({ fmt, method: 'share_sheet' }))
-      .catch(() => { /* AbortError (user cancelled) or extension error */ })
+      .catch((err) => {
+        // AbortError (user cancelled) is expected and not a failure worth
+        // instrumenting; anything else is the "share_threw" case the
+        // bugfix ticket's temporary instrumentation wants to see.
+        if (err?.name !== 'AbortError') {
+          trackShareFallbackReason({ reason: 'share_threw', err: String(err) });
+        }
+      })
       .finally(() => {
         sessionStorage.removeItem('settle_sharing');
-        // Release the file reference so iOS doesn't hold the 340 KB blob
-        // longer than necessary — also makes the share state unambiguous.
+        // Release the file reference so iOS doesn't hold the rendered PNG
+        // (can run into the low single-digit MB range) longer than
+        // necessary — also makes the share state unambiguous.
         shareFileRef.current = null;
       });
   };
