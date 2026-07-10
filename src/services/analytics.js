@@ -333,16 +333,3 @@ export function trackShareCardShared({ fmt, method }) {
 export function trackShareCardFormatChanged({ fmt }) {
   track('share_card_format_changed', { fmt });
 }
-
-// ── TEMPORARY — share-card delivery bugfix ticket §2.1 ────────────────────────
-// Diagnoses which branch is causing the image-attached share to fall back to
-// text-only. Remove this event (and its call sites in src/App.js) once
-// share_fallback_reason volume drops to ~0 on current-gen devices post-deploy
-// — the ticket asks for about a week of data before cleanup.
-export function trackShareFallbackReason({ reason, err }) {
-  track('share_fallback_reason', {
-    reason, // 'no_web_share' | 'canShare_false' | 'share_threw' | 'file_missing' | 'fetch_failed'
-    err: err || '',
-    ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
-  });
-}

@@ -17,7 +17,6 @@ import {
   trackMoreLikeThisTapped,
   trackLinkModalOpened, trackLinkModalSkippedToQuickPick, trackConfirmModalDismissed,
   trackShareCardOpened, trackShareCardShared, trackShareCardFormatChanged,
-  trackShareFallbackReason,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -2400,12 +2399,6 @@ function App() {
     trackShareCardOpened({ tmdbId: item.id, mode });
     const ok = await fetchShareCard(item, 'story');
     if (!ok) {
-      // Distinct reason from shareImageCard's fallback branches below —
-      // this one means /api/share-card itself errored (network/5xx) before
-      // the user ever saw the format picker, not a post-render Web Share API
-      // failure. Previously invisible in PostHog: every other branch here
-      // reports a reason, this was the one silent path.
-      trackShareFallbackReason({ reason: 'fetch_failed' });
       closeShareModal();
       shareAsText(item);
     }
@@ -2460,7 +2453,6 @@ function App() {
         trackShareCardShared({ fmt: 'text', method: 'share_sheet' });
       } catch {}
     } else {
-      trackShareFallbackReason({ reason: 'no_web_share' });
       try {
         await navigator.clipboard.writeText(`${text}\n${url}`);
         setShareCopied(true);
@@ -2492,7 +2484,6 @@ function App() {
     if (!file) {
       // Pre-bake failed (render error, low-memory abort) — fall back to
       // text-only share so the user isn't stuck.
-      trackShareFallbackReason({ reason: 'file_missing' });
       shareAsText(item || {});
       return;
     }
@@ -2507,7 +2498,6 @@ function App() {
     const data = { files: [file], text };
 
     if (!navigator.canShare?.(data)) {
-      trackShareFallbackReason({ reason: 'canShare_false' });
       shareAsText(item || {});
       return;
     }
@@ -2525,14 +2515,7 @@ function App() {
     const fmt = shareCardFormat;
     navigator.share(data)
       .then(() => trackShareCardShared({ fmt, method: 'share_sheet' }))
-      .catch((err) => {
-        // AbortError (user cancelled) is expected and not a failure worth
-        // instrumenting; anything else is the "share_threw" case the
-        // bugfix ticket's temporary instrumentation wants to see.
-        if (err?.name !== 'AbortError') {
-          trackShareFallbackReason({ reason: 'share_threw', err: String(err) });
-        }
-      })
+      .catch(() => {})
       .finally(() => {
         sessionStorage.removeItem('settle_sharing');
         // Release the file reference so iOS doesn't hold the rendered PNG
