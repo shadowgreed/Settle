@@ -20,6 +20,22 @@ root.render(
 // is served from the local bundle, so the SW (and its web-push path) is both
 // unnecessary and potentially confusing — native push uses @capacitor/push.
 if (!isNative() && 'serviceWorker' in navigator) {
+  // Security/performance audit fix (PERF-01): sw.js calls skipWaiting() +
+  // clients.claim(), so a new deploy's service worker takes over every open
+  // tab immediately with no update prompt. Without this listener, a tab left
+  // open across a deploy would keep running old in-memory JS against a new
+  // SW's fetch/cache behavior indefinitely — stale static-asset hashes,
+  // changed /api contracts, etc. Reload once when the controller actually
+  // CHANGES from one active worker to another; `currentController` starts
+  // null on a fresh page load with nothing controlling it yet, so the very
+  // first activation (every first-time visitor) is correctly not treated as
+  // an update and doesn't trigger an unwanted reload.
+  let currentController = navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (currentController) window.location.reload();
+    currentController = navigator.serviceWorker.controller;
+  });
+
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
