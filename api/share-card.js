@@ -34,6 +34,7 @@ const { PNG } = require('pngjs');
 const jpeg = require('jpeg-js');
 const { buildCardElement, FORMAT_SIZES } = require('../lib/shareCardLayout.js');
 const { getShareCardCache, setShareCardCache } = require('../lib/shareCardCache.js');
+const { enforceRateLimit } = require('../lib/rateLimit');
 
 const VALID_FORMATS = new Set(['story', 'portrait', 'square', 'og']);
 const POSTER_FETCH_TIMEOUT_MS = 3000;
@@ -48,6 +49,16 @@ function clean(str, maxLen) {
   if (typeof str !== 'string') return '';
   // eslint-disable-next-line no-control-regex
   return str.replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, maxLen);
+}
+
+// The client's buildDaypartText() (src/App.js) always prepends a 🎬 to the
+// daypart label for the in-app pill, where the OS's native emoji font
+// renders it fine. Satori resolves emoji glyphs from its own font backend
+// (a green-boarded clapperboard on this deploy) — off-brand, and redundant
+// with the real Settle wordmark this card already leads with. Stripped here
+// rather than in the client so the in-app pill keeps its emoji.
+function stripLeadingEmoji(str) {
+  return str.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]\s*/u, '');
 }
 
 // Google Fonts serves WOFF2 by default (which Satori can't parse — it needs
@@ -187,6 +198,20 @@ function pngToJpeg(pngBuf) {
 }
 
 module.exports = async function handler(req, res) {
+  // Rate-limit before doing any rendering work — the client never sends an
+  // auth token here (see fetchShareCard, src/App.js), so this is IP-tier
+  // only. Limits set tighter than the plain JSON proxies (watchmode/
+  // showtimes/geocode) since a miss here means a font fetch + Satori render
+  // + PNG->JPEG re-encode, not just a forwarded API call; a cache hit
+  // (getShareCardCache below) is cheap regardless and unaffected by this gate.
+  const gate = await enforceRateLimit(req, {
+    endpoint: 'share-card', userMax: 20, ipMax: 60, window: '60 s',
+  });
+  if (!gate.ok) {
+    if (gate.retryAfter) res.setHeader('Retry-After', String(gate.retryAfter));
+    return res.status(429).json({ error: 'Too many requests — please slow down.' });
+  }
+
   const fmt = VALID_FORMATS.has(req.query.fmt) ? req.query.fmt : 'story';
   const { width, height } = FORMAT_SIZES[fmt];
 
@@ -199,7 +224,7 @@ module.exports = async function handler(req, res) {
     genres:     clean(req.query.genres || '', 60).split(',').map(s => s.trim()).filter(Boolean),
   };
   const storyLine   = clean(req.query.story || '', 80);
-  const daypartText = clean(req.query.daypart || '🎬 Tonight\'s Pick', 40);
+  const daypartText = stripLeadingEmoji(clean(req.query.daypart || 'Tonight\'s Pick', 40));
   const tmdbId      = clean(req.query.tmdb || '', 20);
   const posterPath  = req.query.posterPath || '';
 
