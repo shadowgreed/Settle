@@ -10,6 +10,21 @@
 
 const IS_DEV = process.env.NODE_ENV === 'development';
 
+// Storage-consent gate (security/privacy audit PRIV-01) — the Privacy Policy
+// and ToS both state "Analytics are only activated after you accept the
+// storage consent prompt," but nothing previously checked consent before
+// capturing events; trackAppLoaded fired unconditionally on every mount.
+// Same localStorage key App.js's consent banner/toggle already reads and
+// writes (`sd_consent`) — checked here, once, rather than threaded through
+// every track*() call site, so it can't be forgotten at a new call site.
+// Gates loadPosthog() itself, not just capture() — an undecided or declined
+// user never downloads or initialises the PostHog SDK at all, matching
+// "activated" in the policy's own wording, not just "not captured."
+function hasConsent() {
+  try { return localStorage.getItem('sd_consent') === 'true'; }
+  catch { return false; }
+}
+
 let posthogPromise = null;
 
 // Resolves to the initialised posthog client, or null if init was disabled
@@ -44,6 +59,7 @@ async function track(eventName, properties = {}) {
     console.log(`[Analytics] ${eventName}`, properties);
     return;
   }
+  if (!hasConsent()) return;
   const posthog = await loadPosthog();
   if (posthog) posthog.capture(eventName, properties);
 }
