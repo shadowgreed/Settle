@@ -6,7 +6,7 @@ import React from 'react';
 // so the two surfaces never drift out of sync.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const EFFECTIVE_DATE = 'May 18, 2026';
+export const EFFECTIVE_DATE = 'July 10, 2026';
 
 export function PrivacyBody() {
   return (
@@ -92,7 +92,7 @@ export function TermsBody() {
       <p>You are responsible for maintaining the security of your account. We use Firebase Authentication (Google LLC) to manage sign-in — we do not store passwords. Your in-app data (preferences, history, taste profile) is stored in Firebase Firestore when you grant consent. You may delete your account and all associated data at any time from the in-app <strong>Privacy &amp; Data</strong> settings, or by emailing <strong>hello@trysettle.app</strong>.</p>
 
       <h3>5. Share Cards</h3>
-      <p>Settle can generate shareable pick images ("share cards") via the in-app Share button. These images are created entirely within your browser and are not stored on our servers. You are responsible for any content you choose to share publicly. Movie poster images remain the property of their respective studios and rights holders — share cards are intended for personal, non-commercial use only.</p>
+      <p>Settle can generate shareable pick images ("share cards") via the in-app Share button. Card images are rendered on our servers, not in your browser — see the Privacy Policy's Share Cards section for exactly what data that involves — and may be cached briefly server-side to speed up repeat shares of the same pick. You are responsible for any content you choose to share publicly. Movie poster images remain the property of their respective studios and rights holders — share cards are intended for personal, non-commercial use only.</p>
 
       <h3>6. Progressive Web App (PWA)</h3>
       <p>Settle can be installed to your home screen as a PWA. The app uses browser localStorage and IndexedDB to cache data for offline use. This local data is private to your device and is not transmitted unless you are signed in with cloud sync enabled.</p>
