@@ -3,7 +3,7 @@
 //                     &service=&genres=&posterPath=&story=&daypart=&tmdb=
 //
 // Server-side render of the shareable pick card (handoff spec §2/§4), using
-// @vercel/og (Satori) against the shared layout in lib/shareCardLayout.jsx.
+// @vercel/og (Satori) against the shared layout in lib/shareCardLayout.js.
 //
 // Node runtime (CommonJS, (req, res) signature) — same convention as every
 // other api/*.js route. This was originally an Edge Function (the first one
@@ -32,7 +32,7 @@
 const QRCode = require('qrcode');
 const { PNG } = require('pngjs');
 const jpeg = require('jpeg-js');
-const { buildCardElement, FORMAT_SIZES } = require('../lib/shareCardLayout.jsx');
+const { buildCardElement, FORMAT_SIZES } = require('../lib/shareCardLayout.js');
 const { getShareCardCache, setShareCardCache } = require('../lib/shareCardCache.js');
 
 const VALID_FORMATS = new Set(['story', 'portrait', 'square', 'og']);
