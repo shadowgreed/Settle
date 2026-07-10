@@ -3112,6 +3112,34 @@ button.sequel-badge {
 }
 
 /* Action buttons */
+/* Format picker (spec §5) — segmented control above the Share button. */
+.share-format-picker {
+  display: flex;
+  gap: 4px;
+  margin: 0 18px 12px;
+  padding: 4px;
+  background: #161616;
+  border: 0.5px solid #2a2a2a;
+  border-radius: 10px;
+}
+
+.share-format-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #999;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 0.15s, color 0.15s;
+}
+.share-format-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.share-format-btn.active { background: #2a2a2a; color: #f5f5f5; }
+
 .share-modal-actions {
   display: flex;
   flex-direction: column;

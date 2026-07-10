@@ -25,7 +25,16 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { ImageResponse } from '@vercel/og';
+// Explicit browser-safe subpath, not the bare 'qrcode' package — the default
+// entry point's toDataURL renders via an actual <canvas> element (through
+// CanvasRenderer), which doesn't exist in the Edge runtime (no DOM). This
+// subpath's toString({type:'svg'}) path is pure string templating with no
+// canvas/zlib dependency, confirmed by reading node_modules/qrcode/lib/
+// browser.js directly rather than assuming the package.json "browser" field
+// resolution would be honored by every bundler.
+import QRCode from 'qrcode/lib/browser.js';
 import { buildCardElement, FORMAT_SIZES } from '../lib/shareCardLayout.jsx';
+import { getShareCardCache, setShareCardCache } from '../lib/shareCardCache.js';
 
 export const config = { runtime: 'edge' };
 
@@ -70,6 +79,27 @@ async function loadInterWeight(weight) {
   return res.arrayBuffer();
 }
 
+// Story-format QR (spec §3 item 6) — stories aren't tappable for small
+// accounts, so this is the only working link on that format. Encodes the
+// same personalized /pick/{id} URL the card's own share flow generates,
+// SVG-rendered (no canvas/zlib) and base64-embedded as an <img> data URI.
+async function buildQrDataUri(pickUrl) {
+  if (!pickUrl) return null;
+  try {
+    const svg = await QRCode.toString(pickUrl, {
+      type: 'svg',
+      width: 240,
+      margin: 1,
+      color: { dark: '#0A0A0C', light: '#FFFFFF' },
+    });
+    const base64 = Buffer.from(svg, 'utf8').toString('base64');
+    return `data:image/svg+xml;base64,${base64}`;
+  } catch (e) {
+    console.warn('[share-card] QR generation failed:', e.message);
+    return null;
+  }
+}
+
 // 3s timeout (spec §4) — a slow TMDB image response must not hang the whole
 // card render. Returns null (→ placeholder panel in the layout) on failure.
 async function loadPosterDataUri(posterPath) {
@@ -94,7 +124,7 @@ async function loadPosterDataUri(posterPath) {
 }
 
 export default async function handler(request) {
-  const { searchParams } = new URL(request.url);
+  const { searchParams, origin } = new URL(request.url);
 
   const fmt = VALID_FORMATS.has(searchParams.get('fmt')) ? searchParams.get('fmt') : 'story';
   const { width, height } = FORMAT_SIZES[fmt];
@@ -109,13 +139,41 @@ export default async function handler(request) {
   };
   const storyLine   = clean(searchParams.get('story') || '', 80);
   const daypartText = clean(searchParams.get('daypart') || '🎬 Tonight\'s Pick', 40);
+  const tmdbId      = clean(searchParams.get('tmdb') || '', 20);
+  const posterPath  = searchParams.get('posterPath') || '';
 
-  const [fonts, posterSrc] = await Promise.all([
+  const PNG_HEADERS = { 'Content-Type': 'image/png', 'Cache-Control': 'public, max-age=86400' };
+
+  // Cache key covers every input that affects the rendered pixels (spec §4 —
+  // "identical shares shouldn't re-render"). A hit skips the font/poster
+  // fetch and the Satori render entirely.
+  const cacheParams = JSON.stringify({ tmdbId, ...item, storyLine, daypartText, posterPath });
+  const cached = await getShareCardCache(fmt, cacheParams);
+  if (cached) {
+    const bytes = Uint8Array.from(atob(cached), (c) => c.charCodeAt(0));
+    return new Response(bytes, { headers: PNG_HEADERS });
+  }
+
+  // Story format only (spec §3 item 6). Mirrors the same personalization
+  // params api/pick/[id].js reads, so the QR's destination unfurls with the
+  // same title/story/daypart as this exact card.
+  const pickUrl = tmdbId
+    ? `${origin}/pick/${encodeURIComponent(tmdbId)}?${new URLSearchParams({
+        title: item.title, year: item.year, type: item.type,
+        rating: item.rating || '', service: item.service,
+        posterPath,
+        story: storyLine, daypart: daypartText,
+        utm_source: 'pickcard', utm_medium: 'share', utm_campaign: 'story',
+      }).toString()}`
+    : null;
+
+  const [fonts, posterSrc, qrDataUrl] = await Promise.all([
     loadFonts().catch((e) => {
       console.warn('[share-card] font load failed, falling back to no custom font:', e.message);
       return [];
     }),
-    loadPosterDataUri(searchParams.get('posterPath')),
+    loadPosterDataUri(posterPath),
+    fmt === 'story' ? buildQrDataUri(pickUrl) : Promise.resolve(null),
   ]);
 
   const element = buildCardElement({
@@ -123,7 +181,15 @@ export default async function handler(request) {
     item: { ...item, posterSrc },
     storyLine,
     daypartText,
+    qrDataUrl,
   });
 
-  return new ImageResponse(element, { width, height, fonts });
+  const rendered = new ImageResponse(element, { width, height, fonts });
+  const buf = await rendered.arrayBuffer();
+
+  // Fire-and-forget — a cache-write failure shouldn't fail (or delay) the
+  // response the user is waiting on.
+  setShareCardCache(fmt, cacheParams, Buffer.from(buf).toString('base64')).catch(() => {});
+
+  return new Response(buf, { headers: PNG_HEADERS });
 }

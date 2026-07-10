@@ -16,6 +16,7 @@ import {
   trackHistoryItemRated, trackHistoryRateNudgeTapped, trackHistoryCleared,
   trackMoreLikeThisTapped,
   trackLinkModalOpened, trackLinkModalSkippedToQuickPick, trackConfirmModalDismissed,
+  trackShareCardOpened, trackShareCardShared, trackShareCardFormatChanged,
 } from './services/analytics';
 import {
   getCurrentCoords, getStoredPermissionState, getStoredZip, setStoredZip,
@@ -438,6 +439,8 @@ function App() {
   const [shareCardUrl, setShareCardUrl] = useState(null);
   const [shareCardLoading, setShareCardLoading] = useState(false);
   const [shareCardReady, setShareCardReady] = useState(false);
+  // 'story' | 'portrait' | 'square' — the sheet's format picker (spec §5).
+  const [shareCardFormat, setShareCardFormat] = useState('story');
   const shareItemRef = useRef(null);
   // Pre-baked share-blob File ref. Generated proactively when the server-
   // rendered card image arrives so the Share button's click handler can call
@@ -2334,19 +2337,14 @@ function App() {
     return `Matched my ${chip.icon ? chip.icon + ' ' : ''}${chip.label} mood`;
   };
 
-  // Opens the share modal and generates the card.
-  // Critically: we also pre-bake the share File here so the Share button's
-  // click handler doesn't have to await anything before navigator.share().
-  // iOS Safari enforces user-gesture context strictly — any async work
-  // between the tap and navigator.share() makes the share sheet render
-  // as an empty dark overlay with no app icons.
-  const handleShare = async (item) => {
-    shareItemRef.current = item;
+  // Core fetch, shared by the initial open (handleShare) and the format
+  // picker (handleFormatChange) — only the `fmt` param and the loading/error
+  // handling differ between those two call sites.
+  const fetchShareCard = async (item, fmt) => {
     setShareCardUrl(null);
     setShareCardReady(false);
     shareFileRef.current = null;
     setShareCardLoading(true);
-    setShowShareModal(true);
     try {
       const genreNames = (item.genres || [])
         .map(id => genreById.get(id)?.name)
@@ -2354,7 +2352,8 @@ function App() {
         .slice(0, 2);
 
       const params = new URLSearchParams({
-        fmt:        'story',
+        fmt,
+        tmdb:       item.id != null ? String(item.id) : '',
         title:      item.title || '',
         year:       item.year || '',
         type:       item.type || '',
@@ -2372,13 +2371,43 @@ function App() {
       shareFileRef.current = new File([blob], 'settle-pick.png', { type: 'image/png' });
       setShareCardUrl(URL.createObjectURL(blob));
       setShareCardReady(true);
+      return true;
     } catch (err) {
       console.error('[ShareCard] generation failed:', err);
-      closeShareModal();
-      shareAsText(item);
+      return false;
     } finally {
       setShareCardLoading(false);
     }
+  };
+
+  // Opens the share modal and generates the card.
+  // Critically: we also pre-bake the share File here so the Share button's
+  // click handler doesn't have to await anything before navigator.share().
+  // iOS Safari enforces user-gesture context strictly — any async work
+  // between the tap and navigator.share() makes the share sheet render
+  // as an empty dark overlay with no app icons.
+  const handleShare = async (item) => {
+    shareItemRef.current = item;
+    setShareCardFormat('story'); // spec §5 — the picker always opens on Story
+    setShowShareModal(true);
+    trackShareCardOpened({ tmdbId: item.id, mode });
+    const ok = await fetchShareCard(item, 'story');
+    if (!ok) {
+      closeShareModal();
+      shareAsText(item);
+    }
+  };
+
+  // Format picker (spec §5) — re-fetches the preview for the same item at a
+  // new size rather than reopening the whole modal. Falls back to keeping
+  // the previous format's card on failure rather than closing the sheet out
+  // from under the user mid-pick.
+  const handleFormatChange = async (fmt) => {
+    if (fmt === shareCardFormat) return;
+    setShareCardFormat(fmt);
+    trackShareCardFormatChanged({ fmt });
+    const item = shareItemRef.current;
+    if (item) await fetchShareCard(item, fmt);
   };
 
   // Fallback: share/copy as plain text. The URL points at the per-pick
@@ -2407,12 +2436,16 @@ function App() {
     const url = `https://trysettle.app/pick/${item.id}?${params.toString()}`;
 
     if (navigator.share) {
-      try { await navigator.share({ title: 'Settle', text, url }); } catch {}
+      try {
+        await navigator.share({ title: 'Settle', text, url });
+        trackShareCardShared({ fmt: 'text', method: 'share_sheet' });
+      } catch {}
     } else {
       try {
         await navigator.clipboard.writeText(`${text}\n${url}`);
         setShareCopied(true);
         setTimeout(() => setShareCopied(false), 2500);
+        trackShareCardShared({ fmt: 'text', method: 'copy' });
       } catch {}
     }
   };
@@ -2457,7 +2490,9 @@ function App() {
     // Hand off to the OS share sheet — fire-and-forget. Title is intentionally
     // omitted: it was confusing iOS into displaying a "Sharing 'Title'…"
     // status that delayed sheet dismissal in some flows.
+    const fmt = shareCardFormat;
     navigator.share({ files: [file] })
+      .then(() => trackShareCardShared({ fmt, method: 'share_sheet' }))
       .catch(() => { /* AbortError (user cancelled) or extension error */ })
       .finally(() => {
         sessionStorage.removeItem('settle_sharing');
@@ -5400,6 +5435,29 @@ function App() {
               >
                 <span aria-hidden="true">✕</span>
               </button>
+            </div>
+
+            {/* Format picker (spec §5) — rendered unconditionally (not just in
+                the "ready" branch) so it doesn't flicker out of existence
+                while a re-fetch triggered by a tap is in flight. */}
+            <div className="share-format-picker" role="tablist" aria-label="Card format">
+              {[
+                { fmt: 'story',    label: 'Story' },
+                { fmt: 'portrait', label: 'Post' },
+                { fmt: 'square',   label: 'Square' },
+              ].map(({ fmt, label }) => (
+                <button
+                  key={fmt}
+                  type="button"
+                  role="tab"
+                  aria-selected={shareCardFormat === fmt}
+                  className={`share-format-btn ${shareCardFormat === fmt ? 'active' : ''}`}
+                  disabled={shareCardLoading}
+                  onClick={() => handleFormatChange(fmt)}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
 
             {shareCardLoading ? (

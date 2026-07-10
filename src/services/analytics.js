@@ -315,3 +315,21 @@ export function trackLinkModalSkippedToQuickPick() {
 export function trackConfirmModalDismissed({ via, openedService }) {
   track('confirm_modal_dismissed', { via, opened_service: !!openedService }); // via: 'x' | 'backdrop'
 }
+
+// ── Shareable Pick Card events (July 2026 handoff spec) ───────────────────────
+
+/** Fired when the "Your Pick Card" sheet opens (card generation begins). */
+export function trackShareCardOpened({ tmdbId, mode }) {
+  track('share_card_opened', { tmdb_id: tmdbId, mode });
+}
+
+/** Fired when the card is actually shared or copied — after the fact, not
+ *  just tapped, so it reflects a completed hand-off. */
+export function trackShareCardShared({ fmt, method }) {
+  track('share_card_shared', { fmt, method }); // method: 'share_sheet' | 'copy'
+}
+
+/** Fired when the sheet's format picker changes the active format. */
+export function trackShareCardFormatChanged({ fmt }) {
+  track('share_card_format_changed', { fmt });
+}
