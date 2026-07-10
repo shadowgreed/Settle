@@ -29,7 +29,6 @@
 // the metadata API api/tmdb.js proxies).
 // ─────────────────────────────────────────────────────────────────────────────
 
-const { ImageResponse } = require('@vercel/og');
 const QRCode = require('qrcode');
 const { PNG } = require('pngjs');
 const jpeg = require('jpeg-js');
@@ -64,6 +63,22 @@ function clean(str, maxLen) {
 // fonts are loaded") when handed an empty fonts array, which an unmatched
 // regex here produced every time.
 const FONT_FETCH_UA = 'Googlebot/2.1 (+http://www.google.com/bot.html)';
+
+// @vercel/og's package.json declares "type": "module" with no "require"
+// export condition, so it's an ES module as far as Node's resolver is
+// concerned. A plain top-level `require('@vercel/og')` throws
+// ERR_REQUIRE_ESM in Vercel's actual Lambda runtime (confirmed via
+// `vercel logs` against a live 500 — this did NOT reproduce locally, where
+// `require('@vercel/og')` succeeds outright, so the discrepancy is in how
+// Vercel's Node runtime handles require-of-ESM, not something obviously
+// wrong in this repo). Dynamic `import()` is the documented, version-
+// independent way to load an ES module from CommonJS regardless of that
+// interop behavior, so it replaces the top-level require entirely.
+let ogModulePromise = null;
+function loadOgModule() {
+  if (!ogModulePromise) ogModulePromise = import('@vercel/og');
+  return ogModulePromise;
+}
 
 let fontsPromise = null;
 async function loadFonts() {
@@ -253,6 +268,7 @@ module.exports = async function handler(req, res) {
 
   let pngBuf;
   try {
+    const { ImageResponse } = await loadOgModule();
     const rendered = new ImageResponse(element, { width, height, fonts });
     pngBuf = Buffer.from(await rendered.arrayBuffer());
   } catch (e) {
