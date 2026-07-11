@@ -263,6 +263,12 @@ module.exports = async function handler(req, res) {
     const city = await geocodeZipToCity(zip);
     if (city) location = city;
   }
+  // TEMPORARY — debug variant: pass an exact raw location string via `_loc`,
+  // bypassing all geocoding, to test SerpAPI's own documented canonical
+  // format directly (e.g. "Providence,RI,United States").
+  if (isDebugVariant && req.query._loc) {
+    location = String(req.query._loc);
+  }
 
   try {
     const params = new URLSearchParams({
