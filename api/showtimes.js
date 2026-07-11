@@ -306,6 +306,14 @@ module.exports = async function handler(req, res) {
     // was never going to have data anyway.
     if (!showtimes) {
       const stick = findShowtimesTabStick(firstData);
+      // TEMPORARY — debug: confirm whether a missing stick means "no
+      // Showtimes tab offered" vs. a bug in how we're reading tabs.
+      console.warn(
+        '[showtimes][debug-tabs]',
+        'has_kg:', !!firstData.knowledge_graph,
+        '| kg.tabs:', JSON.stringify(firstData.knowledge_graph?.tabs || 'none'),
+        '| stick_found:', !!stick,
+      );
       if (stick) {
         const secondParams = new URLSearchParams(baseParams);
         secondParams.set('stick', stick);
