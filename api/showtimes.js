@@ -38,12 +38,21 @@
 // construction problem: SerpAPI does not appear to extract populated
 // theater/showtime data from Google's "google" engine for this rich-result
 // type at all, via any parameter combination tried (8 single-call variants
-// plus the stick-based follow-up — see git history). The only real showtime
-// data observed anywhere in these responses was unstructured free text
-// inside a couple of organic_results snippets from third-party sites
-// (IMDb, Atom Tickets) — not something safe to parse reliably long-term.
-// Real fix, if this feature needs to keep working, is a different data
-// source for showtimes, not a different query to this one.
+// plus the stick-based follow-up — see git history). Also tried SerpAPI's
+// own documented showtimes-results example verbatim (serpapi.com/showtimes-
+// results uses "{movie} theater" as its query, not "{movie} showtimes",
+// and demonstrates a top-level `data.showtimes[].theaters[]` shape —
+// extractShowtimes below already checks that location first) — reproducing
+// their exact example query + location still returned plain organic results
+// with no showtimes. Their docs appear to describe the shape SerpAPI parses
+// WHEN Google happens to show this rich result, not a guarantee that any
+// given query reliably triggers it — Google's own decision to render a
+// showtimes carousel is apparently too inconsistent to depend on via this
+// API. The only real showtime data observed anywhere in these responses was
+// unstructured free text inside a couple of organic_results snippets from
+// third-party sites (IMDb, Atom Tickets) — not something safe to parse
+// reliably long-term. Real fix, if this feature needs to keep working, is a
+// different data source for showtimes, not a different query to this one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { enforceRateLimit } = require('../lib/rateLimit');
@@ -262,13 +271,9 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // TEMPORARY — debug: SerpAPI's own showtimes-results docs example query
-    // is "{movie} theater", not "{movie} showtimes" — testing whether that's
-    // the actual missing ingredient before committing to it as the real fix.
-    const qSuffix = req.query._qsuffix ? String(req.query._qsuffix) : 'showtimes';
     const params = new URLSearchParams({
       engine:  'google',
-      q:       `${movie} ${qSuffix}`,
+      q:       `${movie} showtimes`,
       location,
       hl:      'en',
       gl:      'us',
