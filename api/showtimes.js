@@ -117,31 +117,6 @@ async function reverseGeocode(lat, lng) {
   return null;
 }
 
-// TEMPORARY — debugging the "no showtimes panel" issue (SerpAPI calls succeed,
-// account/key/query are fine, but the response is a plain organic search with
-// no `showtimes` key at all). Forward-geocodes a ZIP to a "City, State,
-// Country" string, since SerpAPI's docs recommend a canonical location over a
-// bare ZIP for reliably triggering Google's local-intent rich results. Only
-// used by the `_variant=cityzip` debug override below — remove alongside it
-// once the real fix is identified.
-async function geocodeZipToCity(zip) {
-  if (!process.env.GOOGLE_GEOCODING_KEY) return null;
-  try {
-    const url = new URL(GEOCODE_BASE);
-    url.searchParams.set('address', zip);
-    url.searchParams.set('components', 'country:US');
-    url.searchParams.set('key', process.env.GOOGLE_GEOCODING_KEY);
-    const res = await fetch(url.toString());
-    const data = await res.json();
-    if (data.status === 'OK' && data.results?.[0]?.formatted_address) {
-      return data.results[0].formatted_address;
-    }
-  } catch (err) {
-    console.warn('[showtimes] geocodeZipToCity failed:', err.message);
-  }
-  return null;
-}
-
 module.exports = async function handler(req, res) {
   setCorsHeaders(req, res);
 
@@ -184,12 +159,6 @@ module.exports = async function handler(req, res) {
     }
   }
 
-  // TEMPORARY — debug-only query-format override, see geocodeZipToCity's
-  // comment above. Never sent by the real client. `_variant` can combine
-  // flags: "mobile", "nosuffix", "cityzip" (e.g. "mobile+nosuffix").
-  const variant = String(req.query._variant || '');
-  const isDebugVariant = variant.length > 0;
-
   // Backend cache key — derived from the client's raw inputs so a cache HIT
   // avoids the reverse-geocode round trip too. ZIP keys directly; GPS rounds to
   // ~1 km (2 dp) so the same spot reuses one entry.
@@ -200,9 +169,7 @@ module.exports = async function handler(req, res) {
   // Durable shared cache (Upstash) FIRST — a hit costs no SerpAPI call and no
   // rate-limit budget. This is the main lever against repeated SerpAPI spend:
   // the first visitor to a ZIP today pays; everyone else rides the cache.
-  // Skipped entirely for a debug variant so test traffic never reads/writes
-  // the real cache.
-  if (cacheLocKey && !isDebugVariant) {
+  if (cacheLocKey) {
     const cached = await getShowtimesCache(movie, cacheLocKey);
     if (cached) {
       res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=300');
@@ -257,36 +224,15 @@ module.exports = async function handler(req, res) {
     return res.status(400).json({ error: 'zip or lat+lng required' });
   }
 
-  // TEMPORARY — debug variant: swap the bare ZIP for a canonical "City,
-  // State, Country" string. See geocodeZipToCity's comment above.
-  if (isDebugVariant && variant.includes('cityzip') && zip) {
-    const city = await geocodeZipToCity(zip);
-    if (city) location = city;
-  }
-  // TEMPORARY — debug variant: pass an exact raw location string via `_loc`,
-  // bypassing all geocoding, to test SerpAPI's own documented canonical
-  // format directly (e.g. "Providence,RI,United States").
-  if (isDebugVariant && req.query._loc) {
-    location = String(req.query._loc);
-  }
-
   try {
     const params = new URLSearchParams({
       engine:  'google',
-      // TEMPORARY — debug variant: drop the "showtimes" suffix, letting
-      // Google's own movie-entity detection decide whether to surface a
-      // showtimes panel, rather than us forcing search intent via the query text.
-      q:       isDebugVariant && variant.includes('nosuffix') ? movie : `${movie} showtimes`,
+      q:       `${movie} showtimes`,
       location,
       hl:      'en',
       gl:      'us',
       api_key: process.env.SERP_API_KEY,
     });
-    // TEMPORARY — debug variant: Google's local/rich-result carousels are
-    // more consistently surfaced on mobile SERPs than desktop.
-    if (isDebugVariant && variant.includes('mobile')) {
-      params.set('device', 'mobile');
-    }
 
     const upstream = await fetch(`${SERP_BASE}?${params}`);
     const data     = await upstream.json();
@@ -307,14 +253,11 @@ module.exports = async function handler(req, res) {
     if (data.showtimes == null) {
       console.warn(
         '[showtimes] no showtimes key in a 200 response —',
-        'variant:', variant || '(none)',
-        '| error:', data.error || '(none)',
+        'error:', data.error || '(none)',
         '| search_metadata.status:', data.search_metadata?.status || '(none)',
         '| top-level keys:', Object.keys(data).join(','),
         '| location_source:', locationSource, '| location:', location,
       );
-    } else {
-      console.warn('[showtimes] GOT showtimes! variant:', variant || '(none)', '| location:', location);
     }
 
     // Slim payload — the client (and native app) only ever reads `showtimes`.
@@ -324,9 +267,8 @@ module.exports = async function handler(req, res) {
 
     // Persist to the durable shared cache (incl. negative results) so the next
     // visitor to this movie+location skips SerpAPI entirely. Awaited so the
-    // write completes before the serverless instance can freeze. Skipped for
-    // a debug variant so test traffic never pollutes the real cache.
-    if (cacheLocKey && !isDebugVariant) {
+    // write completes before the serverless instance can freeze.
+    if (cacheLocKey) {
       await setShowtimesCache(movie, cacheLocKey, payload);
     }
 
