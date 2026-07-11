@@ -166,14 +166,10 @@ module.exports = async function handler(req, res) {
     ? `z:${zip}`
     : (lat && lng ? `g:${Number(lat).toFixed(2)},${Number(lng).toFixed(2)}` : null);
 
-  // TEMPORARY — debug-only, see the _rawq/_extra comment below. Skips the
-  // cache entirely so test traffic always reaches SerpAPI fresh.
-  const isDebugQuery = !!(req.query._rawq || req.query._extra);
-
   // Durable shared cache (Upstash) FIRST — a hit costs no SerpAPI call and no
   // rate-limit budget. This is the main lever against repeated SerpAPI spend:
   // the first visitor to a ZIP today pays; everyone else rides the cache.
-  if (cacheLocKey && !isDebugQuery) {
+  if (cacheLocKey) {
     const cached = await getShowtimesCache(movie, cacheLocKey);
     if (cached) {
       res.setHeader('Cache-Control', 'public, s-maxage=1800, stale-while-revalidate=300');
@@ -229,25 +225,14 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // TEMPORARY — debug-only single-call query experiments (never sent by
-    // the real client). `_rawq` overrides the `q` text entirely; `_extra` is
-    // "key=value;key2=value2" extra SerpAPI params to test whether some
-    // combination makes Google default straight to the Showtimes sub-view
-    // instead of Overview, avoiding a second stick-based lookup entirely.
     const params = new URLSearchParams({
       engine:  'google',
-      q:       req.query._rawq ? String(req.query._rawq) : `${movie} showtimes`,
+      q:       `${movie} showtimes`,
       location,
       hl:      'en',
       gl:      'us',
       api_key: process.env.SERP_API_KEY,
     });
-    if (req.query._extra) {
-      String(req.query._extra).split(';').forEach(pair => {
-        const [k, v] = pair.split('=');
-        if (k && v) params.set(k, v);
-      });
-    }
 
     const upstream = await fetch(`${SERP_BASE}?${params}`);
     const data     = await upstream.json();
@@ -274,21 +259,6 @@ module.exports = async function handler(req, res) {
         '| location_source:', locationSource, '| location:', location,
       );
     }
-    // TEMPORARY — debug-only: knowledge_graph.showtimes is where the real
-    // data actually lives (confirmed via a live SerpAPI response dump), but
-    // only populated when Google's default panel view already is the
-    // "Showtimes" tab rather than "Overview". Logging its length + the tab
-    // list to test whether a single-call query change can make Showtimes
-    // the default, avoiding a second stick-based follow-up request.
-    if (isDebugQuery) {
-      const kg = data.knowledge_graph;
-      console.warn(
-        '[showtimes][debug]',
-        'kg.showtimes.length:', kg?.showtimes?.length ?? '(no kg.showtimes)',
-        '| kg.tabs:', JSON.stringify((kg?.tabs || []).map(t => t.text)),
-        '| filters:', JSON.stringify((data.filters || []).map(f => f.name)),
-      );
-    }
 
     // Slim payload — the client (and native app) only ever reads `showtimes`.
     // Caching just this keeps the Redis entry small and the response identical
@@ -298,7 +268,7 @@ module.exports = async function handler(req, res) {
     // Persist to the durable shared cache (incl. negative results) so the next
     // visitor to this movie+location skips SerpAPI entirely. Awaited so the
     // write completes before the serverless instance can freeze.
-    if (cacheLocKey && !isDebugQuery) {
+    if (cacheLocKey) {
       await setShowtimesCache(movie, cacheLocKey, payload);
     }
 
