@@ -262,9 +262,13 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    // TEMPORARY — debug: SerpAPI's own showtimes-results docs example query
+    // is "{movie} theater", not "{movie} showtimes" — testing whether that's
+    // the actual missing ingredient before committing to it as the real fix.
+    const qSuffix = req.query._qsuffix ? String(req.query._qsuffix) : 'showtimes';
     const params = new URLSearchParams({
       engine:  'google',
-      q:       `${movie} showtimes`,
+      q:       `${movie} ${qSuffix}`,
       location,
       hl:      'en',
       gl:      'us',
