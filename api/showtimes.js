@@ -313,14 +313,6 @@ module.exports = async function handler(req, res) {
     // was never going to have data anyway.
     if (!showtimes) {
       const stick = findShowtimesTabStick(firstData);
-      // TEMPORARY — debug: confirm whether a missing stick means "no
-      // Showtimes tab offered" vs. a bug in how we're reading tabs.
-      console.warn(
-        '[showtimes][debug-tabs]',
-        'has_kg:', !!firstData.knowledge_graph,
-        '| kg.tabs:', JSON.stringify(firstData.knowledge_graph?.tabs || 'none'),
-        '| stick_found:', !!stick,
-      );
       if (stick) {
         const secondParams = new URLSearchParams(baseParams);
         secondParams.set('stick', stick);
@@ -330,6 +322,16 @@ module.exports = async function handler(req, res) {
         if (second.ok) {
           data = secondData;
           showtimes = extractShowtimes(secondData);
+          // TEMPORARY — debug: the follow-up call succeeds but still isn't
+          // producing populated showtimes. Dump the second response's
+          // knowledge_graph shape (truncated) to find where the real data
+          // actually landed.
+          console.warn(
+            '[showtimes][debug-second]',
+            'kg keys:', JSON.stringify(Object.keys(secondData.knowledge_graph || {})),
+            '| kg.showtimes:', JSON.stringify(secondData.knowledge_graph?.showtimes ?? '(missing)'),
+            '| top-level keys:', Object.keys(secondData).join(','),
+          );
         } else {
           console.warn(
             '[showtimes] Showtimes-tab follow-up failed:',
