@@ -243,6 +243,23 @@ module.exports = async function handler(req, res) {
       return res.status(502).json({ error: msg });
     }
 
+    // SerpAPI can return HTTP 200 with no `showtimes` key at all — e.g. an
+    // in-body error (bad/expired api_key, exceeded plan quota), a query that
+    // genuinely has no local showtimes, or a Google SERP layout SerpAPI's
+    // parser doesn't recognize for this query shape. Log enough of the raw
+    // shape to tell those apart without needing to reproduce against SerpAPI
+    // directly — this was previously silently swallowed into `null`, making
+    // "some real problem" indistinguishable from "no theaters found."
+    if (data.showtimes == null) {
+      console.warn(
+        '[showtimes] no showtimes key in a 200 response —',
+        'error:', data.error || '(none)',
+        '| search_metadata.status:', data.search_metadata?.status || '(none)',
+        '| top-level keys:', Object.keys(data).join(','),
+        '| location_source:', locationSource,
+      );
+    }
+
     // Slim payload — the client (and native app) only ever reads `showtimes`.
     // Caching just this keeps the Redis entry small and the response identical
     // for the client's purposes.
