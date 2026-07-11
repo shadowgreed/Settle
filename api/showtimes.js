@@ -25,16 +25,25 @@
 // has been observed treating requests with stricter rules than its browser
 // mode — explicit ACAO + ACAM avoids any ambiguity.
 //
-// TWO-CALL SHOWTIMES FETCH: Google's movie knowledge panel has separate
-// "Overview" and "Showtimes" sub-views, and a plain query only ever returns
-// Overview — knowledge_graph.showtimes comes back empty even for a movie
-// Google fully recognizes as playing. Getting the real data requires a
-// second request carrying the `stick` token Google assigns the Showtimes tab
-// in the FIRST response (see findShowtimesTabStick below) — there's no way
-// to construct that token up front, so this is a genuine two-request flow,
-// not a bug to optimize away. The second call only fires when a Showtimes
-// tab actually exists in the first response, so titles with no local
-// showtimes at all (no tab to follow) still cost one call, not two.
+// KNOWN LIMITATION — no populated showtimes via this engine/provider:
+// Google's movie knowledge panel has separate "Overview" and "Showtimes"
+// sub-views; a plain query only ever returns Overview, so
+// knowledge_graph.showtimes comes back as an empty array even for a movie
+// Google fully recognizes as playing (confirmed via a live raw SerpAPI
+// response dump). The "Showtimes" tab carries a `stick` token that in a real
+// browser would render the populated tab — tried following it with a second
+// request (device=mobile required to get knowledge_graph.tabs at all), which
+// DOES reach the right tab, but SerpAPI's structured JSON parser still
+// returns knowledge_graph.showtimes: [] even then. So this isn't a query-
+// construction problem: SerpAPI does not appear to extract populated
+// theater/showtime data from Google's "google" engine for this rich-result
+// type at all, via any parameter combination tried (8 single-call variants
+// plus the stick-based follow-up — see git history). The only real showtime
+// data observed anywhere in these responses was unstructured free text
+// inside a couple of organic_results snippets from third-party sites
+// (IMDb, Atom Tickets) — not something safe to parse reliably long-term.
+// Real fix, if this feature needs to keep working, is a different data
+// source for showtimes, not a different query to this one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const { enforceRateLimit } = require('../lib/rateLimit');
@@ -128,45 +137,21 @@ async function reverseGeocode(lat, lng) {
   return null;
 }
 
-// Google's movie knowledge panel has two sub-views — "Overview" (the
-// default) and "Showtimes" — and only the selected one's content actually
-// populates. A plain "{movie} showtimes" query still lands on Overview, so
-// knowledge_graph.showtimes comes back as an empty array even for a movie
-// Google fully recognizes as currently playing. Confirmed via a live raw
-// SerpAPI response dump, and ruled out 8 separate single-call query variants
-// (device=mobile, dropping the "showtimes" suffix, "near me" phrasing,
-// ibp=htl;showtimes, tbm=lcl, and 3 location-format variants) that all still
-// landed on Overview. The only way to get the Showtimes tab's real content is
-// a second request carrying the `stick` token Google assigns that tab —
-// which only exists once the first response hands it to us; there's no way
-// to construct it up front.
-//
-// Checks the historical top-level `data.showtimes` first in case SerpAPI/
-// Google ever puts it back there for some query shapes, then the nested
-// knowledge_graph location. Treats an empty array as "not found" (not
-// "found but empty") so it correctly falls through to the Showtimes-tab
-// follow-up rather than reporting a false negative.
+// Checks the historical top-level `data.showtimes` (what this code assumed
+// for a long time) and the nested knowledge_graph location Google actually
+// uses now, in case either ever comes back populated for some query shape.
+// In practice, as of this investigation, neither does — see the file header
+// comment for the full story (SerpAPI doesn't appear to extract populated
+// theater/showtime data from this engine at all, even via the Showtimes
+// tab's own `stick` token). Kept as a real (if currently unfruitful) check
+// rather than removed, since it costs nothing and would start working again
+// for free if SerpAPI or Google's SERP behavior ever changes.
 function extractShowtimes(data) {
   if (Array.isArray(data?.showtimes) && data.showtimes.length > 0) return data.showtimes;
   if (Array.isArray(data?.knowledge_graph?.showtimes) && data.knowledge_graph.showtimes.length > 0) {
     return data.knowledge_graph.showtimes;
   }
   return null;
-}
-
-// The Showtimes tab's own serpapi_link carries a `stick` query param — an
-// opaque per-search token Google generates to reference that exact tab.
-// Pulled via the URL constructor (not regex) since the raw link already has
-// its own encoding to account for.
-function findShowtimesTabStick(data) {
-  const tabs = data?.knowledge_graph?.tabs || [];
-  const tab = tabs.find(t => /showtimes/i.test(t.text || ''));
-  if (!tab?.serpapi_link) return null;
-  try {
-    return new URL(tab.serpapi_link).searchParams.get('stick');
-  } catch {
-    return null;
-  }
 }
 
 module.exports = async function handler(req, res) {
@@ -277,79 +262,33 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const baseParams = new URLSearchParams({
+    const params = new URLSearchParams({
       engine:  'google',
       q:       `${movie} showtimes`,
       location,
       hl:      'en',
       gl:      'us',
-      // Google's knowledge_graph.tabs (the "Overview"/"Showtimes" sub-view
-      // structure the two-call flow below depends on) only reliably appears
-      // on a mobile SERP — every desktop-default test came back with either
-      // no knowledge_graph.tabs at all or no knowledge_graph whatsoever,
-      // while a mobile-device test was the one live example that actually
-      // had the Showtimes tab (and its stick token) present.
-      device:  'mobile',
       api_key: process.env.SERP_API_KEY,
     });
 
-    const first = await fetch(`${SERP_BASE}?${baseParams}`);
-    const firstData = await first.json();
+    const upstream = await fetch(`${SERP_BASE}?${params}`);
+    const data     = await upstream.json();
 
-    if (!first.ok) {
-      const msg = firstData?.error || `SerpAPI ${first.status}`;
+    if (!upstream.ok) {
+      const msg = data?.error || `SerpAPI ${upstream.status}`;
       console.error('[showtimes] upstream error:', msg, '(location_source:', locationSource, ')');
       return res.status(502).json({ error: msg });
     }
 
-    let data = firstData;
-    let showtimes = extractShowtimes(firstData);
-    let usedFollowUp = false;
+    const showtimes = extractShowtimes(data);
 
-    // First call landed on the "Overview" tab (see findShowtimesTabStick's
-    // comment) — only worth a second, paid call if Google actually offered a
-    // "Showtimes" tab to follow. No tab = no local showtimes for this movie,
-    // full stop, so this naturally skips the extra cost for anything that
-    // was never going to have data anyway.
-    if (!showtimes) {
-      const stick = findShowtimesTabStick(firstData);
-      if (stick) {
-        const secondParams = new URLSearchParams(baseParams);
-        secondParams.set('stick', stick);
-        const second = await fetch(`${SERP_BASE}?${secondParams}`);
-        const secondData = await second.json();
-        usedFollowUp = true;
-        if (second.ok) {
-          data = secondData;
-          showtimes = extractShowtimes(secondData);
-          // TEMPORARY — debug: the follow-up call succeeds but still isn't
-          // producing populated showtimes. Dump the second response's
-          // knowledge_graph shape (truncated) to find where the real data
-          // actually landed.
-          console.warn(
-            '[showtimes][debug-second]',
-            'kg keys:', JSON.stringify(Object.keys(secondData.knowledge_graph || {})),
-            '| kg.showtimes:', JSON.stringify(secondData.knowledge_graph?.showtimes ?? '(missing)'),
-            '| top-level keys:', Object.keys(secondData).join(','),
-          );
-        } else {
-          console.warn(
-            '[showtimes] Showtimes-tab follow-up failed:',
-            secondData?.error || `SerpAPI ${second.status}`,
-          );
-        }
-      }
-    }
-
-    // Still nothing after the follow-up (or no tab to follow at all) — log
-    // enough of the raw shape to tell "genuinely no local showtimes" apart
-    // from "some real problem" (bad api_key, exceeded quota, SerpAPI/Google
-    // schema drift) without needing to reproduce against SerpAPI directly.
+    // See the file header comment — this is expected to be null for
+    // basically every query today, not a bug. Logged so a genuine account/
+    // quota problem is still distinguishable from the known limitation.
     if (showtimes == null) {
       console.warn(
         '[showtimes] no showtimes found —',
-        'used_follow_up:', usedFollowUp,
-        '| error:', data.error || '(none)',
+        'error:', data.error || '(none)',
         '| search_metadata.status:', data.search_metadata?.status || '(none)',
         '| top-level keys:', Object.keys(data).join(','),
         '| location_source:', locationSource, '| location:', location,
