@@ -283,6 +283,13 @@ module.exports = async function handler(req, res) {
       location,
       hl:      'en',
       gl:      'us',
+      // Google's knowledge_graph.tabs (the "Overview"/"Showtimes" sub-view
+      // structure the two-call flow below depends on) only reliably appears
+      // on a mobile SERP — every desktop-default test came back with either
+      // no knowledge_graph.tabs at all or no knowledge_graph whatsoever,
+      // while a mobile-device test was the one live example that actually
+      // had the Showtimes tab (and its stick token) present.
+      device:  'mobile',
       api_key: process.env.SERP_API_KEY,
     });
 
