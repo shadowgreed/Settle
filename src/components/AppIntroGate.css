@@ -1,0 +1,18 @@
+.intro-reveal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 9999; /* above .dial-overlay (9998) */
+  background: var(--color-bg, #0A0A0C);
+  opacity: 1;
+  pointer-events: none; /* app underneath is already interactive as soon as the reveal starts */
+  animation: intro-reveal-fade 300ms ease forwards;
+}
+
+@keyframes intro-reveal-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-reveal-scrim { animation-duration: 1ms; }
+}

@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import AppIntroGate from './components/AppIntroGate';
 import { Analytics } from '@vercel/analytics/react';
 import { installNativeBridge, isNative } from './native/bridge';
 
@@ -11,7 +12,9 @@ installNativeBridge();
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(
   <React.StrictMode>
-    <App />
+    <AppIntroGate>
+      <App />
+    </AppIntroGate>
     <Analytics />
   </React.StrictMode>
 );
