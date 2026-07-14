@@ -46,8 +46,15 @@
 
 @keyframes dial-spin {
   0%   { transform: rotate(-375deg); }
-  88%  { transform: rotate(9deg); }   /* overshoot past the top mark */
-  94%  { transform: rotate(-2.5deg); } /* ratchet back */
+  /* The 88%->94%->100% ratchet-back only spans ~12% of the total duration.
+     cubic-bezier(0.14, 0.72, 0.16, 1) front-loads ~85% of its motion into
+     the first ~15% of whatever segment it's given — reapplied here, it would
+     compress the entire reversal into a handful of milliseconds, often under
+     one frame interval, so it never reads as visible motion. Force `linear`
+     for just these two segments so the ratchet is evenly paced and visible,
+     without touching the spec's keyframe percentages/values themselves. */
+  88%  { transform: rotate(9deg); animation-timing-function: linear; }   /* overshoot past the top mark */
+  94%  { transform: rotate(-2.5deg); animation-timing-function: linear; } /* ratchet back */
   100% { transform: rotate(0deg); }    /* rest — the "click" */
 }
 

@@ -95,7 +95,7 @@ function playDialSound(ctx, spinDelayMs, spinDurMs) {
 export default function DialIntro({
   spinDelayMs = 150,
   spinDurMs = 2000,
-  soundEnabled = false,
+  soundEnabled = true,
   onSettled,
 }) {
   const [skipped, setSkipped] = useState(false);

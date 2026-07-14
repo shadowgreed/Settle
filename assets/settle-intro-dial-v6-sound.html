@@ -31,8 +31,13 @@
   }
   @keyframes spin {
     0%   { transform: rotate(-375deg); }
-    88%  { transform: rotate(9deg); }
-    94%  { transform: rotate(-2.5deg); }
+    /* linear override: the shared cubic-bezier front-loads ~85% of its
+       motion into the first ~15% of a segment. Reapplied to this ~12%-of-
+       total ratchet-back, that compresses the whole reversal into a
+       handful of ms (often under one frame) -- it plays but never reads as
+       visible motion. Forcing linear here keeps it evenly paced and visible. */
+    88%  { transform: rotate(9deg); animation-timing-function: linear; }
+    94%  { transform: rotate(-2.5deg); animation-timing-function: linear; }
     100% { transform: rotate(0deg); }
   }
 

@@ -33,7 +33,6 @@ import PushOptIn from './components/PushOptIn';
 import Settings from './components/Settings';
 import ShowtimesSheet from './components/ShowtimesSheet';
 import InTheaters from './components/InTheaters';
-import BrandLogo from './components/BrandLogo';
 import NudgeCard from './components/NudgeCard';
 import settleWordmark from './assets/settle-wordmark.png';
 import StreakHistory from './components/StreakHistory';
@@ -3370,12 +3369,11 @@ function App() {
 
   // ── Auth guards ────────────────────────────────────────────────────────────
   if (user === undefined) {
-    // Firebase auth is still initialising — show the branded loading screen
+    // Firebase auth is still initialising — plain spinner only. The Dial
+    // intro is the one branded moment on cold start; this shouldn't read as
+    // a second logo screen right behind it.
     return (
       <div className="authgate">
-        <div className="authgate-brand">
-          <BrandLogo className="authgate-logo" height={30} />
-        </div>
         <div className="authgate-spinner" aria-label="Loading…" />
       </div>
     );
